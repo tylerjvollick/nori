@@ -1,0 +1,36 @@
+name: nori-dev
+
+services:
+  nori-server:
+    container_name: nori-server
+    build: ../server
+    environment:
+      DB_HOST: database
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_NAME: nori
+      DB_PORT: 5432
+    depends_on:
+      - database
+    ports:
+      - "8080:8080"
+
+  database:
+    image: postgres:16
+    container_name: nori-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: nori
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+volumes:
+  postgres_data:
