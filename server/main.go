@@ -6,15 +6,15 @@ import (
 	"os"
 
 	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/joho/godotenv"
 
-	"github.com/tylerjvollick/nori/internal/handlers"
 	"github.com/tylerjvollick/nori/internal/database"
-
-	"github.com/tylerjvollick/nori/internal/models"
-	"github.com/google/uuid"
+	"github.com/tylerjvollick/nori/internal/handlers"
+	"github.com/tylerjvollick/nori/internal/repositories"
+	"github.com/tylerjvollick/nori/internal/services"
 )
 
 func main() {
@@ -23,23 +23,16 @@ func main() {
 	log.Println("Connecting to database")
 	database.Connect()
 
-	user:= models.User{
-		ID: uuid.New(),
-		Email: "test@example.com",
-	}
-	database.DB.Create(&user)
-
 	log.Println("setup complete")
 
 	connString := fmt.Sprintf(
-    "postgres://%s:%s@%s:%s/%s?sslmode=disable",
-    os.Getenv("DB_USER"),
-    os.Getenv("DB_PASSWORD"),
-    os.Getenv("DB_HOST"),
-    os.Getenv("DB_PORT"),
-    os.Getenv("DB_NAME"),
+		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_NAME"),
 	)
-
 
 	conn, err := pgx.Connect(context.Background(), connString)
 	if err != nil {
@@ -51,8 +44,11 @@ func main() {
 
 	// Register routes
 	handlers.RegisterHealthRoutes(app, conn)
-	handlers.RegisterAuthRoutes(app, conn)
+
+	userRepo := repositories.NewUserRepository(database.DB)
+	authService := services.NewAuthService(userRepo)
+	authHandler := handlers.NewAuthHandler(authService)
+	authHandler.RegisterAuthRoutes(app)
 
 	log.Fatal(app.Listen(":8080"))
 }
-
