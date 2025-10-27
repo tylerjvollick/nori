@@ -7,14 +7,11 @@ import (
 
 	"fmt"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/joho/godotenv"
 
+	"github.com/tylerjvollick/nori/internal/app"
 	"github.com/tylerjvollick/nori/internal/database"
-	"github.com/tylerjvollick/nori/internal/handlers"
-	"github.com/tylerjvollick/nori/internal/repositories"
-	"github.com/tylerjvollick/nori/internal/services"
 )
 
 func main() {
@@ -40,15 +37,16 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	app := fiber.New()
+	// app := fiber.New()
 
 	// Register routes
-	handlers.RegisterHealthRoutes(app, conn)
+	//handlers.RegisterHealthRoutes(app, conn)
 
-	userRepo := repositories.NewUserRepository(database.DB)
-	authService := services.NewAuthService(userRepo)
-	authHandler := handlers.NewAuthHandler(authService)
-	authHandler.RegisterAuthRoutes(app)
+	//userRepo := repositories.NewUserRepository(database.DB)
+	//authService := services.NewAuthService(userRepo)
+	//authHandler := handlers.NewAuthHandler(authService)
+	//authHandler.RegisterAuthRoutes(app)
 
-	log.Fatal(app.Listen(":8080"))
+	a := app.New()
+	log.Fatal(a.Fiber.Listen(":8080"))
 }
