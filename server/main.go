@@ -37,16 +37,6 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	// app := fiber.New()
-
-	// Register routes
-	//handlers.RegisterHealthRoutes(app, conn)
-
-	//userRepo := repositories.NewUserRepository(database.DB)
-	//authService := services.NewAuthService(userRepo)
-	//authHandler := handlers.NewAuthHandler(authService)
-	//authHandler.RegisterAuthRoutes(app)
-
 	a := app.New()
 	log.Fatal(a.Fiber.Listen(":8080"))
 }

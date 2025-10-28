@@ -5,16 +5,20 @@ dev:
 
 dev-down:
 	docker compose -f $(DOCKER_COMPOSE_DEV) down --remove-orphans
-
+dev-fresh:
+	docker compose -f $(DOCKER_COMPOSE_DEV) down -v --remove-orphans 
+	
+	
 dev-update:
 	docker compose -f $(DOCKER_COMPOSE_DEV) up --build -V --remove-orphans
 
 dev-server:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up nori-server --remove-orphans
+	docker compose -f $(DOCKER_COMPOSE_DEV) up --build -d nori-server --remove-orphans
 
 dev-web:
 	docker compose -f $(DOCKER_COMPOSE_DEV) up nori-web --remove-orphans
 
+# migrate -path ./migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" up
 dev-db:
 	docker compose -f $(DOCKER_COMPOSE_DEV) up -d database --remove-orphans || make dev-db-down
 

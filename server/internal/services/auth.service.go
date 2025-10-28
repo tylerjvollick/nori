@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/models"
@@ -10,14 +11,15 @@ import (
 )
 
 type AuthService struct {
-	userRepository *repositories.UserRepository
+	userRepository    *repositories.UserRepository
+	accountRepository *repositories.AccountRepository
 }
 
-func NewAuthService(userRepository *repositories.UserRepository) *AuthService {
-	return &AuthService{userRepository: userRepository}
+func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository) *AuthService {
+	return &AuthService{userRepository: userRepository, accountRepository: accountRepository}
 }
 
-func (s *AuthService) CreateUser(firstName, lastName, email, password string) (*models.User, error) {
+func (s *AuthService) CreateUser(firstName, lastName, email, password string, createDefaultAccount bool) (*models.User, error) {
 	// check to see if use already exists
 	existing, err := s.userRepository.GetUserByEmail(email)
 	if err == nil && existing != nil {
@@ -40,14 +42,37 @@ func (s *AuthService) CreateUser(firstName, lastName, email, password string) (*
 	}
 
 	// save user
-
 	if err := s.userRepository.CreateUser(user); err != nil {
 		return nil, err
+	}
+
+	if createDefaultAccount {
+		defaultAccount, err := s.CreateAccount(email, user.ID, models.Trial)
+		if err != nil {
+			return nil, err
+		}
+
+		// update user with default account id.
+		// user.DefaultAccountID = defaultAccount.
+		user, err = s.userRepository.UpdateUser(user.ID, &repositories.UpdateUserInput{DefaultAccountID: &defaultAccount.ID})
+		log.Println("Updating user default account")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// do not return password
 	user.Password = nil
 	return user, nil
+}
+
+func (s *AuthService) CreateAccount(billingEmail string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
+	// save account
+	account, err := s.accountRepository.Create(billingEmail, createdByUserId, plan)
+	if err != nil {
+		return nil, err
+	}
+	return account, nil
 }
 
 func ptrString(s string) *string {

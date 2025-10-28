@@ -38,7 +38,7 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	}
 
 	// call auth service
-	user, err := h.authService.CreateUser(body.FirstName, body.LastName, body.Email, body.Password)
+	user, err := h.authService.CreateUser(body.FirstName, body.LastName, body.Email, body.Password, true)
 	if err != nil {
 		log.Println("Failed to create user:", err)
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
