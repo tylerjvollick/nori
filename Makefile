@@ -8,7 +8,6 @@ dev-down:
 dev-fresh:
 	docker compose -f $(DOCKER_COMPOSE_DEV) down -v --remove-orphans 
 	
-	
 dev-update:
 	docker compose -f $(DOCKER_COMPOSE_DEV) up --build -V --remove-orphans
 

@@ -3,7 +3,9 @@ package services
 import (
 	"errors"
 	"log"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
@@ -17,6 +19,77 @@ type AuthService struct {
 
 func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository) *AuthService {
 	return &AuthService{userRepository: userRepository, accountRepository: accountRepository}
+}
+
+type LoginResponse struct {
+	AccessToken string    `json:"accessToken"`
+	UserID      uuid.UUID `json:"userId"`
+	UserEmail   string    `json:"userEmail"`
+	FirstName   string    `json:"firstName"`
+	LastName    string    `json:"lastName"`
+}
+
+func (s *AuthService) ValidatePassword(user models.User, password string) bool {
+	if user.Password == nil {
+		return false
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(*user.Password), []byte(password)); err != nil {
+		return false
+	}
+	return true
+}
+
+func (s *AuthService) Login(email, password string) (*LoginResponse, error) {
+	// find user by email with password set
+	user, err := s.userRepository.GetUserByEmail(email)
+	if err != nil {
+		// TODO: handle error in same line as failed password.
+		log.Println("Failed to get user by email")
+		return nil, errors.New("inNvalid email or password")
+	}
+
+	// if user is found validate password
+	if user != nil {
+		isAuthenticated := s.ValidatePassword(*user, password)
+		if !isAuthenticated {
+			log.Println("failed to validate password")
+			return nil, errors.New("invalid Email or password")
+		}
+	}
+
+	return s.CreateLoginResponse(*user)
+}
+
+func (s *AuthService) CreateLoginResponse(user models.User) (*LoginResponse, error) {
+	// TODO: store secret in env vars
+	var jwtSecret = []byte("your-secret-key")
+
+	claims := jwt.MapClaims{
+		"sub":   user.ID,
+		"email": user.Email,
+		"exp":   time.Now().Add(time.Hour * 24).Unix(),
+		"iat":   time.Now().Unix(), // issued at
+	}
+
+	// create the token with claims
+	// TODO learn about the different signing methods
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// sign token and return as string
+	accessToken, err := token.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("failed to sign access token: %v", err)
+		return nil, err
+	}
+	return &LoginResponse{
+		AccessToken: accessToken,
+		UserID:      user.ID,
+		UserEmail:   user.Email,
+
+		FirstName: *user.FirstName,
+		LastName:  *user.LastName,
+	}, nil
 }
 
 func (s *AuthService) CreateUser(firstName, lastName, email, password string, createDefaultAccount bool) (*models.User, error) {
