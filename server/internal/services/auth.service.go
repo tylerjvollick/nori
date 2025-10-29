@@ -13,12 +13,15 @@ import (
 )
 
 type AuthService struct {
-	userRepository    *repositories.UserRepository
-	accountRepository *repositories.AccountRepository
+	userRepository        *repositories.UserRepository
+	accountRepository     *repositories.AccountRepository
+	userAccountRepository *repositories.UserAccountRepository
 }
 
-func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository) *AuthService {
-	return &AuthService{userRepository: userRepository, accountRepository: accountRepository}
+func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository) *AuthService {
+	return &AuthService{userRepository: userRepository, accountRepository: accountRepository,
+		userAccountRepository: userAccountRepository,
+	}
 }
 
 type LoginResponse struct {
@@ -131,6 +134,15 @@ func (s *AuthService) CreateUser(firstName, lastName, email, password string, cr
 		log.Println("Updating user default account")
 		if err != nil {
 			return nil, err
+		}
+
+		// add link able
+		userAccountRepository, err := s.userAccountRepository.Create(user.ID, defaultAccount.ID)
+		if err != nil {
+			return nil, err
+		}
+		if userAccountRepository == nil {
+			return nil, nil
 		}
 	}
 

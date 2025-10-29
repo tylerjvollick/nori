@@ -21,9 +21,9 @@ func New() *App {
 	// Repositories
 	userRepo := repositories.NewUserRepository(database.DB)
 	accountRepo := repositories.NewAccountRepository(database.DB)
-
+	userAccountRepo := repositories.NewUserAccountRepository(database.DB)
 	// Services
-	authService := services.NewAuthService(userRepo, accountRepo)
+	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
