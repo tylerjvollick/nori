@@ -3,10 +3,12 @@ package services
 import (
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 	"golang.org/x/crypto/bcrypt"
@@ -43,12 +45,71 @@ func (s *AuthService) ValidatePassword(user models.User, password string) bool {
 	return true
 }
 
+func (s *AuthService) Authenticate(authHeader string) (*dtos.AuthDTO, error) {
+	authDto, err := s.Validate(authHeader)
+	if err != nil {
+		return nil, err
+	}
+	return authDto, nil
+}
+
+func (s *AuthService) Validate(authHeader string) (*dtos.AuthDTO, error) {
+	bearerToken, err := s.GetBearerToken(authHeader)
+	if err != nil {
+		return nil, errors.New("failed to validate token")
+	}
+	return s.ValidateToken(bearerToken)
+}
+
+func (s *AuthService) ValidateToken(bearerToken string) (*dtos.AuthDTO, error) {
+	var jwtSecret = []byte("your-secret-key")
+	token, err := jwt.Parse(bearerToken, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return jwtSecret, nil
+	})
+	if err != nil {
+		log.Println("JWT parse error:", err)
+		return nil, errors.New("invalid or expired token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return nil, errors.New("invalid token claims")
+	}
+
+	userIDStr, ok := claims["sub"].(string)
+	if !ok {
+		return nil, errors.New("invalid user id in token claims")
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return nil, errors.New("invalid UUID format in token claims")
+	}
+	user, err := s.userRepository.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dtos.AuthDTO{User: *user}, nil
+}
+
+func (s *AuthService) GetBearerToken(authHeader string) (string, error) {
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", errors.New("invalid authorization format")
+	}
+	tokenString := parts[1]
+	return tokenString, nil
+}
+
 func (s *AuthService) Login(email, password string) (*LoginResponse, error) {
 	// find user by email with password set
 	user, err := s.userRepository.GetUserByEmail(email)
 	if err != nil {
 		// TODO: handle error in same line as failed password.
-		log.Println("Failed to get user by email")
 		return nil, errors.New("inNvalid email or password")
 	}
 

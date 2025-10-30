@@ -1,6 +1,8 @@
 package repositories
 
 import (
+	"fmt"
+
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/models"
 	"gorm.io/gorm"
@@ -12,6 +14,18 @@ type UserRepository struct {
 
 func NewUserRepository(db *gorm.DB) *UserRepository {
 	return &UserRepository{db: db}
+}
+
+func (r *UserRepository) GetUserByID(id uuid.UUID) (*models.User, error) {
+	var user models.User
+	err := r.db.First(&user, "id = ?", id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user account not found")
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {

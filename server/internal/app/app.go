@@ -24,15 +24,18 @@ func New() *App {
 	userAccountRepo := repositories.NewUserAccountRepository(database.DB)
 	// Services
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo)
+	userService := services.NewUserService(userRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
+	userHandler := handlers.NewUserHandler(userService)
 
 	// Fiber instance
 	app := fiber.New()
 
 	// Register routes
 	authHandler.RegisterAuthRoutes(app)
+	userHandler.RegisterUserRoutes(app)
 
 	return &App{
 		Fiber:       app,
