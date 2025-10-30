@@ -15,6 +15,19 @@ services:
     ports:
       - "8080:8080"
 
+  nori-web:
+    container_name: nori-web
+    build: ../web
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../web:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:8080
+    command: npm run dev -- --host 0.0.0.0
+
   database:
     image: postgres:16
     container_name: nori-db
@@ -31,6 +44,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-  
+
 volumes:
   postgres_data:

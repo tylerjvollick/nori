@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORS Test</title>
+</head>
+<body>
+    <h1>CORS Test</h1>
+    <button id="testHealth">Test Health Endpoint</button>
+    <button id="testLogin">Test Login Endpoint</button>
+    <div id="result"></div>
+
+    <script>
+        const result = document.getElementById('result');
+
+        document.getElementById('testHealth').addEventListener('click', async () => {
+            try {
+                const response = await fetch('http://localhost:8080/health');
+                const data = await response.json();
+                result.innerHTML = `<pre>Health: ${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                result.innerHTML = `<pre>Error: ${error.message}</pre>`;
+            }
+        });
+
+        document.getElementById('testLogin').addEventListener('click', async () => {
+            try {
+                const response = await fetch('http://localhost:8080/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'test@example.com',
+                        password: 'password123'
+                    })
+                });
+                const data = await response.json();
+                result.innerHTML = `<pre>Login: ${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                result.innerHTML = `<pre>Error: ${error.message}</pre>`;
+            }
+        });
+    </script>
+</body>
+</html>
