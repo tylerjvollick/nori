@@ -5,6 +5,10 @@
 
   let name = '';
   let description = '';
+  let materials: string[] = [];
+  let equipment: string[] = [];
+  let newMaterialInput = '';
+  let newEquipmentInput = '';
   let steps: Omit<SOPStep, 'id'>[] = [
     {
       stepNumber: 1,

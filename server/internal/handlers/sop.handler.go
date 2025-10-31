@@ -219,6 +219,8 @@ func (h *SOPHandler) versionToResponse(version *models.SOPTemplateVersion) *dtos
 		ID:            version.ID,
 		VersionNumber: version.VersionNumber,
 		Description:   version.Description,
+		Materials:     version.Materials,
+		Equipment:     version.Equipment,
 		ChangeSummary: version.ChangeSummary,
 		CreatedAt:     version.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		IsActive:      version.IsActive,

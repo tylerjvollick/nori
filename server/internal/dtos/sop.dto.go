@@ -15,6 +15,8 @@ type CreateSOPStepDTO struct {
 type CreateSOPDTO struct {
 	Name          string             `json:"name" binding:"required"`
 	Description   *string            `json:"description,omitempty"`
+	Materials     []string           `json:"materials,omitempty"`
+	Equipment     []string           `json:"equipment,omitempty"`
 	ChangeSummary *string            `json:"changeSummary,omitempty"`
 	Steps         []CreateSOPStepDTO `json:"steps" binding:"required,min=1"`
 }
@@ -23,6 +25,8 @@ type CreateSOPDTO struct {
 type UpdateSOPDTO struct {
 	Name          *string            `json:"name,omitempty"`
 	Description   *string            `json:"description,omitempty"`
+	Materials     []string           `json:"materials,omitempty"`
+	Equipment     []string           `json:"equipment,omitempty"`
 	ChangeSummary string             `json:"changeSummary" binding:"required"`
 	Steps         []CreateSOPStepDTO `json:"steps" binding:"required,min=1"`
 }
@@ -44,6 +48,8 @@ type SOPVersionResponseDTO struct {
 	ID            int                  `json:"id"`
 	VersionNumber int                  `json:"versionNumber"`
 	Description   *string              `json:"description,omitempty"`
+	Materials     []string             `json:"materials,omitempty"`
+	Equipment     []string             `json:"equipment,omitempty"`
 	ChangeSummary *string              `json:"changeSummary,omitempty"`
 	CreatedAt     string               `json:"createdAt"`
 	IsActive      bool                 `json:"isActive"`

@@ -16,6 +16,8 @@ export interface SOPVersion {
   id: number;
   versionNumber: number;
   description?: string;
+  materials?: string[];
+  equipment?: string[];
   changeSummary?: string;
   createdAt: string;
   isActive: boolean;
@@ -33,6 +35,8 @@ export interface SOPTemplate {
 export interface CreateSOPRequest {
   name: string;
   description?: string;
+  materials?: string[];
+  equipment?: string[];
   changeSummary?: string;
   steps: Omit<SOPStep, 'id'>[];
 }
@@ -40,6 +44,8 @@ export interface CreateSOPRequest {
 export interface UpdateSOPRequest {
   name?: string;
   description?: string;
+  materials?: string[];
+  equipment?: string[];
   changeSummary: string;
   steps: Omit<SOPStep, 'id'>[];
 }

@@ -11,6 +11,8 @@ type SOPTemplateVersion struct {
 	SOPTemplateID int       `gorm:"not null" json:"sopTemplateId"`
 	VersionNumber int       `gorm:"not null" json:"versionNumber"`
 	Description   *string   `json:"description,omitempty"`
+	Materials     []string  `gorm:"type:text[]" json:"materials,omitempty"`
+	Equipment     []string  `gorm:"type:text[]" json:"equipment,omitempty"`
 	CreatedBy     uuid.UUID `gorm:"type:uuid;not null" json:"createdBy"`
 	CreatedAt     time.Time `gorm:"default:now()" json:"createdAt"`
 	ChangeSummary *string   `json:"changeSummary,omitempty"`
