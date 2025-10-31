@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SOPStep } from '$lib/api/sop';
+  import CollapsibleStep from '$lib/components/CollapsibleStep.svelte';
   
   interface SOPFormProps {
     onSubmit: (data: {
@@ -41,12 +42,15 @@
     }
   ]);
   let error = $state('');
+  let expandedSteps = $state<Set<number>>(new Set());
+  let stepRefs: CollapsibleStep[] = [];
 
-  function addStep() {
+  function addStep(focusOnNew = false) {
+    const newIndex = steps.length;
     steps = [
       ...steps,
       {
-        stepNumber: steps.length + 1,
+        stepNumber: newIndex + 1,
         title: '',
         instructions: '',
         estimatedTimeMinutes: undefined,
@@ -55,6 +59,40 @@
         requiresApproval: false
       }
     ];
+    
+    // Focus on the new step's title after it's rendered
+    if (focusOnNew) {
+      setTimeout(() => {
+        stepRefs[newIndex]?.focusTitle();
+      }, 100);
+    }
+  }
+
+  function handleStepNext(currentIndex: number) {
+    const nextIndex = currentIndex + 1;
+    
+    // If there's already a next step, focus on it
+    if (nextIndex < steps.length) {
+      setTimeout(() => {
+        stepRefs[nextIndex]?.focusTitle();
+      }, 100);
+    } else {
+      // Otherwise, create a new step
+      addStep(true);
+    }
+  }
+  
+  function updateStep(index: number, updatedStep: Omit<SOPStep, 'id'>) {
+    steps = steps.map((step, i) => i === index ? updatedStep : step);
+  }
+  
+  function toggleStepExpanded(index: number) {
+    if (expandedSteps.has(index)) {
+      expandedSteps.delete(index);
+    } else {
+      expandedSteps.add(index);
+    }
+    expandedSteps = new Set(expandedSteps);
   }
 
   function removeStep(index: number) {
@@ -143,33 +181,70 @@
   }
 </script>
 
-<div class="space-y-6">
+<div class="flex flex-col max-h-[85vh]">
   {#if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
       <p class="font-medium">Error</p>
       <p class="text-sm">{error}</p>
     </div>
   {/if}
 
-  <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-6">
-    <!-- SOP Details -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-      <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">SOP Details</h2>
-      
-      <div class="space-y-4">
-        <div>
-          <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Name <span class="text-red-500">*</span>
-          </label>
-          <input
-            id="name"
-            type="text"
-            bind:value={name}
-            placeholder="e.g., Equipment Maintenance Procedure"
-            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-            required
-          />
+  <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="flex flex-col flex-1 min-h-0">
+    <!-- Two Column Layout -->
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-6 flex-1 min-h-0 overflow-hidden">
+      <!-- Left Column - Steps -->
+      <div class="space-y-4 overflow-y-auto pr-2">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
+          <button
+            type="button"
+            onclick={(e) => { e.preventDefault(); addStep(true); }}
+            class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+          >
+            + Add Step
+          </button>
         </div>
+
+        <div class="space-y-3">
+          {#each steps as step, index}
+            <CollapsibleStep
+              bind:this={stepRefs[index]}
+              {step}
+              {index}
+              isExpanded={expandedSteps.has(index)}
+              onUpdate={(updatedStep) => updateStep(index, updatedStep)}
+              onNext={() => handleStepNext(index)}
+              onRemove={() => removeStep(index)}
+              onToggleExpand={() => toggleStepExpanded(index)}
+              onMoveUp={() => moveStep(index, 'up')}
+              onMoveDown={() => moveStep(index, 'down')}
+              canMoveUp={index > 0}
+              canMoveDown={index < steps.length - 1}
+            />
+          {/each}
+        </div>
+      </div>
+
+      <!-- Right Column - SOP Metadata -->
+      <div class="space-y-4 overflow-y-auto">
+        <!-- SOP Details Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">SOP Details</h3>
+          
+          <div class="space-y-4">
+            <div>
+              <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Name <span class="text-red-500">*</span>
+              </label>
+              <input
+                id="name"
+                type="text"
+                bind:value={name}
+                placeholder="e.g., Equipment Maintenance Procedure"
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                required
+              />
+            </div>
 
         <div>
           <label for="description" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -267,167 +342,32 @@
             </div>
           </div>
         </div>
-      </div>
-    </div>
-
-    <!-- Steps -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
-        <button
-          type="button"
-          onclick={addStep}
-          class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-        >
-          + Add Step
-        </button>
-      </div>
-
-      <div class="space-y-6">
-        {#each steps as step, index}
-          <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-            <div class="flex justify-between items-start mb-4">
-              <h3 class="text-lg font-medium text-gray-900 dark:text-white">
-                Step {step.stepNumber}
-              </h3>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  onclick={() => moveStep(index, 'up')}
-                  disabled={index === 0}
-                  class="px-2 py-1 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onclick={() => moveStep(index, 'down')}
-                  disabled={index === steps.length - 1}
-                  class="px-2 py-1 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  onclick={() => removeStep(index)}
-                  disabled={steps.length === 1}
-                  class="px-3 py-1 text-sm bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-
-            <div class="space-y-4">
-              <div>
-                <label for="step-title-{index}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Title <span class="text-red-500">*</span>
-                </label>
-                <input
-                  id="step-title-{index}"
-                  type="text"
-                  bind:value={step.title}
-                  placeholder="e.g., Inspect equipment for damage"
-                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label for="step-instructions-{index}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Instructions
-                </label>
-                <textarea
-                  id="step-instructions-{index}"
-                  bind:value={step.instructions}
-                  placeholder="Detailed instructions for this step..."
-                  rows="3"
-                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                ></textarea>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label for="step-time-{index}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Estimated Time (minutes)
-                  </label>
-                  <input
-                    id="step-time-{index}"
-                    type="number"
-                    min="0"
-                    bind:value={step.estimatedTimeMinutes}
-                    placeholder="e.g., 15"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  />
-                </div>
-
-                <div>
-                  <label for="step-approval-{index}" class="flex items-center mt-8">
-                    <input
-                      id="step-approval-{index}"
-                      type="checkbox"
-                      bind:checked={step.requiresApproval}
-                      class="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500"
-                    />
-                    <span class="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Requires Approval
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label for="step-image-{index}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Image URL
-                  </label>
-                  <input
-                    id="step-image-{index}"
-                    type="url"
-                    bind:value={step.imageUrl}
-                    placeholder="https://example.com/image.jpg"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  />
-                </div>
-
-                <div>
-                  <label for="step-video-{index}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Video URL
-                  </label>
-                  <input
-                    id="step-video-{index}"
-                    type="url"
-                    bind:value={step.videoUrl}
-                    placeholder="https://example.com/video.mp4"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
           </div>
-        {/each}
+        </div>
       </div>
     </div>
 
-    <!-- Submit -->
-    <div class="flex gap-4">
-      {#if showCancelButton}
+    <!-- Submit Buttons -->
+    <div class="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+      <div class="flex gap-4">
+        {#if showCancelButton}
+          <button
+            type="button"
+            onclick={onCancel}
+            class="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-6 py-3 rounded-lg font-medium transition-colors"
+            disabled={isSubmitting}
+          >
+            Cancel
+          </button>
+        {/if}
         <button
-          type="button"
-          onclick={onCancel}
-          class="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-6 py-3 rounded-lg font-medium transition-colors"
+          type="submit"
+          class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={isSubmitting}
         >
-          Cancel
+          {isSubmitting ? 'Creating...' : submitButtonText}
         </button>
-      {/if}
-      <button
-        type="submit"
-        class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? 'Creating...' : submitButtonText}
-      </button>
+      </div>
     </div>
   </form>
 </div>
