@@ -74,7 +74,10 @@
         <div>
           <TaskCard 
             task={item.task}
-            onclick={() => onTaskClick(item.task)}
+            onclick={(e?: MouseEvent) => {
+              e?.stopPropagation();
+              onTaskClick(item.task);
+            }}
           />
         </div>
       {/each}

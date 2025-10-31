@@ -5,7 +5,7 @@
   
   interface TaskCardProps {
     task: Task;
-    onclick?: () => void;
+    onclick?: (e?: MouseEvent) => void;
     isDragging?: boolean;
   }
   
@@ -39,12 +39,13 @@
   const progress = totalSteps > 0 ? (completedCount / totalSteps) * 100 : 0;
 </script>
 
-<Card 
-  class="p-4 cursor-pointer hover:shadow-md transition-all border border-slate-200 dark:border-slate-700 {isDragging ? 'opacity-50' : 'opacity-100'}"
+<button
+  class="w-full text-left"
+  onclick={(e) => onclick?.(e)}
+  type="button"
 >
-  <button 
-    class="w-full text-left"
-    onclick={onclick}
+  <Card 
+    class="p-4 cursor-pointer hover:shadow-md transition-all border border-slate-200 dark:border-slate-700 {isDragging ? 'opacity-50' : 'opacity-100'}"
   >
     <div class="space-y-3">
       <div>
@@ -102,5 +103,5 @@
         </div>
       </div>
     </div>
-  </button>
-</Card>
+  </Card>
+</button>

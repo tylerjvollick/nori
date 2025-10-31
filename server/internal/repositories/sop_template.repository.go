@@ -34,7 +34,7 @@ func (r *SOPTemplateRepository) GetByID(id int) (*models.SOPTemplate, error) {
 
 func (r *SOPTemplateRepository) GetAll() ([]models.SOPTemplate, error) {
 	var templates []models.SOPTemplate
-	err := r.db.Preload("CurrentVersion").Find(&templates).Error
+	err := r.db.Preload("CurrentVersion").Preload("CurrentVersion.Steps").Find(&templates).Error
 	return templates, err
 }
 

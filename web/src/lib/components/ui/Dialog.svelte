@@ -5,9 +5,10 @@
     open?: boolean;
     onClose?: () => void;
     children?: Snippet;
+    class?: string;
   }
   
-  let { open = $bindable(false), onClose, children }: DialogProps = $props();
+  let { open = $bindable(false), onClose, children, class: className = '' }: DialogProps = $props();
   
   function handleBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) {
@@ -33,7 +34,7 @@
     aria-modal="true"
     tabindex="-1"
   >
-    <div class="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+    <div class="bg-white dark:bg-gray-800 rounded-lg {className || 'max-w-2xl w-full'} max-h-[90vh] overflow-y-auto shadow-xl">
       {#if children}
         {@render children()}
       {/if}
