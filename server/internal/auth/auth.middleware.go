@@ -23,7 +23,7 @@ func AuthMiddleware() fiber.Handler {
 		accountRepo := repositories.NewAccountRepository(database.DB)
 		userAccountRepo := repositories.NewUserAccountRepository(database.DB)
 		// Services
-		authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo)
+		authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, nil)
 
 		authDTO, err := authService.Authenticate(authHeader)
 		if err != nil {

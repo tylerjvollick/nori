@@ -1,8 +1,9 @@
 <script lang="ts">
   import { authStore } from '$lib/stores/auth';
   import { themeStore } from '$lib/stores/theme';
+  import { sidebarStore } from '$lib/stores/sidebar';
   import { goto } from '$app/navigation';
-  import { Moon, Sun, Search, Plus } from 'lucide-svelte';
+  import { Moon, Sun, Search, Plus, Menu } from 'lucide-svelte';
   import type { User } from '$lib/api/auth';
 
   interface TopNavProps {
@@ -47,6 +48,10 @@
   function closeDropdown() {
     showDropdown = false;
   }
+
+  function toggleSidebar() {
+    sidebarStore.toggle();
+  }
 </script>
 
 <svelte:window onclick={closeDropdown} />
@@ -54,17 +59,13 @@
 <header class="border-b border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm sticky top-0 z-40">
   <div class="max-w-7xl mx-auto px-6 py-4">
     <div class="flex items-center justify-between gap-4">
-      <!-- Logo and App Name -->
-      <button onclick={() => goto('/')} class="flex items-center gap-3 hover:opacity-80 transition-opacity">
-        <div class="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
-          <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        </div>
-        <div>
-          <h1 class="text-xl font-bold text-gray-900 dark:text-white">Nori</h1>
-          <p class="text-xs text-gray-600 dark:text-gray-400">A thin layer that holds everything together</p>
-        </div>
+      <!-- Sidebar Toggle Button -->
+      <button
+        onclick={toggleSidebar}
+        class="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        aria-label="Toggle sidebar"
+      >
+        <Menu class="w-5 h-5" />
       </button>
 
       <!-- Search Bar (Placeholder for future) -->

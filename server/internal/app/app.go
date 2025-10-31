@@ -26,16 +26,19 @@ func New() *App {
 	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
 	sopVersionRepo := repositories.NewSOPTemplateVersionRepository(database.DB)
 	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
+	spaceRepo := repositories.NewSpaceRepository(database.DB)
 
 	// Services
-	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo)
 	userService := services.NewUserService(userRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
+	spaceService := services.NewSpaceService(spaceRepo, userRepo)
+	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
+	spaceHandler := handlers.NewSpaceHandler(spaceService)
 
 	// Fiber instance with CORS
 	app := fiber.New()
@@ -53,6 +56,7 @@ func New() *App {
 	authHandler.RegisterAuthRoutes(app)
 	userHandler.RegisterUserRoutes(app)
 	sopHandler.RegisterSOPRoutes(app)
+	spaceHandler.RegisterSpaceRoutes(app)
 
 	return &App{
 		Fiber:       app,

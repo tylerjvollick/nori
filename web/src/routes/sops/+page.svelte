@@ -1,78 +1,54 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sopStore } from '$lib/stores/sop';
-  import { taskStore } from '$lib/stores/task';
-  import KanbanColumn from '$lib/components/KanbanColumn.svelte';
-  import TaskDetailDialog from '$lib/components/TaskDetailDialog.svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import Dialog from '$lib/components/ui/Dialog.svelte';
-  import type { Task, TaskStatus } from '$lib/types/task';
   import type { SOPTemplate } from '$lib/api/sop';
   
-  let showCreateTaskDialog = $state(false);
-  let selectedTask = $state<Task | null>(null);
-  let selectedSOPForTask = $state<SOPTemplate | null>(null);
-  let assignedToName = $state('');
+  let searchQuery = $state('');
 
   onMount(() => {
     sopStore.loadAllSOPs();
   });
 
-  // Get tasks organized by status - these are read-only derived values
-  function getTodoTasks() {
-    return $taskStore.tasks.filter(task => task.status === 'todo');
-  }
-  
-  function getInProgressTasks() {
-    return $taskStore.tasks.filter(task => task.status === 'inProgress');
-  }
-  
-  function getDoneTasks() {
-    return $taskStore.tasks.filter(task => task.status === 'done');
-  }
+  // Filter SOPs based on search query
+  const filteredSOPs = $derived(
+    searchQuery.trim()
+      ? $sopStore.sops.filter(sop => 
+          sop.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          sop.currentVersion?.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : $sopStore.sops
+  );
 
-  function handleTaskClick(task: Task) {
-    selectedTask = task;
-  }
-
-  function handleTaskMove(taskId: string, newStatus: TaskStatus) {
-    taskStore.updateTaskStatus(taskId, newStatus);
-  }
-
-  function openCreateTaskDialog() {
-    showCreateTaskDialog = true;
-  }
-
-  function handleCreateTask() {
-    if (selectedSOPForTask && assignedToName.trim()) {
-      taskStore.createTask(selectedSOPForTask, assignedToName.trim());
-      showCreateTaskDialog = false;
-      selectedSOPForTask = null;
-      assignedToName = '';
-    } else if (selectedSOPForTask) {
-      taskStore.createTask(selectedSOPForTask);
-      showCreateTaskDialog = false;
-      selectedSOPForTask = null;
-      assignedToName = '';
-    }
-  }
-
-  function handleCancelCreateTask() {
-    showCreateTaskDialog = false;
-    selectedSOPForTask = null;
-    assignedToName = '';
+  function formatDate(dateString: string): string {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
   }
 </script>
 
 <div class="container mx-auto px-4 py-8">
+  <!-- Header -->
   <div class="flex justify-between items-center mb-8">
     <div>
-      <h1 class="text-3xl font-bold text-slate-900 dark:text-white">Task Board</h1>
-      <p class="text-slate-500 dark:text-slate-400 mt-1">Manage your procedures and tasks</p>
+      <h1 class="text-3xl font-bold text-slate-900 dark:text-white">SOP Templates</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-1">Browse and manage your standard operating procedures</p>
     </div>
-    <Button onclick={openCreateTaskDialog}>
-      Create New Task
-    </Button>
+    <a href="/sops/create">
+      <Button>Create New SOP</Button>
+    </a>
+  </div>
+
+  <!-- Search Bar -->
+  <div class="mb-6">
+    <input
+      type="text"
+      bind:value={searchQuery}
+      placeholder="Search SOPs by name or description..."
+      class="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+    />
   </div>
 
   {#if $sopStore.loading}
@@ -86,121 +62,56 @@
     </div>
   {:else if !$sopStore.sops || $sopStore.sops.length === 0}
     <div class="text-center py-12">
-      <p class="text-slate-500 dark:text-slate-400 mb-4">No SOPs created yet. Create an SOP first to start creating tasks.</p>
+      <p class="text-slate-500 dark:text-slate-400 mb-4">No SOPs created yet. Create your first SOP template to get started.</p>
       <a href="/sops/create">
         <Button>Create Your First SOP</Button>
       </a>
     </div>
+  {:else if filteredSOPs.length === 0}
+    <div class="text-center py-12">
+      <p class="text-slate-500 dark:text-slate-400">No SOPs match your search.</p>
+    </div>
   {:else}
-    <!-- Kanban Board -->
-    <div class="flex gap-6 overflow-x-auto pb-4">
-      <KanbanColumn
-        title="To Do"
-        status="todo"
-        tasks={getTodoTasks()}
-        onTaskClick={handleTaskClick}
-        onTaskMove={handleTaskMove}
-      />
-      
-      <KanbanColumn
-        title="In Progress"
-        status="inProgress"
-        tasks={getInProgressTasks()}
-        onTaskClick={handleTaskClick}
-        onTaskMove={handleTaskMove}
-      />
-      
-      <KanbanColumn
-        title="Done"
-        status="done"
-        tasks={getDoneTasks()}
-        onTaskClick={handleTaskClick}
-        onTaskMove={handleTaskMove}
-      />
+    <!-- SOP Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {#each filteredSOPs as sop}
+        <a 
+          href="/sops/{sop.id}"
+          class="block p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:shadow-lg hover:border-emerald-500 dark:hover:border-emerald-500 transition-all"
+        >
+          <div class="flex items-start justify-between mb-3">
+            <h3 class="text-xl font-semibold text-slate-900 dark:text-white">
+              {sop.name}
+            </h3>
+            <span class="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full">
+              v{sop.currentVersion?.versionNumber || '1'}
+            </span>
+          </div>
+          
+          {#if sop.currentVersion?.description}
+            <p class="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">
+              {sop.currentVersion.description}
+            </p>
+          {:else}
+            <p class="text-sm text-slate-400 dark:text-slate-500 italic mb-4">
+              No description
+            </p>
+          {/if}
+
+          <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <span>
+              {sop.currentVersion?.steps?.length || 0} steps
+            </span>
+            <span>
+              Updated {formatDate(sop.updatedAt)}
+            </span>
+          </div>
+        </a>
+      {/each}
     </div>
 
-    {#if $taskStore.tasks.length === 0}
-      <div class="text-center py-12 mt-8">
-        <p class="text-slate-500 dark:text-slate-400 mb-4">No tasks yet. Create your first task from an SOP!</p>
-        <Button onclick={openCreateTaskDialog}>Create Task</Button>
-      </div>
-    {/if}
+    <div class="mt-8 text-center text-sm text-slate-500 dark:text-slate-400">
+      Showing {filteredSOPs.length} of {$sopStore.sops.length} SOP{$sopStore.sops.length === 1 ? '' : 's'}
+    </div>
   {/if}
 </div>
-
-<!-- Create Task Dialog -->
-{#if showCreateTaskDialog}
-  <Dialog onClose={handleCancelCreateTask}>
-    <div class="p-6">
-      <h2 class="text-2xl font-bold text-slate-900 dark:text-white mb-6">Create New Task</h2>
-      
-      <div class="space-y-4">
-        <!-- Select SOP -->
-        <div>
-          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-            Select SOP
-          </label>
-          <select
-            bind:value={selectedSOPForTask}
-            class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-          >
-            <option value={null}>Choose an SOP...</option>
-            {#each $sopStore.sops as sop}
-              <option value={sop}>{sop.name} (v{sop.currentVersion?.versionNumber || '1'})</option>
-            {/each}
-          </select>
-        </div>
-
-        <!-- Assigned To (Optional) -->
-        <div>
-          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-            Assign To (Optional)
-          </label>
-          <input
-            type="text"
-            bind:value={assignedToName}
-            placeholder="Enter name..."
-            class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-          />
-        </div>
-
-        <!-- SOP Preview -->
-        {#if selectedSOPForTask}
-          <div class="mt-4 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
-            <p class="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">SOP Details:</p>
-            <p class="text-sm text-slate-600 dark:text-slate-400">
-              <strong>Name:</strong> {selectedSOPForTask.name}
-            </p>
-            {#if selectedSOPForTask.currentVersion?.description}
-              <p class="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                <strong>Description:</strong> {selectedSOPForTask.currentVersion.description}
-              </p>
-            {/if}
-            <p class="text-sm text-slate-600 dark:text-slate-400 mt-1">
-              <strong>Steps:</strong> {selectedSOPForTask.currentVersion?.steps?.length || 0}
-            </p>
-          </div>
-        {/if}
-      </div>
-
-      <div class="flex gap-4 mt-6">
-        <Button variant="outline" onclick={handleCancelCreateTask} class="flex-1">
-          Cancel
-        </Button>
-        <Button 
-          onclick={handleCreateTask} 
-          class="flex-1"
-          disabled={!selectedSOPForTask}
-        >
-          Create Task
-        </Button>
-      </div>
-    </div>
-  </Dialog>
-{/if}
-
-<!-- Task Detail Dialog -->
-<TaskDetailDialog 
-  task={selectedTask}
-  onClose={() => selectedTask = null}
-/>

@@ -1,7 +1,11 @@
 package dtos
 
-import "github.com/tylerjvollick/nori/internal/models"
+import (
+	"github.com/google/uuid"
+	"github.com/tylerjvollick/nori/internal/models"
+)
 
 type AuthDTO struct {
-	User models.User
+	User      models.User
+	AccountID uuid.UUID
 }

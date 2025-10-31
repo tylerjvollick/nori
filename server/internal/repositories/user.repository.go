@@ -67,3 +67,10 @@ func (r UserRepository) UpdateUser(id uuid.UUID, input *UpdateUserInput) (*model
 	}
 	return &user, nil
 }
+
+// UpdateRecentSpaces updates the user's recent spaces list
+func (r *UserRepository) UpdateRecentSpaces(userID uuid.UUID, recentSpaces models.RecentSpaces) error {
+	return r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("recent_spaces", recentSpaces).Error
+}

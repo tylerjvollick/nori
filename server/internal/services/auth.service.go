@@ -18,11 +18,15 @@ type AuthService struct {
 	userRepository        *repositories.UserRepository
 	accountRepository     *repositories.AccountRepository
 	userAccountRepository *repositories.UserAccountRepository
+	spaceService          *SpaceService
 }
 
-func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository) *AuthService {
-	return &AuthService{userRepository: userRepository, accountRepository: accountRepository,
+func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, spaceService *SpaceService) *AuthService {
+	return &AuthService{
+		userRepository:        userRepository,
+		accountRepository:     accountRepository,
 		userAccountRepository: userAccountRepository,
+		spaceService:          spaceService,
 	}
 }
 
@@ -93,7 +97,16 @@ func (s *AuthService) ValidateToken(bearerToken string) (*dtos.AuthDTO, error) {
 		return nil, err
 	}
 
-	return &dtos.AuthDTO{User: *user}, nil
+	// Get the user's default account ID
+	accountID := uuid.Nil
+	if user.DefaultAccountID != nil {
+		accountID = *user.DefaultAccountID
+	}
+
+	return &dtos.AuthDTO{
+		User:      *user,
+		AccountID: accountID,
+	}, nil
 }
 
 func (s *AuthService) GetBearerToken(authHeader string) (string, error) {
@@ -204,6 +217,13 @@ func (s *AuthService) CreateUser(firstName, lastName, email, password string, cr
 		}
 		if userAccountRepository == nil {
 			return nil, nil
+		}
+
+		// Create default space for the account
+		_, err = s.spaceService.CreateDefaultSpace(defaultAccount.ID)
+		if err != nil {
+			log.Printf("Failed to create default space for account %s: %v", defaultAccount.ID, err)
+			return nil, err
 		}
 	}
 
