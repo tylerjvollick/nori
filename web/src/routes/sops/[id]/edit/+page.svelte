@@ -9,6 +9,10 @@
   let originalName = '';
   let name = '';
   let description = '';
+  let materials: string[] = [];
+  let equipment: string[] = [];
+  let newMaterialInput = '';
+  let newEquipmentInput = '';
   let changeSummary = '';
   let steps: Omit<SOPStep, 'id'>[] = [];
   let error = '';
@@ -24,6 +28,8 @@
         originalName = sop.name;
         name = sop.name;
         description = sop.currentVersion.description || '';
+        materials = sop.currentVersion.materials || [];
+        equipment = sop.currentVersion.equipment || [];
         
         // Load existing steps
         if (sop.currentVersion.steps && sop.currentVersion.steps.length > 0) {
@@ -94,6 +100,28 @@
     }));
   }
 
+  function addMaterial() {
+    if (newMaterialInput.trim()) {
+      materials = [...materials, newMaterialInput.trim()];
+      newMaterialInput = '';
+    }
+  }
+
+  function removeMaterial(index: number) {
+    materials = materials.filter((_, i) => i !== index);
+  }
+
+  function addEquipment() {
+    if (newEquipmentInput.trim()) {
+      equipment = [...equipment, newEquipmentInput.trim()];
+      newEquipmentInput = '';
+    }
+  }
+
+  function removeEquipment(index: number) {
+    equipment = equipment.filter((_, i) => i !== index);
+  }
+
   async function handleSubmit() {
     error = '';
     
@@ -136,6 +164,8 @@
       await sopStore.updateSOP(sopId, {
         name: name.trim() !== originalName ? name.trim() : undefined,
         description: description.trim() || undefined,
+        materials: materials.length > 0 ? materials : undefined,
+        equipment: equipment.length > 0 ? equipment : undefined,
         changeSummary: changeSummary.trim(),
         steps: cleanSteps
       });
@@ -205,6 +235,88 @@
               rows="3"
               class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             ></textarea>
+          </div>
+
+          <!-- Materials -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Materials
+            </label>
+            <div class="space-y-2">
+              {#if materials.length > 0}
+                <ul class="space-y-2">
+                  {#each materials as material, index}
+                    <li class="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-600">
+                      <span class="text-sm text-gray-700 dark:text-gray-300">• {material}</span>
+                      <button
+                        type="button"
+                        on:click={() => removeMaterial(index)}
+                        class="text-red-600 hover:text-red-700 text-xs font-medium"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  bind:value={newMaterialInput}
+                  placeholder="Add material (e.g., Safety goggles)..."
+                  class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  on:keydown={(e) => e.key === 'Enter' && (e.preventDefault(), addMaterial())}
+                />
+                <button
+                  type="button"
+                  on:click={addMaterial}
+                  class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Equipment -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Equipment
+            </label>
+            <div class="space-y-2">
+              {#if equipment.length > 0}
+                <ul class="space-y-2">
+                  {#each equipment as item, index}
+                    <li class="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-600">
+                      <span class="text-sm text-gray-700 dark:text-gray-300">• {item}</span>
+                      <button
+                        type="button"
+                        on:click={() => removeEquipment(index)}
+                        class="text-red-600 hover:text-red-700 text-xs font-medium"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  bind:value={newEquipmentInput}
+                  placeholder="Add equipment (e.g., Oscilloscope)..."
+                  class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  on:keydown={(e) => e.key === 'Enter' && (e.preventDefault(), addEquipment())}
+                />
+                <button
+                  type="button"
+                  on:click={addEquipment}
+                  class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
           </div>
 
           <div>
