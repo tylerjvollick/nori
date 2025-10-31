@@ -231,85 +231,93 @@
   }
 </script>
 
-<div class="container mx-auto px-4 py-8 max-w-7xl">
+<div class="h-full overflow-hidden">
   {#if $sopStore.loading}
     <div class="flex justify-center items-center py-12">
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   {:else if $sopStore.error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg m-4">
       <p class="font-medium">Error loading SOP</p>
       <p class="text-sm">{$sopStore.error}</p>
     </div>
   {:else if $sopStore.currentSOP}
-    <!-- Header -->
-    <div class="mb-6">
-      <button
-        on:click={() => goto('/sops')}
-        class="text-blue-600 hover:text-blue-700 mb-4 inline-flex items-center"
-      >
-        ← Back to SOPs
-      </button>
-    </div>
-
     <!-- Two Column Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
       <!-- Left Column: Main Content -->
-      <div class="lg:col-span-2 space-y-6">
-        <!-- Title -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-          {#if editingTitle}
-            <div class="space-y-3">
-              <input
-                type="text"
-                bind:value={localTitle}
-                class="w-full text-3xl font-bold text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                on:keydown={(e) => {
-                  if (e.key === 'Enter') saveTitle();
-                  if (e.key === 'Escape') editingTitle = false;
-                }}
-              />
-              <div class="flex gap-2">
-                <button
-                  on:click={saveTitle}
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-                >
-                  Save
-                </button>
-                <button
-                  on:click={() => {
-                    editingTitle = false;
-                    localTitle = $sopStore.currentSOP?.name || '';
-                  }}
-                  class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          {:else}
-            <h1
-              class="text-3xl font-bold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600"
-              on:click={() => (editingTitle = true)}
-              on:keydown={(e) => e.key === 'Enter' && (editingTitle = true)}
-              role="button"
-              tabindex="0"
+      <div class="lg:col-span-2 flex flex-col overflow-hidden">
+        <!-- Sticky Breadcrumb -->
+        <div class="sticky top-0 z-10 bg-white dark:bg-gray-900 py-4 px-4 border-b border-gray-200 dark:border-gray-700">
+          <nav class="flex items-center text-sm text-gray-600 dark:text-gray-400">
+            <button
+              on:click={() => goto('/sops')}
+              class="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
             >
+              SOPs
+            </button>
+            <span class="mx-2">/</span>
+            <span class="text-gray-900 dark:text-white font-medium truncate">
               {localTitle}
-            </h1>
-          {/if}
-          
-          {#if $sopStore.currentSOP.currentVersion}
-            <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
-              Version {$sopStore.currentSOP.currentVersion.versionNumber} • 
-              Last updated: {formatDate($sopStore.currentSOP.updatedAt)}
-            </p>
-          {/if}
+            </span>
+          </nav>
         </div>
 
-        <!-- Description -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-          <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-3">Description</h2>
+        <!-- Scrollable Content -->
+        <div class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+          <!-- Title -->
+          <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
+            {#if editingTitle}
+              <div class="space-y-3">
+                <input
+                  type="text"
+                  bind:value={localTitle}
+                  class="w-full text-3xl font-bold text-gray-900 dark:text-white bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter') saveTitle();
+                    if (e.key === 'Escape') editingTitle = false;
+                  }}
+                />
+                <div class="flex gap-2">
+                  <button
+                    on:click={saveTitle}
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                  >
+                    Save
+                  </button>
+                  <button
+                    on:click={() => {
+                      editingTitle = false;
+                      localTitle = $sopStore.currentSOP?.name || '';
+                    }}
+                    class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <h1
+                class="text-3xl font-bold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600"
+                on:click={() => (editingTitle = true)}
+                on:keydown={(e) => e.key === 'Enter' && (editingTitle = true)}
+                role="button"
+                tabindex="0"
+              >
+                {localTitle}
+              </h1>
+            {/if}
+            
+            {#if $sopStore.currentSOP.currentVersion}
+              <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                Version {$sopStore.currentSOP.currentVersion.versionNumber} • 
+                Last updated: {formatDate($sopStore.currentSOP.updatedAt)}
+              </p>
+            {/if}
+          </div>
+
+          <!-- Description -->
+          <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-3">Description</h2>
           
           {#if editingDescription}
             <div class="space-y-3">
@@ -350,12 +358,12 @@
               {localDescription || 'Click to add description'}
             </p>
           {/if}
-        </div>
+          </div>
 
-        <!-- Steps -->
-        {#if localSteps && localSteps.length > 0}
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-            <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Steps</h2>
+          <!-- Steps -->
+          {#if localSteps && localSteps.length > 0}
+            <div>
+              <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Steps</h2>
             
             <div class="space-y-2">
               {#each localSteps as step, index}
@@ -494,14 +502,15 @@
                 </div>
               {/each}
             </div>
-          </div>
-        {/if}
+            </div>
+          {/if}
+        </div>
       </div>
 
       <!-- Right Column: Sidebar -->
-      <div class="space-y-6">
+      <div class="overflow-y-auto px-4 py-6 space-y-6 border-l border-gray-200 dark:border-gray-700">
         <!-- Actions -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
           <div class="space-y-2">
             <button
@@ -520,7 +529,7 @@
         </div>
 
         <!-- Metadata -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Details</h3>
           <div class="space-y-3 text-sm">
             <div>
@@ -542,7 +551,7 @@
 
         <!-- Summary Stats -->
         {#if localSteps.length > 0}
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+          <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Summary</h3>
             <div class="space-y-3">
               <div>
@@ -570,7 +579,7 @@
         {/if}
 
         <!-- Materials -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Materials</h3>
           
           {#if editingMaterials}
@@ -646,7 +655,7 @@
         </div>
 
         <!-- Equipment -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
+        <div>
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Equipment</h3>
           
           {#if editingEquipment}
@@ -722,11 +731,26 @@
         </div>
       </div>
     </div>
+  {/if}
+</div>
 
-    <!-- Version History (Full Width Below) -->
-    {#if showVersionHistory}
-      <div class="mt-6 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-6">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-6">Version History</h2>
+<!-- Version History Modal/Overlay (Outside main grid) -->
+{#if $sopStore.currentSOP && showVersionHistory}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Version History</h2>
+        <button
+          on:click={() => showVersionHistory = false}
+          class="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+        >
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      
+      <div class="p-6">
         
         {#if $sopStore.loading}
           <div class="flex justify-center py-6">
@@ -776,6 +800,6 @@
           </div>
         {/if}
       </div>
-    {/if}
-  {/if}
-</div>
+    </div>
+  </div>
+{/if}
