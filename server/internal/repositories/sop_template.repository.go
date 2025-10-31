@@ -22,7 +22,7 @@ func (r *SOPTemplateRepository) Create(template *models.SOPTemplate) error {
 
 func (r *SOPTemplateRepository) GetByID(id int) (*models.SOPTemplate, error) {
 	var template models.SOPTemplate
-	err := r.db.Preload("CurrentVersion").Preload("CurrentVersion.Steps").First(&template, id).Error
+	err := r.db.Preload("CurrentVersion.Steps").Preload("CurrentVersion").First(&template, id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("SOP template not found")
@@ -34,7 +34,7 @@ func (r *SOPTemplateRepository) GetByID(id int) (*models.SOPTemplate, error) {
 
 func (r *SOPTemplateRepository) GetAll() ([]models.SOPTemplate, error) {
 	var templates []models.SOPTemplate
-	err := r.db.Preload("CurrentVersion").Preload("CurrentVersion.Steps").Find(&templates).Error
+	err := r.db.Preload("CurrentVersion.Steps").Preload("CurrentVersion").Find(&templates).Error
 	return templates, err
 }
 
