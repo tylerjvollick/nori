@@ -16,6 +16,9 @@
   let expandedSteps = new Set<number>();
   let editingSteps = new Set<number>();
   let isPublishing = false;
+  let creatingNewStep = false;
+  let newStepTitle = '';
+  let newStepTitleInput: HTMLInputElement;
 
   // Local editable state
   let localTitle = '';
@@ -421,6 +424,95 @@
       }
     }
   }
+
+  function startAddingStep() {
+    creatingNewStep = true;
+    newStepTitle = '';
+    // Focus the input after it's rendered
+    setTimeout(() => {
+      newStepTitleInput?.focus();
+    }, 0);
+  }
+
+  function cancelAddingStep() {
+    creatingNewStep = false;
+    newStepTitle = '';
+  }
+
+  async function saveNewStep() {
+    if (!newStepTitle.trim()) {
+      cancelAddingStep();
+      return;
+    }
+
+    if (!$sopStore.currentSOP) return;
+
+    try {
+      // Ensure we're in draft mode (auto-create if needed)
+      const activeDraftId = await ensureDraftMode();
+      if (!activeDraftId) {
+        console.error('Failed to enter draft mode');
+        return;
+      }
+
+      // If we just created/navigated to draft, the page will reload
+      // Only proceed if we're already in draft mode
+      if (isDraftMode && draftId) {
+        // Calculate the next step number
+        const nextStepNumber = localSteps.length > 0 
+          ? Math.max(...localSteps.map(s => s.stepNumber)) + 1 
+          : 1;
+
+        // Create the new step
+        const newStep: SOPStep = {
+          stepNumber: nextStepNumber,
+          title: newStepTitle.trim(),
+          instructions: '',
+          estimatedTimeMinutes: 0,
+          requiresApproval: false
+        };
+
+        // Add to local steps
+        localSteps = [...localSteps, newStep];
+
+        // Save to backend
+        await sopStore.updateDraft(draftId, {
+          description: localDescription,
+          materials: localMaterials,
+          equipment: localEquipment,
+          changeSummary: `Added step ${nextStepNumber}`,
+          steps: localSteps.map(s => ({
+            stepNumber: s.stepNumber,
+            title: s.title,
+            instructions: s.instructions,
+            estimatedTimeMinutes: s.estimatedTimeMinutes,
+            imageUrl: s.imageUrl,
+            videoUrl: s.videoUrl,
+            requiresApproval: s.requiresApproval
+          }))
+        });
+
+        // Reset the form but keep allowing more additions
+        newStepTitle = '';
+        newStepTitleInput?.focus();
+      }
+    } catch (error) {
+      console.error('Failed to add step:', error);
+    }
+  }
+
+  async function handleNewStepKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      await saveNewStep();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      await saveNewStep();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelAddingStep();
+    }
+  }
 </script>
 
 <div class="h-full overflow-hidden">
@@ -564,7 +656,15 @@
           <!-- Steps -->
           {#if localSteps && localSteps.length > 0}
             <div>
-              <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Steps</h2>
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
+                <button
+                  on:click={startAddingStep}
+                  class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+                >
+                  + Add Step
+                </button>
+              </div>
             
             <div class="space-y-2">
               {#each localSteps as step, index}
@@ -702,7 +802,75 @@
                   {/if}
                 </div>
               {/each}
+
+              <!-- New Step Form -->
+              {#if creatingNewStep}
+                <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+                  <div class="flex items-center gap-3 p-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+                      {localSteps.length > 0 ? Math.max(...localSteps.map(s => s.stepNumber)) + 1 : 1}
+                    </span>
+                    <input
+                      type="text"
+                      bind:this={newStepTitleInput}
+                      bind:value={newStepTitle}
+                      on:keydown={handleNewStepKeydown}
+                      placeholder="Enter step title and press Enter or Tab..."
+                      class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <button
+                      on:click={cancelAddingStep}
+                      class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                    >
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              {/if}
             </div>
+            </div>
+          {:else}
+            <!-- No steps yet -->
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
+                <button
+                  on:click={startAddingStep}
+                  class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+                >
+                  + Add Step
+                </button>
+              </div>
+              
+              {#if creatingNewStep}
+                <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+                  <div class="flex items-center gap-3 p-4">
+                    <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+                      1
+                    </span>
+                    <input
+                      type="text"
+                      bind:this={newStepTitleInput}
+                      bind:value={newStepTitle}
+                      on:keydown={handleNewStepKeydown}
+                      placeholder="Enter step title and press Enter or Tab..."
+                      class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                    <button
+                      on:click={cancelAddingStep}
+                      class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                    >
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <p class="text-gray-600 dark:text-gray-400 text-sm">No steps yet. Click "Add Step" to create your first step.</p>
+              {/if}
             </div>
           {/if}
         </div>
