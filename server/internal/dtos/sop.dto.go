@@ -47,11 +47,13 @@ type SOPStepResponseDTO struct {
 type SOPVersionResponseDTO struct {
 	ID            int                  `json:"id"`
 	VersionNumber int                  `json:"versionNumber"`
+	Status        string               `json:"status"`
 	Description   *string              `json:"description,omitempty"`
 	Materials     []string             `json:"materials,omitempty"`
 	Equipment     []string             `json:"equipment,omitempty"`
 	ChangeSummary *string              `json:"changeSummary,omitempty"`
 	CreatedAt     string               `json:"createdAt"`
+	UpdatedAt     string               `json:"updatedAt"`
 	IsActive      bool                 `json:"isActive"`
 	Steps         []SOPStepResponseDTO `json:"steps,omitempty"`
 }
@@ -63,6 +65,7 @@ type SOPTemplateResponseDTO struct {
 	CreatedAt      string                 `json:"createdAt"`
 	UpdatedAt      string                 `json:"updatedAt"`
 	CurrentVersion *SOPVersionResponseDTO `json:"currentVersion,omitempty"`
+	ActiveDraftID  *int                   `json:"activeDraftId,omitempty"`
 }
 
 // SOPTemplateDetailResponseDTO represents a detailed SOP template with all versions
@@ -73,4 +76,30 @@ type SOPTemplateDetailResponseDTO struct {
 	UpdatedAt      string                  `json:"updatedAt"`
 	CurrentVersion *SOPVersionResponseDTO  `json:"currentVersion,omitempty"`
 	Versions       []SOPVersionResponseDTO `json:"versions,omitempty"`
+}
+
+// SaveDraftSOPDTO represents the request to save or update a draft
+type SaveDraftSOPDTO struct {
+	Name          *string            `json:"name,omitempty"`
+	Description   *string            `json:"description,omitempty"`
+	Materials     []string           `json:"materials,omitempty"`
+	Equipment     []string           `json:"equipment,omitempty"`
+	ChangeSummary *string            `json:"changeSummary,omitempty"`
+	Steps         []CreateSOPStepDTO `json:"steps" binding:"required,min=1"`
+}
+
+// PublishDraftDTO represents the request to publish a draft
+type PublishDraftDTO struct {
+	ChangeSummary string `json:"changeSummary" binding:"required"`
+}
+
+// DraftListItemDTO represents a draft in the list of user's drafts
+type DraftListItemDTO struct {
+	ID              int     `json:"id"`
+	SOPTemplateID   int     `json:"sopTemplateId"`
+	SOPTemplateName string  `json:"sopTemplateName"`
+	VersionNumber   int     `json:"versionNumber"`
+	ChangeSummary   *string `json:"changeSummary,omitempty"`
+	CreatedAt       string  `json:"createdAt"`
+	UpdatedAt       string  `json:"updatedAt"`
 }

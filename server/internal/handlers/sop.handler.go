@@ -22,16 +22,27 @@ func NewSOPHandler(sopService *services.SOPService) *SOPHandler {
 func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App) {
 	group := app.Group("/sops")
 
-	// Public routes (or add auth middleware if needed)
-	group.Get("/", auth.AuthMiddleware(), h.GetAllSOPs)
-	group.Get("/:id", auth.AuthMiddleware(), h.GetSOP)
-	group.Get("/:id/versions", auth.AuthMiddleware(), h.GetSOPVersions)
+	// Draft routes (must come before parameterized routes)
+	group.Get("/drafts", auth.AuthMiddleware(), h.GetUserDrafts)
+	group.Get("/drafts/:draftId", auth.AuthMiddleware(), h.GetDraft)
+	group.Put("/drafts/:draftId", auth.AuthMiddleware(), h.UpdateDraft)
+	group.Post("/drafts/:draftId/publish", auth.AuthMiddleware(), h.PublishDraft)
+	group.Delete("/drafts/:draftId", auth.AuthMiddleware(), h.DeleteDraft)
+
+	// Version routes (must come before generic /:id route)
 	group.Get("/versions/:versionId", auth.AuthMiddleware(), h.GetSOPVersion)
 
-	// Protected routes
+	// Public routes
+	group.Get("/", auth.AuthMiddleware(), h.GetAllSOPs)
 	group.Post("/", auth.AuthMiddleware(), h.CreateSOP)
+
+	// Parameterized routes (must come after specific routes)
+	group.Get("/:id", auth.AuthMiddleware(), h.GetSOP)
 	group.Put("/:id", auth.AuthMiddleware(), h.UpdateSOP)
 	group.Delete("/:id", auth.AuthMiddleware(), h.DeleteSOP)
+	group.Get("/:id/versions", auth.AuthMiddleware(), h.GetSOPVersions)
+	group.Get("/:id/drafts", auth.AuthMiddleware(), h.GetSOPDrafts)
+	group.Post("/:id/drafts", auth.AuthMiddleware(), h.SaveDraft)
 }
 
 // CreateSOP creates a new SOP template with its first version
@@ -109,7 +120,15 @@ func (h *SOPHandler) GetSOP(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(http.StatusOK).JSON(h.templateToResponse(template))
+	response := h.templateToResponse(template)
+
+	// Check for active draft
+	draft, _ := h.sopService.GetDraftByTemplateID(id)
+	if draft != nil {
+		response.ActiveDraftID = &draft.ID
+	}
+
+	return c.Status(http.StatusOK).JSON(response)
 }
 
 // GetAllSOPs gets all SOP templates
@@ -123,7 +142,15 @@ func (h *SOPHandler) GetAllSOPs(c *fiber.Ctx) error {
 
 	response := []dtos.SOPTemplateResponseDTO{}
 	for _, template := range templates {
-		response = append(response, *h.templateToResponse(&template))
+		templateResponse := h.templateToResponse(&template)
+
+		// Check for active draft
+		draft, _ := h.sopService.GetDraftByTemplateID(template.ID)
+		if draft != nil {
+			templateResponse.ActiveDraftID = &draft.ID
+		}
+
+		response = append(response, *templateResponse)
 	}
 
 	return c.Status(http.StatusOK).JSON(response)
@@ -218,11 +245,13 @@ func (h *SOPHandler) versionToResponse(version *models.SOPTemplateVersion) *dtos
 	response := &dtos.SOPVersionResponseDTO{
 		ID:            version.ID,
 		VersionNumber: version.VersionNumber,
+		Status:        string(version.Status),
 		Description:   version.Description,
 		Materials:     version.Materials,
 		Equipment:     version.Equipment,
 		ChangeSummary: version.ChangeSummary,
 		CreatedAt:     version.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:     version.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		IsActive:      version.IsActive,
 	}
 
@@ -244,4 +273,215 @@ func (h *SOPHandler) versionToResponse(version *models.SOPTemplateVersion) *dtos
 	}
 
 	return response
+}
+
+// SaveDraft creates a new draft version for an SOP template
+func (h *SOPHandler) SaveDraft(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid id",
+		})
+	}
+
+	var dto dtos.SaveDraftSOPDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	draft, err := h.sopService.SaveDraft(id, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(h.versionToResponse(draft))
+}
+
+// UpdateDraft updates an existing draft version
+func (h *SOPHandler) UpdateDraft(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	draftID, err := strconv.Atoi(c.Params("draftId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid draft id",
+		})
+	}
+
+	var dto dtos.SaveDraftSOPDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	draft, err := h.sopService.UpdateDraft(draftID, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(h.versionToResponse(draft))
+}
+
+// PublishDraft publishes a draft version
+func (h *SOPHandler) PublishDraft(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	draftID, err := strconv.Atoi(c.Params("draftId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid draft id",
+		})
+	}
+
+	var dto dtos.PublishDraftDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	template, err := h.sopService.PublishDraft(draftID, dto.ChangeSummary)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(h.templateToResponse(template))
+}
+
+// GetUserDrafts gets all draft versions for the authenticated user
+func (h *SOPHandler) GetUserDrafts(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	drafts, err := h.sopService.GetUserDrafts(authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := []dtos.DraftListItemDTO{}
+	for _, draft := range drafts {
+		item := dtos.DraftListItemDTO{
+			ID:              draft.ID,
+			SOPTemplateID:   draft.SOPTemplateID,
+			SOPTemplateName: "",
+			VersionNumber:   draft.VersionNumber,
+			ChangeSummary:   draft.ChangeSummary,
+			CreatedAt:       draft.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt:       draft.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+		if draft.SOPTemplate != nil {
+			item.SOPTemplateName = draft.SOPTemplate.Name
+		}
+		response = append(response, item)
+	}
+
+	return c.Status(http.StatusOK).JSON(response)
+}
+
+// GetSOPDrafts gets all draft versions for a specific SOP template
+func (h *SOPHandler) GetSOPDrafts(c *fiber.Ctx) error {
+	id, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid id",
+		})
+	}
+
+	drafts, err := h.sopService.GetSOPDrafts(id)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := []dtos.SOPVersionResponseDTO{}
+	for _, draft := range drafts {
+		response = append(response, *h.versionToResponse(&draft))
+	}
+
+	return c.Status(http.StatusOK).JSON(response)
+}
+
+// DeleteDraft deletes a draft version
+func (h *SOPHandler) DeleteDraft(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	draftID, err := strconv.Atoi(c.Params("draftId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid draft id",
+		})
+	}
+
+	if err := h.sopService.DeleteDraft(draftID, authDTO.User.ID); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusNoContent).Send(nil)
+}
+
+// GetDraft retrieves a specific draft by ID
+func (h *SOPHandler) GetDraft(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	draftID, err := strconv.Atoi(c.Params("draftId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid draft id",
+		})
+	}
+
+	version, err := h.sopService.GetDraft(draftID, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := h.versionToResponse(version)
+	return c.JSON(response)
 }

@@ -1,10 +1,12 @@
 import { writable } from 'svelte/store';
-import { sopApi, type SOPTemplate, type SOPVersion } from '$lib/api/sop';
+import { sopApi, type SOPTemplate, type SOPVersion, type DraftListItem } from '$lib/api/sop';
 
 interface SOPStore {
   sops: SOPTemplate[];
   currentSOP: SOPTemplate | null;
   currentVersions: SOPVersion[];
+  drafts: DraftListItem[];
+  currentDraft: SOPVersion | null;
   loading: boolean;
   error: string | null;
 }
@@ -14,6 +16,8 @@ function createSOPStore() {
     sops: [],
     currentSOP: null,
     currentVersions: [],
+    drafts: [],
+    currentDraft: null,
     loading: false,
     error: null
   });
@@ -108,6 +112,93 @@ function createSOPStore() {
       }
     },
 
+    async loadUserDrafts() {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const drafts = await sopApi.getUserDrafts();
+        update(state => ({ ...state, drafts, loading: false }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load drafts';
+        update(state => ({ ...state, error: message, loading: false }));
+      }
+    },
+
+    async saveDraft(id: number, data: Parameters<typeof sopApi.saveDraft>[1]) {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const draft = await sopApi.saveDraft(id, data);
+        update(state => ({ ...state, currentDraft: draft, loading: false }));
+        return draft;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to save draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
+    async updateDraft(draftId: number, data: Parameters<typeof sopApi.updateDraft>[1]) {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const draft = await sopApi.updateDraft(draftId, data);
+        update(state => ({ ...state, currentDraft: draft, loading: false }));
+        return draft;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to update draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
+    async publishDraft(draftId: number, changeSummary: string) {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const updatedSOP = await sopApi.publishDraft(draftId, { changeSummary });
+        update(state => ({
+          ...state,
+          sops: Array.isArray(state.sops) ? state.sops.map(sop => sop.id === updatedSOP.id ? updatedSOP : sop) : [updatedSOP],
+          currentSOP: state.currentSOP?.id === updatedSOP.id ? updatedSOP : state.currentSOP,
+          currentDraft: null,
+          drafts: state.drafts.filter(d => d.id !== draftId),
+          loading: false
+        }));
+        return updatedSOP;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to publish draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
+    async deleteDraft(draftId: number) {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        await sopApi.deleteDraft(draftId);
+        update(state => ({
+          ...state,
+          drafts: state.drafts.filter(d => d.id !== draftId),
+          currentDraft: state.currentDraft?.id === draftId ? null : state.currentDraft,
+          loading: false
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
+    async loadDraft(draftId: number) {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const draft = await sopApi.getDraft(draftId);
+        update(state => ({ ...state, currentDraft: draft, loading: false }));
+        return draft;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
     clearError() {
       update(state => ({ ...state, error: null }));
     },
@@ -117,6 +208,8 @@ function createSOPStore() {
         sops: [],
         currentSOP: null,
         currentVersions: [],
+        drafts: [],
+        currentDraft: null,
         loading: false,
         error: null
       });

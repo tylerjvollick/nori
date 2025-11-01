@@ -57,3 +57,22 @@ func (r *SOPStepRepository) Delete(id int) error {
 func (r *SOPStepRepository) DeleteByVersionID(versionID int) error {
 	return r.db.Where("sop_template_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
 }
+
+func (r *SOPStepRepository) DeleteByVersionIDWithTx(tx *gorm.DB, versionID int) error {
+	return tx.Where("sop_template_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
+}
+
+func (r *SOPStepRepository) CreateBatchWithTx(tx *gorm.DB, steps []models.SOPStep) error {
+	if len(steps) == 0 {
+		return nil
+	}
+	return tx.Create(&steps).Error
+}
+
+func (r *SOPStepRepository) UpdateWithTx(tx *gorm.DB, step *models.SOPStep) error {
+	return tx.Save(step).Error
+}
+
+func (r *SOPStepRepository) DeleteWithTx(tx *gorm.DB, id int) error {
+	return tx.Delete(&models.SOPStep{}, id).Error
+}

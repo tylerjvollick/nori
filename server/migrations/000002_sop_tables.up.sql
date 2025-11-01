@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sop_template_version (
     description TEXT,
     created_by UUID NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
     change_summary TEXT,
     is_active BOOLEAN DEFAULT TRUE,
     CONSTRAINT fk_sop_template_version_template
