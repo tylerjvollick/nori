@@ -1,0 +1,2 @@
+2025/10/31 22:26:40 Connecting to database
+2025/10/31 22:26:40 Failed to connect to database:cannot parse `host= user= password=xxxxx dbname= port= sslmode=disable`: invalid port (strconv.ParseUint: parsing "sslmode=disable": invalid syntax)
