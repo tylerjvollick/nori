@@ -882,7 +882,6 @@
       <div class="overflow-y-auto px-4 py-6 space-y-6 border-l border-gray-200 dark:border-gray-700">
         <!-- Actions -->
         <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
           <div class="flex items-center justify-between gap-2">
             <!-- Left: Publish and Discard Buttons -->
             <div class="flex items-center gap-2">
