@@ -81,6 +81,34 @@ export interface DraftListItem {
   stepCount?: number;
 }
 
+// Step-specific request types
+export interface CreateStepRequest {
+  stepNumber: number;
+  title: string;
+  instructions?: string;
+  estimatedTimeMinutes?: number;
+  imageUrl?: string;
+  videoUrl?: string;
+  requiresApproval?: boolean;
+}
+
+export interface UpdateStepRequest {
+  stepNumber?: number;
+  title?: string;
+  instructions?: string;
+  estimatedTimeMinutes?: number;
+  imageUrl?: string;
+  videoUrl?: string;
+  requiresApproval?: boolean;
+}
+
+export interface ReorderStepsRequest {
+  steps: Array<{
+    id: number;
+    stepNumber: number;
+  }>;
+}
+
 class SOPApi {
   async getAllSOPs(): Promise<SOPTemplate[]> {
     return apiClient.get<SOPTemplate[]>('/sops/');
@@ -119,12 +147,12 @@ class SOPApi {
     return apiClient.get<SOPVersion[]>(`/sops/${id}/drafts`);
   }
 
-  async saveDraft(id: number, data: SaveDraftRequest): Promise<SOPVersion> {
-    return apiClient.post<SOPVersion>(`/sops/${id}/drafts`, data);
+  async saveDraft(id: number, data: SaveDraftRequest): Promise<SOPTemplate> {
+    return apiClient.post<SOPTemplate>(`/sops/${id}/drafts`, data);
   }
 
-  async updateDraft(draftId: number, data: SaveDraftRequest): Promise<SOPVersion> {
-    return apiClient.put<SOPVersion>(`/sops/drafts/${draftId}`, data);
+  async updateDraft(draftId: number, data: SaveDraftRequest): Promise<SOPTemplate> {
+    return apiClient.put<SOPTemplate>(`/sops/drafts/${draftId}`, data);
   }
 
   async publishDraft(draftId: number, data: PublishDraftRequest): Promise<SOPTemplate> {
@@ -137,6 +165,23 @@ class SOPApi {
 
   async getDraft(draftId: number): Promise<SOPVersion> {
     return apiClient.get<SOPVersion>(`/sops/drafts/${draftId}`);
+  }
+
+  // Individual step operations (using template ID - backend auto-resolves to draft)
+  async createStep(templateId: number, data: CreateStepRequest): Promise<SOPStep> {
+    return apiClient.post<SOPStep>(`/sops/${templateId}/steps`, data);
+  }
+
+  async updateStep(templateId: number, stepId: number, data: UpdateStepRequest): Promise<SOPStep> {
+    return apiClient.put<SOPStep>(`/sops/${templateId}/steps/${stepId}`, data);
+  }
+
+  async deleteStep(templateId: number, stepId: number): Promise<void> {
+    return apiClient.delete<void>(`/sops/${templateId}/steps/${stepId}`);
+  }
+
+  async reorderSteps(templateId: number, data: ReorderStepsRequest): Promise<SOPStep[]> {
+    return apiClient.patch<SOPStep[]>(`/sops/${templateId}/steps/reorder`, data);
   }
 }
 

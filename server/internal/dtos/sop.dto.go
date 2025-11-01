@@ -103,3 +103,37 @@ type DraftListItemDTO struct {
 	CreatedAt       string  `json:"createdAt"`
 	UpdatedAt       string  `json:"updatedAt"`
 }
+
+// Individual step operation DTOs for granular updates
+
+// CreateStepDTO represents the request to create a single step in a draft
+type CreateStepDTO struct {
+	StepNumber           int     `json:"stepNumber" binding:"required"`
+	Title                string  `json:"title" binding:"required"`
+	Instructions         *string `json:"instructions,omitempty"`
+	EstimatedTimeMinutes *int    `json:"estimatedTimeMinutes,omitempty"`
+	ImageURL             *string `json:"imageUrl,omitempty"`
+	VideoURL             *string `json:"videoUrl,omitempty"`
+	RequiresApproval     bool    `json:"requiresApproval"`
+}
+
+// UpdateStepDTO represents the request to update a single step
+type UpdateStepDTO struct {
+	Title                *string `json:"title,omitempty"`
+	Instructions         *string `json:"instructions,omitempty"`
+	EstimatedTimeMinutes *int    `json:"estimatedTimeMinutes,omitempty"`
+	ImageURL             *string `json:"imageUrl,omitempty"`
+	VideoURL             *string `json:"videoUrl,omitempty"`
+	RequiresApproval     *bool   `json:"requiresApproval,omitempty"`
+}
+
+// ReorderStepsDTO represents the request to reorder steps
+type ReorderStepsDTO struct {
+	Steps []StepOrderDTO `json:"steps" binding:"required,min=1"`
+}
+
+// StepOrderDTO represents a step's ID and its new position
+type StepOrderDTO struct {
+	ID         int `json:"id" binding:"required"`
+	StepNumber int `json:"stepNumber" binding:"required"`
+}

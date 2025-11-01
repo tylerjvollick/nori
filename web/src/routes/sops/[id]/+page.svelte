@@ -3,12 +3,11 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { sopStore } from '$lib/stores/sop';
+  import { sopApi } from '$lib/api/sop';
   import type { SOPStep } from '$lib/api/sop';
   import Button from '$lib/components/ui/Button.svelte';
 
   let sopId: number;
-  let draftId: number | null = null;
-  let isDraftMode = false;
   let showVersionHistory = false;
   let editingTitle = false;
   let editingDescription = false;
@@ -32,11 +31,9 @@
   let newEquipmentInput = '';
 
   $: sopId = parseInt($page.params.id || '0');
-  $: {
-    const draftIdParam = $page.url.searchParams.get('draftId');
-    draftId = draftIdParam ? parseInt(draftIdParam) : null;
-    isDraftMode = !!draftId;
-  }
+  
+  // Backend now auto-returns draft as currentVersion when one exists
+  $: isDraftMode = $sopStore.currentSOP?.currentVersion?.status === 'draft';
   
   $: if ($sopStore.currentSOP) {
     localTitle = $sopStore.currentSOP.name;
@@ -46,19 +43,8 @@
     localSteps = $sopStore.currentSOP.currentVersion?.steps || [];
   }
 
-  $: if (isDraftMode && $sopStore.currentDraft) {
-    localTitle = $sopStore.currentDraft.templateName;
-    localDescription = $sopStore.currentDraft.description || '';
-    localMaterials = $sopStore.currentDraft.materials || [];
-    localEquipment = $sopStore.currentDraft.equipment || [];
-    localSteps = $sopStore.currentDraft.steps || [];
-  }
-
   onMount(async () => {
     await sopStore.loadSOP(sopId);
-    if (draftId) {
-      await sopStore.loadDraft(draftId);
-    }
   });
 
   async function loadVersionHistory() {
@@ -66,46 +52,6 @@
       await sopStore.loadSOPVersions(sopId);
     }
     showVersionHistory = !showVersionHistory;
-  }
-
-  // Helper function to ensure we're in draft mode
-  async function ensureDraftMode(): Promise<number | null> {
-    if (isDraftMode && draftId) {
-      // Already in draft mode
-      return draftId;
-    }
-
-    // Check if a draft already exists for this SOP
-    if ($sopStore.currentSOP?.activeDraftId) {
-      // Draft exists, redirect to it
-      goto(`/sops/${sopId}?draftId=${$sopStore.currentSOP.activeDraftId}`);
-      return $sopStore.currentSOP.activeDraftId;
-    }
-
-    // No draft exists, create one (copy-on-write)
-    try {
-      const draft = await sopStore.saveDraft(sopId, {
-        description: localDescription,
-        materials: localMaterials,
-        equipment: localEquipment,
-        changeSummary: 'Auto-created draft',
-        steps: localSteps.map(s => ({
-          stepNumber: s.stepNumber,
-          title: s.title,
-          instructions: s.instructions,
-          estimatedTimeMinutes: s.estimatedTimeMinutes,
-          imageUrl: s.imageUrl,
-          videoUrl: s.videoUrl,
-          requiresApproval: s.requiresApproval
-        }))
-      });
-      // Redirect to draft mode
-      goto(`/sops/${sopId}?draftId=${draft.id}`);
-      return draft.id;
-    } catch (error) {
-      console.error('Failed to create draft:', error);
-      return null;
-    }
   }
 
   function formatDate(dateString: string): string {
@@ -131,55 +77,11 @@
     expandedSteps = expandedSteps;
   }
 
-  async function saveAsDraft() {
-    if (!$sopStore.currentSOP) return;
-    
-    try {
-      if (isDraftMode && draftId) {
-        // Update existing draft
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Updated draft',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-      } else {
-        // Create new draft
-        const draft = await sopStore.saveDraft(sopId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Created draft',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        // Redirect to draft mode
-        goto(`/sops/${sopId}?draftId=${draft.id}`);
-      }
-    } catch (error) {
-      console.error('Failed to save draft:', error);
-    }
-  }
+
 
   async function publish() {
     // Only allow publishing if in draft mode
-    if (!isDraftMode || !draftId) {
+    if (!isDraftMode || !$sopStore.currentSOP?.activeDraftId) {
       return;
     }
 
@@ -191,8 +93,10 @@
     if (confirm('Are you sure you want to publish this draft? This will create a new version of the SOP.')) {
       try {
         isPublishing = true;
-        await sopStore.publishDraft(draftId, 'Published draft changes');
-        goto(`/sops/${sopId}`);
+        await sopStore.publishDraft($sopStore.currentSOP.activeDraftId, 'Published draft changes');
+        // Reload the SOP to get the published version
+        await sopStore.loadSOP(sopId);
+        isPublishing = false;
       } catch (error) {
         console.error('Failed to publish draft:', error);
         isPublishing = false;
@@ -201,12 +105,13 @@
   }
 
   async function discardChanges() {
-    if (!isDraftMode || !draftId) return;
+    if (!isDraftMode || !$sopStore.currentSOP?.activeDraftId) return;
     
     if (confirm('Are you sure you want to discard this draft? All changes will be lost and you will return to the published version.')) {
       try {
-        await sopStore.deleteDraft(draftId);
-        goto(`/sops/${sopId}`);
+        await sopStore.deleteDraft($sopStore.currentSOP.activeDraftId);
+        // Reload the SOP to get the published version
+        await sopStore.loadSOP(sopId);
       } catch (error) {
         console.error('Failed to discard draft:', error);
       }
@@ -217,33 +122,29 @@
     if (!$sopStore.currentSOP) return;
     
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
+      // Backend auto-creates/updates draft
+      const draftId = $sopStore.currentSOP.activeDraftId || $sopStore.currentSOP.currentVersion?.id;
+      if (!draftId) {
+        console.error('No draft ID available');
         return;
       }
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Updated SOP title',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        editingTitle = false;
-      }
+      await sopStore.updateDraft(draftId, {
+        description: localDescription,
+        materials: localMaterials,
+        equipment: localEquipment,
+        changeSummary: 'Updated SOP title',
+        steps: localSteps.map(s => ({
+          stepNumber: s.stepNumber,
+          title: s.title,
+          instructions: s.instructions,
+          estimatedTimeMinutes: s.estimatedTimeMinutes,
+          imageUrl: s.imageUrl,
+          videoUrl: s.videoUrl,
+          requiresApproval: s.requiresApproval
+        }))
+      });
+      editingTitle = false;
     } catch (error) {
       console.error('Failed to update title:', error);
     }
@@ -253,33 +154,29 @@
     if (!$sopStore.currentSOP) return;
     
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
+      // Backend auto-creates/updates draft
+      const draftId = $sopStore.currentSOP.activeDraftId || $sopStore.currentSOP.currentVersion?.id;
+      if (!draftId) {
+        console.error('No draft ID available');
         return;
       }
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Updated SOP description',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        editingDescription = false;
-      }
+      await sopStore.updateDraft(draftId, {
+        description: localDescription,
+        materials: localMaterials,
+        equipment: localEquipment,
+        changeSummary: 'Updated SOP description',
+        steps: localSteps.map(s => ({
+          stepNumber: s.stepNumber,
+          title: s.title,
+          instructions: s.instructions,
+          estimatedTimeMinutes: s.estimatedTimeMinutes,
+          imageUrl: s.imageUrl,
+          videoUrl: s.videoUrl,
+          requiresApproval: s.requiresApproval
+        }))
+      });
+      editingDescription = false;
     } catch (error) {
       console.error('Failed to update description:', error);
     }
@@ -289,33 +186,29 @@
     if (!$sopStore.currentSOP) return;
     
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
+      // Backend auto-creates/updates draft
+      const draftId = $sopStore.currentSOP.activeDraftId || $sopStore.currentSOP.currentVersion?.id;
+      if (!draftId) {
+        console.error('No draft ID available');
         return;
       }
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Updated materials list',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        editingMaterials = false;
-      }
+      await sopStore.updateDraft(draftId, {
+        description: localDescription,
+        materials: localMaterials,
+        equipment: localEquipment,
+        changeSummary: 'Updated materials list',
+        steps: localSteps.map(s => ({
+          stepNumber: s.stepNumber,
+          title: s.title,
+          instructions: s.instructions,
+          estimatedTimeMinutes: s.estimatedTimeMinutes,
+          imageUrl: s.imageUrl,
+          videoUrl: s.videoUrl,
+          requiresApproval: s.requiresApproval
+        }))
+      });
+      editingMaterials = false;
     } catch (error) {
       console.error('Failed to update materials:', error);
     }
@@ -325,33 +218,29 @@
     if (!$sopStore.currentSOP) return;
     
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
+      // Backend auto-creates/updates draft
+      const draftId = $sopStore.currentSOP.activeDraftId || $sopStore.currentSOP.currentVersion?.id;
+      if (!draftId) {
+        console.error('No draft ID available');
         return;
       }
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: 'Updated equipment list',
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        editingEquipment = false;
-      }
+      await sopStore.updateDraft(draftId, {
+        description: localDescription,
+        materials: localMaterials,
+        equipment: localEquipment,
+        changeSummary: 'Updated equipment list',
+        steps: localSteps.map(s => ({
+          stepNumber: s.stepNumber,
+          title: s.title,
+          instructions: s.instructions,
+          estimatedTimeMinutes: s.estimatedTimeMinutes,
+          imageUrl: s.imageUrl,
+          videoUrl: s.videoUrl,
+          requiresApproval: s.requiresApproval
+        }))
+      });
+      editingEquipment = false;
     } catch (error) {
       console.error('Failed to update equipment:', error);
     }
@@ -360,35 +249,33 @@
   async function saveStep(stepIndex: number) {
     if (!$sopStore.currentSOP) return;
     
+    const step = localSteps[stepIndex];
+    if (!step.id) {
+      console.error('Step ID is missing');
+      return;
+    }
+    
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
-        return;
-      }
+      // Update the step using template ID (backend auto-creates draft if needed)
+      const updatedStep = await sopApi.updateStep(sopId, step.id, {
+        stepNumber: step.stepNumber,
+        title: step.title,
+        instructions: step.instructions,
+        estimatedTimeMinutes: step.estimatedTimeMinutes,
+        imageUrl: step.imageUrl,
+        videoUrl: step.videoUrl,
+        requiresApproval: step.requiresApproval
+      });
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: `Updated step ${localSteps[stepIndex].stepNumber}`,
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-        editingSteps.delete(stepIndex);
-        editingSteps = editingSteps;
-      }
+      // Update local state
+      localSteps[stepIndex] = updatedStep;
+      localSteps = localSteps;
+
+      // Reload the SOP to get the updated state
+      await sopStore.loadSOP(sopId);
+
+      editingSteps.delete(stepIndex);
+      editingSteps = editingSteps;
     } catch (error) {
       console.error('Failed to update step:', error);
     }
@@ -450,54 +337,29 @@
     if (!$sopStore.currentSOP) return;
 
     try {
-      // Ensure we're in draft mode (auto-create if needed)
-      const activeDraftId = await ensureDraftMode();
-      if (!activeDraftId) {
-        console.error('Failed to enter draft mode');
-        return;
-      }
+      // Calculate the next step number
+      const nextStepNumber = localSteps.length > 0 
+        ? Math.max(...localSteps.map(s => s.stepNumber)) + 1 
+        : 1;
 
-      // If we just created/navigated to draft, the page will reload
-      // Only proceed if we're already in draft mode
-      if (isDraftMode && draftId) {
-        // Calculate the next step number
-        const nextStepNumber = localSteps.length > 0 
-          ? Math.max(...localSteps.map(s => s.stepNumber)) + 1 
-          : 1;
+      // Create the new step using template ID (backend auto-creates draft if needed)
+      const createdStep = await sopApi.createStep(sopId, {
+        stepNumber: nextStepNumber,
+        title: newStepTitle.trim(),
+        instructions: '',
+        estimatedTimeMinutes: 0,
+        requiresApproval: false
+      });
 
-        // Create the new step
-        const newStep: SOPStep = {
-          stepNumber: nextStepNumber,
-          title: newStepTitle.trim(),
-          instructions: '',
-          estimatedTimeMinutes: 0,
-          requiresApproval: false
-        };
+      // Add to local steps
+      localSteps = [...localSteps, createdStep];
 
-        // Add to local steps
-        localSteps = [...localSteps, newStep];
+      // Reload the SOP to get the updated state
+      await sopStore.loadSOP(sopId);
 
-        // Save to backend
-        await sopStore.updateDraft(draftId, {
-          description: localDescription,
-          materials: localMaterials,
-          equipment: localEquipment,
-          changeSummary: `Added step ${nextStepNumber}`,
-          steps: localSteps.map(s => ({
-            stepNumber: s.stepNumber,
-            title: s.title,
-            instructions: s.instructions,
-            estimatedTimeMinutes: s.estimatedTimeMinutes,
-            imageUrl: s.imageUrl,
-            videoUrl: s.videoUrl,
-            requiresApproval: s.requiresApproval
-          }))
-        });
-
-        // Reset the form but keep allowing more additions
-        newStepTitle = '';
-        newStepTitleInput?.focus();
-      }
+      // Reset the form but keep allowing more additions
+      newStepTitle = '';
+      newStepTitleInput?.focus();
     } catch (error) {
       console.error('Failed to add step:', error);
     }
@@ -599,7 +461,7 @@
                   DRAFT MODE
                 </span>
                 <p class="text-sm text-gray-600 dark:text-gray-400">
-                  Last updated: {formatDate($sopStore.currentDraft?.updatedAt || $sopStore.currentSOP.updatedAt)}
+                  Last updated: {formatDate($sopStore.currentSOP.currentVersion?.updatedAt || $sopStore.currentSOP.updatedAt)}
                 </p>
               </div>
             {:else if $sopStore.currentSOP.currentVersion}

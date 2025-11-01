@@ -126,9 +126,13 @@ function createSOPStore() {
     async saveDraft(id: number, data: Parameters<typeof sopApi.saveDraft>[1]) {
       update(state => ({ ...state, loading: true, error: null }));
       try {
-        const draft = await sopApi.saveDraft(id, data);
-        update(state => ({ ...state, currentDraft: draft, loading: false }));
-        return draft;
+        const updatedSOP = await sopApi.saveDraft(id, data);
+        update(state => ({ 
+          ...state, 
+          currentSOP: updatedSOP,
+          loading: false 
+        }));
+        return updatedSOP;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to save draft';
         update(state => ({ ...state, error: message, loading: false }));
@@ -139,9 +143,13 @@ function createSOPStore() {
     async updateDraft(draftId: number, data: Parameters<typeof sopApi.updateDraft>[1]) {
       update(state => ({ ...state, loading: true, error: null }));
       try {
-        const draft = await sopApi.updateDraft(draftId, data);
-        update(state => ({ ...state, currentDraft: draft, loading: false }));
-        return draft;
+        const updatedSOP = await sopApi.updateDraft(draftId, data);
+        update(state => ({ 
+          ...state, 
+          currentSOP: updatedSOP,
+          loading: false 
+        }));
+        return updatedSOP;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to update draft';
         update(state => ({ ...state, error: message, loading: false }));

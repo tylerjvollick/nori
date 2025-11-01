@@ -76,3 +76,37 @@ func (r *SOPStepRepository) UpdateWithTx(tx *gorm.DB, step *models.SOPStep) erro
 func (r *SOPStepRepository) DeleteWithTx(tx *gorm.DB, id int) error {
 	return tx.Delete(&models.SOPStep{}, id).Error
 }
+
+// GetByIDAndVersionID gets a step by ID and verifies it belongs to the specified version
+func (r *SOPStepRepository) GetByIDAndVersionID(stepID int, versionID int) (*models.SOPStep, error) {
+	var step models.SOPStep
+	err := r.db.Where("id = ? AND sop_template_version_id = ?", stepID, versionID).First(&step).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("step not found in this version")
+		}
+		return nil, err
+	}
+	return &step, nil
+}
+
+// GetMaxStepNumber gets the highest step number for a version
+func (r *SOPStepRepository) GetMaxStepNumber(versionID int) (int, error) {
+	var maxStepNumber int
+	err := r.db.Model(&models.SOPStep{}).
+		Where("sop_template_version_id = ?", versionID).
+		Select("COALESCE(MAX(step_number), 0)").
+		Scan(&maxStepNumber).Error
+	return maxStepNumber, err
+}
+
+// UpdateStepNumbersWithTx updates step numbers in bulk (for reordering)
+func (r *SOPStepRepository) UpdateStepNumbersWithTx(tx *gorm.DB, updates map[int]int) error {
+	// updates is a map of stepID -> newStepNumber
+	for stepID, newStepNumber := range updates {
+		if err := tx.Model(&models.SOPStep{}).Where("id = ?", stepID).Update("step_number", newStepNumber).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}

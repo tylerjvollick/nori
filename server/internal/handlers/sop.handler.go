@@ -29,6 +29,12 @@ func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App) {
 	group.Post("/drafts/:draftId/publish", auth.AuthMiddleware(), h.PublishDraft)
 	group.Delete("/drafts/:draftId", auth.AuthMiddleware(), h.DeleteDraft)
 
+	// Step operation routes - work with template ID and auto-resolve to draft
+	group.Post("/:id/steps", auth.AuthMiddleware(), h.CreateStep)
+	group.Put("/:id/steps/:stepId", auth.AuthMiddleware(), h.UpdateStep)
+	group.Delete("/:id/steps/:stepId", auth.AuthMiddleware(), h.DeleteStep)
+	group.Patch("/:id/steps/reorder", auth.AuthMiddleware(), h.ReorderSteps)
+
 	// Version routes (must come before generic /:id route)
 	group.Get("/versions/:versionId", auth.AuthMiddleware(), h.GetSOPVersion)
 
@@ -298,14 +304,21 @@ func (h *SOPHandler) SaveDraft(c *fiber.Ctx) error {
 		})
 	}
 
-	draft, err := h.sopService.SaveDraft(id, &dto, authDTO.User.ID)
+	if _, err := h.sopService.SaveDraft(id, &dto, authDTO.User.ID); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Get the full template with the draft as CurrentVersion
+	template, err := h.sopService.GetSOP(id)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	return c.Status(http.StatusCreated).JSON(h.versionToResponse(draft))
+	return c.Status(http.StatusCreated).JSON(h.templateToResponse(template))
 }
 
 // UpdateDraft updates an existing draft version
@@ -338,7 +351,15 @@ func (h *SOPHandler) UpdateDraft(c *fiber.Ctx) error {
 		})
 	}
 
-	return c.Status(http.StatusOK).JSON(h.versionToResponse(draft))
+	// Get the full template with the updated draft as CurrentVersion
+	template, err := h.sopService.GetSOP(draft.SOPTemplateID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(h.templateToResponse(template))
 }
 
 // PublishDraft publishes a draft version
@@ -484,4 +505,165 @@ func (h *SOPHandler) GetDraft(c *fiber.Ctx) error {
 
 	response := h.versionToResponse(version)
 	return c.JSON(response)
+}
+
+// Individual step operation handlers
+
+// CreateStep creates a single step in the SOP's draft (creates draft if needed)
+func (h *SOPHandler) CreateStep(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	templateID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid template id",
+		})
+	}
+
+	var dto dtos.CreateStepDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	step, err := h.sopService.CreateStepForTemplate(templateID, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := h.stepToResponse(step)
+	return c.Status(http.StatusCreated).JSON(response)
+}
+
+// UpdateStep updates a single step in the SOP's draft
+func (h *SOPHandler) UpdateStep(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	templateID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid template id",
+		})
+	}
+
+	stepID, err := strconv.Atoi(c.Params("stepId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid step id",
+		})
+	}
+
+	var dto dtos.UpdateStepDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	step, err := h.sopService.UpdateStepForTemplate(templateID, stepID, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := h.stepToResponse(step)
+	return c.Status(http.StatusOK).JSON(response)
+}
+
+// DeleteStep deletes a single step from the SOP's draft
+func (h *SOPHandler) DeleteStep(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	templateID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid template id",
+		})
+	}
+
+	stepID, err := strconv.Atoi(c.Params("stepId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid step id",
+		})
+	}
+
+	if err := h.sopService.DeleteStepForTemplate(templateID, stepID, authDTO.User.ID); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusNoContent).Send(nil)
+}
+
+// ReorderSteps reorders steps in the SOP's draft
+func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	templateID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid template id",
+		})
+	}
+
+	var dto dtos.ReorderStepsDTO
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	steps, err := h.sopService.ReorderStepsForTemplate(templateID, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	response := []dtos.SOPStepResponseDTO{}
+	for _, step := range steps {
+		response = append(response, *h.stepToResponse(&step))
+	}
+
+	return c.Status(http.StatusOK).JSON(response)
+}
+
+// Helper function to convert a step model to response DTO
+func (h *SOPHandler) stepToResponse(step *models.SOPStep) *dtos.SOPStepResponseDTO {
+	return &dtos.SOPStepResponseDTO{
+		ID:                   step.ID,
+		StepNumber:           step.StepNumber,
+		Title:                step.Title,
+		Instructions:         step.Instructions,
+		EstimatedTimeMinutes: step.EstimatedTimeMinutes,
+		ImageURL:             step.ImageURL,
+		VideoURL:             step.VideoURL,
+		RequiresApproval:     step.RequiresApproval,
+	}
 }
