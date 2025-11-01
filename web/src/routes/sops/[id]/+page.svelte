@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { sopStore } from '$lib/stores/sop';
   import type { SOPStep } from '$lib/api/sop';
+  import Button from '$lib/components/ui/Button.svelte';
 
   let sopId: number;
   let draftId: number | null = null;
@@ -19,6 +20,7 @@
   let creatingNewStep = false;
   let newStepTitle = '';
   let newStepTitleInput: HTMLInputElement;
+  let showMoreActionsMenu = false;
 
   // Local editable state
   let localTitle = '';
@@ -881,43 +883,55 @@
         <!-- Actions -->
         <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
           <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Actions</h3>
-          <div class="space-y-2">
-            <!-- Publish Button (only in draft mode) -->
-            {#if isDraftMode}
-              <button
-                on:click={publish}
-                disabled={isPublishing}
-                class="w-full px-3 py-2 rounded-lg text-sm transition-colors font-medium {!isPublishing ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
+          <div class="flex items-center justify-between gap-2">
+            <!-- Left: Publish and Discard Buttons -->
+            <div class="flex items-center gap-2">
+              <Button
+                onclick={publish}
+                disabled={!isDraftMode || isPublishing}
+                size="sm"
               >
-                {isPublishing ? 'Publishing...' : 'Publish Draft'}
-              </button>
-            {/if}
+                {isPublishing ? 'Publishing...' : 'Publish'}
+              </Button>
+              
+              {#if isDraftMode}
+                <Button
+                  onclick={discardChanges}
+                  variant="ghost"
+                  size="sm"
+                >
+                  Discard Changes
+                </Button>
+              {/if}
+            </div>
             
-            <!-- Discard Changes Button (only in draft mode) -->
-            {#if isDraftMode}
+            <!-- Right: Three-dot menu -->
+            <div class="relative">
               <button
-                on:click={discardChanges}
-                class="w-full bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                on:click={() => showMoreActionsMenu = !showMoreActionsMenu}
+                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                aria-label="More actions"
               >
-                Discard Changes
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                </svg>
               </button>
-            {/if}
-            
-            <!-- Utility Buttons (only in non-draft mode) -->
-            {#if !isDraftMode}
-              <button
-                on:click={loadVersionHistory}
-                class="w-full bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-              >
-                {showVersionHistory ? 'Hide' : 'Show'} Version History
-              </button>
-              <button
-                on:click={handleDelete}
-                class="w-full bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-              >
-                Delete SOP
-              </button>
-            {/if}
+              
+              <!-- Dropdown menu -->
+              {#if showMoreActionsMenu}
+                <div class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10">
+                  <button
+                    on:click={() => {
+                      handleDelete();
+                      showMoreActionsMenu = false;
+                    }}
+                    class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Delete SOP
+                  </button>
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
 
@@ -934,9 +948,21 @@
               <span class="text-gray-900 dark:text-white ml-2">{formatDate($sopStore.currentSOP.updatedAt)}</span>
             </div>
             {#if $sopStore.currentSOP.currentVersion}
-              <div>
-                <span class="text-gray-600 dark:text-gray-400">Version:</span>
-                <span class="text-gray-900 dark:text-white ml-2">{$sopStore.currentSOP.currentVersion.versionNumber}</span>
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-gray-600 dark:text-gray-400">Version:</span>
+                  <span class="text-gray-900 dark:text-white ml-2">{$sopStore.currentSOP.currentVersion.versionNumber}</span>
+                </div>
+                <button
+                  on:click={loadVersionHistory}
+                  class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                  aria-label="Show version history"
+                  title="Show version history"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
               </div>
             {/if}
           </div>
