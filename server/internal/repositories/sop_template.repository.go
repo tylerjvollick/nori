@@ -32,6 +32,18 @@ func (r *SOPTemplateRepository) GetByID(id int) (*models.SOPTemplate, error) {
 	return &template, nil
 }
 
+func (r *SOPTemplateRepository) GetByIDWithTx(tx *gorm.DB, id int) (*models.SOPTemplate, error) {
+	var template models.SOPTemplate
+	err := tx.Preload("CurrentVersion.Steps").Preload("CurrentVersion").First(&template, id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("SOP template not found")
+		}
+		return nil, err
+	}
+	return &template, nil
+}
+
 func (r *SOPTemplateRepository) GetAll() ([]models.SOPTemplate, error) {
 	var templates []models.SOPTemplate
 	err := r.db.Preload("CurrentVersion.Steps").Preload("CurrentVersion").Find(&templates).Error
@@ -54,6 +66,12 @@ func (r *SOPTemplateRepository) Delete(id int) error {
 
 func (r *SOPTemplateRepository) UpdateCurrentVersion(templateID int, versionID int) error {
 	return r.db.Model(&models.SOPTemplate{}).
+		Where("id = ?", templateID).
+		Update("current_version_id", versionID).Error
+}
+
+func (r *SOPTemplateRepository) UpdateCurrentVersionWithTx(tx *gorm.DB, templateID int, versionID int) error {
+	return tx.Model(&models.SOPTemplate{}).
 		Where("id = ?", templateID).
 		Update("current_version_id", versionID).Error
 }

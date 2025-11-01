@@ -417,29 +417,28 @@ func (s *SOPService) PublishDraft(draftID int, changeSummary string) (*models.SO
 			return fmt.Errorf("version is not a draft")
 		}
 
-		// 3. Update the draft to published
+		// 3. Update the draft to published (using transaction)
 		draft.Status = models.VersionStatusPublished
 		summary := changeSummary
 		draft.ChangeSummary = &summary
 
-		if err := s.versionRepo.Update(draft); err != nil {
+		if err := s.versionRepo.UpdateWithTx(tx, draft); err != nil {
 			log.Println("Failed to publish draft:", err)
 			return fmt.Errorf("failed to publish draft: %w", err)
 		}
 
-		// 4. Update the template's current_version_id
-		existingTemplate, err := s.templateRepo.GetByID(draft.SOPTemplateID)
-		if err != nil {
-			return fmt.Errorf("failed to get template: %w", err)
-		}
-
-		existingTemplate.CurrentVersionID = &draft.ID
-		if err := s.templateRepo.Update(existingTemplate); err != nil {
+		// 4. Update the template's current_version_id (using transaction)
+		if err := s.templateRepo.UpdateCurrentVersionWithTx(tx, draft.SOPTemplateID, draft.ID); err != nil {
 			log.Println("Failed to update template current version:", err)
 			return fmt.Errorf("failed to update template current version: %w", err)
 		}
 
-		existingTemplate.CurrentVersion = draft
+		// 5. Reload the template with the updated current version (using transaction)
+		existingTemplate, err := s.templateRepo.GetByIDWithTx(tx, draft.SOPTemplateID)
+		if err != nil {
+			return fmt.Errorf("failed to get template: %w", err)
+		}
+
 		template = existingTemplate
 		return nil
 	})
