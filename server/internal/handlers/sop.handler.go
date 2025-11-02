@@ -33,7 +33,7 @@ func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App) {
 	group.Post("/:id/steps", auth.AuthMiddleware(), h.CreateStep)
 	group.Put("/:id/steps/:stepId", auth.AuthMiddleware(), h.UpdateStep)
 	group.Delete("/:id/steps/:stepId", auth.AuthMiddleware(), h.DeleteStep)
-	group.Patch("/:id/steps/reorder", auth.AuthMiddleware(), h.ReorderSteps)
+	group.Patch("/:id/steps/:stepId/reorder", auth.AuthMiddleware(), h.ReorderSteps)
 
 	// Version routes (must come before generic /:id route)
 	group.Get("/versions/:versionId", auth.AuthMiddleware(), h.GetSOPVersion)
@@ -266,7 +266,7 @@ func (h *SOPHandler) versionToResponse(version *models.SOPTemplateVersion) *dtos
 		for _, step := range version.Steps {
 			steps = append(steps, dtos.SOPStepResponseDTO{
 				ID:                   step.ID,
-				StepNumber:           step.StepNumber,
+				Order:                step.Order,
 				Title:                step.Title,
 				Instructions:         step.Instructions,
 				EstimatedTimeMinutes: step.EstimatedTimeMinutes,
@@ -616,7 +616,7 @@ func (h *SOPHandler) DeleteStep(c *fiber.Ctx) error {
 	return c.Status(http.StatusNoContent).Send(nil)
 }
 
-// ReorderSteps reorders steps in the SOP's draft
+// ReorderSteps reorders a single step in the SOP's draft
 func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -632,25 +632,28 @@ func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
 		})
 	}
 
-	var dto dtos.ReorderStepsDTO
+	stepID, err := strconv.Atoi(c.Params("stepId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid step id",
+		})
+	}
+
+	var dto dtos.ReorderStepDTO
 	if err := c.BodyParser(&dto); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid request body",
 		})
 	}
 
-	steps, err := h.sopService.ReorderStepsForTemplate(templateID, &dto, authDTO.User.ID)
+	step, err := h.sopService.ReorderStepForTemplate(templateID, stepID, &dto, authDTO.User.ID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	response := []dtos.SOPStepResponseDTO{}
-	for _, step := range steps {
-		response = append(response, *h.stepToResponse(&step))
-	}
-
+	response := h.stepToResponse(step)
 	return c.Status(http.StatusOK).JSON(response)
 }
 
@@ -658,7 +661,7 @@ func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
 func (h *SOPHandler) stepToResponse(step *models.SOPStep) *dtos.SOPStepResponseDTO {
 	return &dtos.SOPStepResponseDTO{
 		ID:                   step.ID,
-		StepNumber:           step.StepNumber,
+		Order:                step.Order,
 		Title:                step.Title,
 		Instructions:         step.Instructions,
 		EstimatedTimeMinutes: step.EstimatedTimeMinutes,

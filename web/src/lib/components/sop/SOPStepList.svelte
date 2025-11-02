@@ -1,0 +1,359 @@
+<script lang="ts">
+  import { dndzone } from 'svelte-dnd-action';
+  import { sopApi } from '$lib/api/sop';
+  import { sopStore } from '$lib/stores/sop';
+  import type { SOPStep } from '$lib/api/sop';
+  import SOPStepItem from './SOPStepItem.svelte';
+  import SOPStepForm from './SOPStepForm.svelte';
+
+  interface Props {
+    steps: SOPStep[];
+    sopId: number;
+    isDraftMode: boolean;
+    onStepsChange?: (steps: SOPStep[]) => void;
+  }
+
+  let { steps = [], sopId, isDraftMode = false, onStepsChange }: Props = $props();
+
+  // Local state
+  let localSteps = $state<SOPStep[]>([...steps]);
+  let expandedSteps = $state(new Set<number>());
+  let editingSteps = $state(new Set<number>());
+  let creatingNewStep = $state(false);
+  let newStepTitle = $state('');
+  let newStepTitleInput = $state<HTMLInputElement>();
+  let isReordering = $state(false);
+  let isDragging = $state(false);
+
+  // DnD uses localSteps directly - all steps from backend have IDs
+  // No need to wrap in extra objects
+
+  // Update local state when props change
+  $effect(() => {
+    localSteps = [...steps];
+  });
+
+  // Notify parent of changes
+  function notifyChange() {
+    if (onStepsChange) {
+      onStepsChange(localSteps);
+    }
+  }
+
+  function toggleStep(stepId: number) {
+    if (expandedSteps.has(stepId)) {
+      expandedSteps.delete(stepId);
+    } else {
+      expandedSteps.add(stepId);
+    }
+    expandedSteps = expandedSteps;
+  }
+
+  function startAddingStep() {
+    creatingNewStep = true;
+    // Focus the input after state updates
+    setTimeout(() => {
+      newStepTitleInput?.focus();
+    }, 0);
+  }
+
+  function cancelAddingStep() {
+    creatingNewStep = false;
+    newStepTitle = '';
+  }
+
+  async function saveNewStep() {
+    if (!newStepTitle.trim()) return;
+
+    try {
+      const newStep = await sopApi.createStep(sopId, {
+        title: newStepTitle.trim()
+      });
+
+      // Reload SOP to get updated steps with correct order
+      await sopStore.loadSOP(sopId);
+
+      // Reset form
+      newStepTitle = '';
+      creatingNewStep = false;
+    } catch (error) {
+      console.error('Failed to create step:', error);
+    }
+  }
+
+  function handleNewStepKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveNewStep();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      saveNewStep();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelAddingStep();
+    }
+  }
+
+  async function saveStep(stepIndex: number) {
+    if (!localSteps[stepIndex]) return;
+
+    const step = localSteps[stepIndex];
+    
+    try {
+      await sopApi.updateStep(sopId, step.id, {
+        title: step.title,
+        instructions: step.instructions,
+        estimatedTimeMinutes: step.estimatedTimeMinutes,
+        requiresApproval: step.requiresApproval
+      });
+
+      // Reload SOP to get updated data
+      await sopStore.loadSOP(sopId);
+
+      // Exit edit mode
+      editingSteps.delete(stepIndex);
+      editingSteps = editingSteps;
+    } catch (error) {
+      console.error('Failed to update step:', error);
+    }
+  }
+
+  function startEditingStep(stepIndex: number) {
+    editingSteps.add(stepIndex);
+    editingSteps = editingSteps;
+  }
+
+  function cancelEditingStep(stepIndex: number) {
+    editingSteps.delete(stepIndex);
+    editingSteps = editingSteps;
+    // Reset to original values
+    localSteps = [...steps];
+  }
+
+  // DnD event handlers
+  function handleDndConsider(e: CustomEvent) {
+    // Update localSteps based on the new order during dragging
+    localSteps = e.detail.items;
+    console.log('handleDndConsider', localSteps.map(e => ({ id: e.id, order: e.order })))
+
+    // Track if we're actively dragging
+    if (!isDragging) {
+      isDragging = true;
+      console.log('Started dragging');
+    }
+  }
+
+  async function handleDndFinalize(e: CustomEvent) {
+    // Update localSteps based on the final order
+    const newLocalSteps = e.detail.items;
+    
+    // Only allow reordering in draft mode
+    if (!isDraftMode) {
+      console.log('Not in draft mode, skipping reorder');
+      localSteps = newLocalSteps;
+      return;
+    }
+    
+    // Find which item was moved
+    const info = e.detail.info;
+    console.log('DnD finalize info:', info);
+    
+    // Check if this was a real drag (not just a click)
+    if (!info) {
+      console.log('No info, skipping reorder');
+      localSteps = newLocalSteps;
+      return;
+    }
+    
+    const movedItemId = info.id;
+    const newIndex = newLocalSteps.findIndex((item: any) => item.id === movedItemId);
+    
+    console.log('Moved item:', movedItemId, 'to index:', newIndex);
+    
+    if (newIndex === -1) {
+      console.log('Invalid index, skipping reorder');
+      localSteps = newLocalSteps;
+      return;
+    }
+    
+    // Reset dragging state first
+    isDragging = false;
+    console.log('Stopped dragging');
+    
+    // Call backend to reorder
+    await handleReorder(movedItemId, newIndex, newLocalSteps);
+  }
+
+  async function handleReorder(stepId: number, newIndex: number, newLocalSteps: SOPStep[]) {
+    try {
+      isReordering = true;
+      
+      // Determine beforeStepId and afterStepId based on newIndex
+      // beforeStepId: the step with LOWER lexicographic order (comes first in sort)
+      // afterStepId: the step with HIGHER lexicographic order (comes second in sort)
+      let beforeStepId: number | undefined;
+      let afterStepId: number | undefined;
+      
+      if (newIndex > 0) {
+        // The step at index-1 has a lower order value
+        beforeStepId = newLocalSteps[newIndex - 1].id;
+      }
+      
+      if (newIndex < newLocalSteps.length - 1) {
+        // The step at index+1 has a higher order value
+        afterStepId = newLocalSteps[newIndex + 1].id;
+      }
+      
+      console.log('Reorder API call:', { stepId, beforeStepId, afterStepId, newIndex });
+      
+      // Call backend API
+      await sopApi.reorderStep(sopId, stepId, {
+        beforeStepId,
+        afterStepId
+      });
+      
+      // Update local state optimistically
+      localSteps = newLocalSteps;
+      notifyChange();
+      
+      // Reload the SOP to get the updated order from backend
+      await sopStore.loadSOP(sopId);
+      
+      isReordering = false;
+    } catch (error) {
+      console.error('Failed to reorder step:', error);
+      isReordering = false;
+      // Reload to reset to correct order
+      await sopStore.loadSOP(sopId);
+    }
+  }
+</script>
+
+<div>
+  {#if localSteps && localSteps.length > 0}
+    <div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
+        <button
+          onclick={startAddingStep}
+          class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+        >
+          + Add Step
+        </button>
+      </div>
+    
+      <div 
+        class="space-y-2 {isDragging ? 'dragging-active' : ''}"
+        use:dndzone={{ items: localSteps, flipDurationMs: 200, dropTargetStyle: { outline: 'none' }, dragDisabled: !isDraftMode }}
+        onconsider={handleDndConsider}
+        onfinalize={handleDndFinalize}
+      >
+        {#each localSteps as step, index (step.id)}
+          <SOPStepItem
+            bind:step={localSteps[index]}
+            stepIndex={index}
+            displayIndex={index + 1}
+            {isDraftMode}
+            expanded={expandedSteps.has(step.id)}
+            editing={editingSteps.has(index)}
+            ontoggle={() => toggleStep(step.id)}
+            onsave={() => saveStep(index)}
+            oncancel={() => cancelEditingStep(index)}
+            onedit={() => startEditingStep(index)}
+          />
+        {/each}
+
+        <!-- New Step Form -->
+        {#if creatingNewStep}
+          <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+            <div class="flex items-center gap-3 p-4">
+              <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+                {localSteps.length + 1}
+              </span>
+              <input
+                type="text"
+                bind:this={newStepTitleInput}
+                bind:value={newStepTitle}
+                onkeydown={handleNewStepKeydown}
+                placeholder="Enter step title and press Enter or Tab..."
+                class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <button
+                onclick={cancelAddingStep}
+                class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                aria-label="Cancel"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {:else}
+    <!-- No steps yet -->
+    <div>
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
+        <button
+          onclick={startAddingStep}
+          class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+        >
+          + Add Step
+        </button>
+      </div>
+      
+      {#if creatingNewStep}
+        <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+          <div class="flex items-center gap-3 p-4">
+            <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+              1
+            </span>
+            <input
+              type="text"
+              bind:this={newStepTitleInput}
+              bind:value={newStepTitle}
+              onkeydown={handleNewStepKeydown}
+              placeholder="Enter step title and press Enter or Tab..."
+              class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <button
+              onclick={cancelAddingStep}
+              class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+              aria-label="Cancel"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      {:else}
+        <p class="text-gray-600 dark:text-gray-400 text-sm">No steps yet. Click "Add Step" to create your first step.</p>
+      {/if}
+    </div>
+  {/if}
+</div>
+
+<style>
+  /* Drop indicator styling */
+  :global([data-is-dnd-shadow-item-hint="true"]) {
+    border: 2px solid #3b82f6 !important;
+    background: transparent !important;
+    height: 4px !important;
+    border-radius: 2px;
+    margin: 8px 0;
+  }
+
+  /* Make dragged item semi-transparent */
+  :global(.step-item[aria-grabbed="true"]) {
+    opacity: 0.5;
+  }
+
+  /* Smooth transitions */
+  :global(.dragging-active .step-item) {
+    transition: transform 200ms ease;
+  }
+</style>

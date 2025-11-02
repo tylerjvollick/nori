@@ -44,6 +44,21 @@
 <div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
   <div class="max-w-md w-full space-y-8">
     <div>
+      <div class="flex justify-center">
+        <div class="w-16 h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
+          <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
+          </svg>
+        </div>
+      </div>
+      <h1 class="mt-4 text-center text-4xl font-bold text-gray-900 dark:text-white">
+        Nori
+      </h1>
       <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
         Sign in to your account
       </h2>

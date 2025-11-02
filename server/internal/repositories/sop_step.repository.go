@@ -41,7 +41,15 @@ func (r *SOPStepRepository) GetByID(id int) (*models.SOPStep, error) {
 func (r *SOPStepRepository) GetByVersionID(versionID int) ([]models.SOPStep, error) {
 	var steps []models.SOPStep
 	err := r.db.Where("sop_template_version_id = ?", versionID).
-		Order("step_number ASC").
+		Order("\"order\" ASC").
+		Find(&steps).Error
+	return steps, err
+}
+
+func (r *SOPStepRepository) GetByVersionIDWithTx(tx *gorm.DB, versionID int) ([]models.SOPStep, error) {
+	var steps []models.SOPStep
+	err := tx.Where("sop_template_version_id = ?", versionID).
+		Order("\"order\" ASC").
 		Find(&steps).Error
 	return steps, err
 }
@@ -90,23 +98,47 @@ func (r *SOPStepRepository) GetByIDAndVersionID(stepID int, versionID int) (*mod
 	return &step, nil
 }
 
-// GetMaxStepNumber gets the highest step number for a version
-func (r *SOPStepRepository) GetMaxStepNumber(versionID int) (int, error) {
-	var maxStepNumber int
+// GetLastOrderByVersionID gets the last (highest) order value for a version
+func (r *SOPStepRepository) GetLastOrderByVersionID(versionID int) (string, error) {
+	var lastOrder string
 	err := r.db.Model(&models.SOPStep{}).
 		Where("sop_template_version_id = ?", versionID).
-		Select("COALESCE(MAX(step_number), 0)").
-		Scan(&maxStepNumber).Error
-	return maxStepNumber, err
+		Select("COALESCE(MAX(\"order\"), '')").
+		Scan(&lastOrder).Error
+	return lastOrder, err
 }
 
-// UpdateStepNumbersWithTx updates step numbers in bulk (for reordering)
-func (r *SOPStepRepository) UpdateStepNumbersWithTx(tx *gorm.DB, updates map[int]int) error {
-	// updates is a map of stepID -> newStepNumber
-	for stepID, newStepNumber := range updates {
-		if err := tx.Model(&models.SOPStep{}).Where("id = ?", stepID).Update("step_number", newStepNumber).Error; err != nil {
-			return err
+// GetOrderBeforeAndAfter gets the order values of steps before and after a given position
+// Used for reordering steps
+func (r *SOPStepRepository) GetOrderBeforeAndAfter(versionID int, beforeStepID, afterStepID *int) (string, string, error) {
+	var beforeOrder, afterOrder string
+
+	if beforeStepID != nil {
+		var step models.SOPStep
+		if err := r.db.Where("id = ? AND sop_template_version_id = ?", *beforeStepID, versionID).First(&step).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return "", "", err
+			}
+		} else {
+			beforeOrder = step.Order
 		}
 	}
-	return nil
+
+	if afterStepID != nil {
+		var step models.SOPStep
+		if err := r.db.Where("id = ? AND sop_template_version_id = ?", *afterStepID, versionID).First(&step).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				return "", "", err
+			}
+		} else {
+			afterOrder = step.Order
+		}
+	}
+
+	return beforeOrder, afterOrder, nil
+}
+
+// UpdateOrderWithTx updates a step's order value
+func (r *SOPStepRepository) UpdateOrderWithTx(tx *gorm.DB, stepID int, newOrder string) error {
+	return tx.Model(&models.SOPStep{}).Where("id = ?", stepID).Update("\"order\"", newOrder).Error
 }

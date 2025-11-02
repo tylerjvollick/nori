@@ -89,7 +89,7 @@
     
     <!-- Step Number -->
     <span class="flex-shrink-0 text-sm font-medium text-gray-500 dark:text-gray-400 w-8">
-      {step.stepNumber}
+      {index + 1}
     </span>
     
     <!-- Title Input (always visible) -->

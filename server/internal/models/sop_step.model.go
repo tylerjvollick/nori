@@ -7,7 +7,7 @@ import (
 type SOPStep struct {
 	ID                   int       `gorm:"primaryKey;autoIncrement" json:"id"`
 	SOPTemplateVersionID int       `gorm:"not null" json:"sopTemplateVersionId"`
-	StepNumber           int       `gorm:"not null" json:"stepNumber"`
+	Order                string    `gorm:"not null;index" json:"order"`
 	Title                string    `gorm:"not null" json:"title"`
 	Instructions         *string   `json:"instructions,omitempty"`
 	EstimatedTimeMinutes *int      `json:"estimatedTimeMinutes,omitempty"`

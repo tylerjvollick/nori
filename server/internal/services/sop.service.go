@@ -8,6 +8,7 @@ import (
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
+	"github.com/tylerjvollick/nori/internal/utils"
 	"gorm.io/gorm"
 )
 
@@ -69,10 +70,18 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 
 		// 3. Create the steps
 		var steps []models.SOPStep
-		for _, stepDTO := range dto.Steps {
+		for i, stepDTO := range dto.Steps {
+			// Generate order value for each step
+			order := stepDTO.Order
+			if order == "" {
+				// If no order provided, generate based on position
+				orderMap := utils.RebalanceOrders(len(dto.Steps))
+				order = orderMap[i]
+			}
+
 			step := models.SOPStep{
 				SOPTemplateVersionID: version.ID,
-				StepNumber:           stepDTO.StepNumber,
+				Order:                order,
 				Title:                stepDTO.Title,
 				Instructions:         stepDTO.Instructions,
 				EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
@@ -147,10 +156,18 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 
 		// 4. Create the steps for the new version
 		var steps []models.SOPStep
-		for _, stepDTO := range dto.Steps {
+		for i, stepDTO := range dto.Steps {
+			// Generate order value for each step
+			order := stepDTO.Order
+			if order == "" {
+				// If no order provided, generate based on position
+				orderMap := utils.RebalanceOrders(len(dto.Steps))
+				order = orderMap[i]
+			}
+
 			step := models.SOPStep{
 				SOPTemplateVersionID: newVersion.ID,
-				StepNumber:           stepDTO.StepNumber,
+				Order:                order,
 				Title:                stepDTO.Title,
 				Instructions:         stepDTO.Instructions,
 				EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
@@ -281,10 +298,18 @@ func (s *SOPService) SaveDraft(templateID int, dto *dtos.SaveDraftSOPDTO, userID
 
 		// 5. Create the steps for the draft
 		var steps []models.SOPStep
-		for _, stepDTO := range dto.Steps {
+		for i, stepDTO := range dto.Steps {
+			// Generate order value for each step
+			order := stepDTO.Order
+			if order == "" {
+				// If no order provided, generate based on position
+				orderMap := utils.RebalanceOrders(len(dto.Steps))
+				order = orderMap[i]
+			}
+
 			step := models.SOPStep{
 				SOPTemplateVersionID: draft.ID,
-				StepNumber:           stepDTO.StepNumber,
+				Order:                order,
 				Title:                stepDTO.Title,
 				Instructions:         stepDTO.Instructions,
 				EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
@@ -349,20 +374,26 @@ func (s *SOPService) UpdateDraft(draftID int, dto *dtos.SaveDraftSOPDTO, userID 
 			return fmt.Errorf("failed to get existing steps: %w", err)
 		}
 
-		// 6. Create maps for efficient lookup
-		existingStepMap := make(map[int]*models.SOPStep)
+		// 6. Create maps for efficient lookup by order
+		existingStepMap := make(map[string]*models.SOPStep)
 		for i := range existingSteps {
-			existingStepMap[existingSteps[i].StepNumber] = &existingSteps[i]
+			existingStepMap[existingSteps[i].Order] = &existingSteps[i]
 		}
 
-		dtoStepMap := make(map[int]bool)
+		dtoStepMap := make(map[string]bool)
 		var updatedSteps []models.SOPStep
 
 		// 7. Update or insert steps from DTO
-		for _, stepDTO := range dto.Steps {
-			dtoStepMap[stepDTO.StepNumber] = true
+		for i, stepDTO := range dto.Steps {
+			order := stepDTO.Order
+			if order == "" {
+				// If no order provided, generate based on position
+				orderMap := utils.RebalanceOrders(len(dto.Steps))
+				order = orderMap[i]
+			}
+			dtoStepMap[order] = true
 
-			if existingStep, exists := existingStepMap[stepDTO.StepNumber]; exists {
+			if existingStep, exists := existingStepMap[order]; exists {
 				// Update existing step
 				existingStep.Title = stepDTO.Title
 				existingStep.Instructions = stepDTO.Instructions
@@ -380,7 +411,7 @@ func (s *SOPService) UpdateDraft(draftID int, dto *dtos.SaveDraftSOPDTO, userID 
 				// Insert new step
 				newStep := models.SOPStep{
 					SOPTemplateVersionID: existingDraft.ID,
-					StepNumber:           stepDTO.StepNumber,
+					Order:                order,
 					Title:                stepDTO.Title,
 					Instructions:         stepDTO.Instructions,
 					EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
@@ -398,8 +429,8 @@ func (s *SOPService) UpdateDraft(draftID int, dto *dtos.SaveDraftSOPDTO, userID 
 		}
 
 		// 8. Delete steps that are no longer in the DTO
-		for stepNumber, existingStep := range existingStepMap {
-			if !dtoStepMap[stepNumber] {
+		for stepOrder, existingStep := range existingStepMap {
+			if !dtoStepMap[stepOrder] {
 				if err := s.stepRepo.DeleteWithTx(tx, existingStep.ID); err != nil {
 					log.Println("Failed to delete step:", err)
 					return fmt.Errorf("failed to delete step: %w", err)
@@ -549,10 +580,64 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 			return fmt.Errorf("unauthorized to modify this draft")
 		}
 
-		// 2. Create the step
+		// 2. Determine order for the new step
+		var order string
+		if dto.AfterStepID != nil {
+			// Get the step after which we're inserting
+			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, draftID)
+			if err != nil {
+				return fmt.Errorf("failed to get after step: %w", err)
+			}
+
+			// Get the last order to find what comes next
+			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(draftID)
+			if err != nil {
+				return fmt.Errorf("failed to get last order: %w", err)
+			}
+
+			// Generate order after the specified step
+			if afterStep.Order == lastOrder {
+				// Inserting at the end
+				order = utils.GenerateOrderBetween(afterStep.Order, "")
+			} else {
+				// Find the next step
+				allSteps, err := s.stepRepo.GetByVersionID(draftID)
+				if err != nil {
+					return fmt.Errorf("failed to get all steps: %w", err)
+				}
+
+				var nextOrder string
+				foundAfter := false
+				for _, s := range allSteps {
+					if foundAfter {
+						nextOrder = s.Order
+						break
+					}
+					if s.ID == *dto.AfterStepID {
+						foundAfter = true
+					}
+				}
+
+				order = utils.GenerateOrderBetween(afterStep.Order, nextOrder)
+			}
+		} else {
+			// Inserting at the beginning
+			allSteps, err := s.stepRepo.GetByVersionID(draftID)
+			if err != nil {
+				return fmt.Errorf("failed to get all steps: %w", err)
+			}
+
+			if len(allSteps) > 0 {
+				order = utils.GenerateOrderBetween("", allSteps[0].Order)
+			} else {
+				order = utils.GenerateOrderBetween("", "")
+			}
+		}
+
+		// 3. Create the step
 		step = &models.SOPStep{
 			SOPTemplateVersionID: draftID,
-			StepNumber:           dto.StepNumber,
+			Order:                order,
 			Title:                dto.Title,
 			Instructions:         dto.Instructions,
 			EstimatedTimeMinutes: dto.EstimatedTimeMinutes,
@@ -581,14 +666,16 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get or create draft for this template
+		// 1. Get the template (we need it to check current version)
+		template, err := s.templateRepo.GetByID(templateID)
+		if err != nil {
+			return fmt.Errorf("failed to get template: %w", err)
+		}
+
+		// 2. Get or create draft for this template
 		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
 		if err != nil || draft == nil {
 			// No draft exists, create one based on current version
-			template, err := s.templateRepo.GetByID(templateID)
-			if err != nil {
-				return fmt.Errorf("failed to get template: %w", err)
-			}
 
 			// Get latest published version to copy from
 			latestVersionNumber, err := s.versionRepo.GetLatestPublishedVersionNumber(templateID)
@@ -624,7 +711,7 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 					for i, oldStep := range currentSteps {
 						newSteps[i] = models.SOPStep{
 							SOPTemplateVersionID: draft.ID,
-							StepNumber:           oldStep.StepNumber,
+							Order:                oldStep.Order,
 							Title:                oldStep.Title,
 							Instructions:         oldStep.Instructions,
 							EstimatedTimeMinutes: oldStep.EstimatedTimeMinutes,
@@ -636,8 +723,18 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 					if err := s.stepRepo.CreateBatchWithTx(tx, newSteps); err != nil {
 						return fmt.Errorf("failed to copy steps: %w", err)
 					}
+					// Store the newly created steps in the draft so we can reference them later
+					// within this transaction without needing to query the database
+					draft.Steps = newSteps
 				}
 			}
+		} else {
+			// Draft already exists, load its steps from the transaction context
+			existingSteps, err := s.stepRepo.GetByVersionIDWithTx(tx, draft.ID)
+			if err != nil {
+				return fmt.Errorf("failed to get existing draft steps: %w", err)
+			}
+			draft.Steps = existingSteps
 		}
 
 		// Verify the user owns this draft
@@ -645,10 +742,84 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 			return fmt.Errorf("unauthorized to modify this draft")
 		}
 
-		// 2. Create the new step
+		// 3. Determine order for the new step
+		var order string
+		if dto.AfterStepID != nil {
+			// The afterStepID might refer to a step in the published version,
+			// so we need to find the corresponding step in the draft by looking up
+			// its order value first
+
+			// Try to get the step from the draft first
+			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, draft.ID)
+			if err != nil {
+				// If not found in draft, look it up in the current version to get its order
+				if template.CurrentVersion != nil {
+					publishedStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, template.CurrentVersion.ID)
+					if err != nil {
+						return fmt.Errorf("failed to get after step: step not found in this version")
+					}
+
+					// Now find the step with the same order in the draft
+					// Use the in-memory steps we stored earlier to avoid querying uncommitted data
+					draftSteps := draft.Steps
+
+					for i := range draftSteps {
+						if draftSteps[i].Order == publishedStep.Order {
+							afterStep = &draftSteps[i]
+							break
+						}
+					}
+					if afterStep == nil {
+						return fmt.Errorf("failed to find corresponding step in draft with order='%s'", publishedStep.Order)
+					}
+				} else {
+					return fmt.Errorf("failed to get after step: %w", err)
+				}
+			}
+
+			// Get the last order to find what comes next
+			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(draft.ID)
+			if err != nil {
+				return fmt.Errorf("failed to get last order: %w", err)
+			}
+
+			// Generate order after the specified step
+			if afterStep.Order == lastOrder {
+				// Inserting at the end
+				order = utils.GenerateOrderBetween(afterStep.Order, "")
+			} else {
+				// Find the next step using in-memory steps
+				allSteps := draft.Steps
+
+				var nextOrder string
+				foundAfter := false
+				for _, s := range allSteps {
+					if foundAfter {
+						nextOrder = s.Order
+						break
+					}
+					if s.Order == afterStep.Order {
+						foundAfter = true
+					}
+				}
+
+				order = utils.GenerateOrderBetween(afterStep.Order, nextOrder)
+			}
+		} else {
+			// Inserting at the beginning using in-memory steps
+			allSteps := draft.Steps
+
+			if len(allSteps) > 0 {
+				order = utils.GenerateOrderBetween("", allSteps[0].Order)
+			} else {
+				order = utils.GenerateOrderBetween("", "")
+			}
+		}
+
+		// 4. Create the new step
 		step = &models.SOPStep{
 			SOPTemplateVersionID: draft.ID,
-			StepNumber:           dto.StepNumber,
+			Order:                order,
 			Title:                dto.Title,
 			Instructions:         dto.Instructions,
 			EstimatedTimeMinutes: dto.EstimatedTimeMinutes,
@@ -852,9 +1023,9 @@ func (s *SOPService) DeleteStepForTemplate(templateID int, stepID int, userID uu
 	})
 }
 
-// ReorderSteps updates the step numbers for multiple steps (reordering)
-func (s *SOPService) ReorderSteps(draftID int, dto *dtos.ReorderStepsDTO, userID uuid.UUID) ([]models.SOPStep, error) {
-	var steps []models.SOPStep
+// ReorderStep updates the order of a single step by moving it between two other steps
+func (s *SOPService) ReorderStep(draftID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// 1. Verify the draft exists and belongs to the user
@@ -871,24 +1042,28 @@ func (s *SOPService) ReorderSteps(draftID int, dto *dtos.ReorderStepsDTO, userID
 			return fmt.Errorf("unauthorized to modify this draft")
 		}
 
-		// 2. Build the update map
-		updates := make(map[int]int)
-		for _, stepOrder := range dto.Steps {
-			updates[stepOrder.ID] = stepOrder.StepNumber
-		}
-
-		// 3. Update the step numbers
-		if err := s.stepRepo.UpdateStepNumbersWithTx(tx, updates); err != nil {
-			log.Println("Failed to reorder steps:", err)
-			return fmt.Errorf("failed to reorder steps: %w", err)
-		}
-
-		// 4. Load all steps to return
-		steps, err = s.stepRepo.GetByVersionID(draftID)
+		// 2. Get the step to reorder
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draftID)
 		if err != nil {
-			return fmt.Errorf("failed to load steps: %w", err)
+			return fmt.Errorf("failed to get step: %w", err)
 		}
 
+		// 3. Get order values for before and after steps
+		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(draftID, dto.BeforeStepID, dto.AfterStepID)
+		if err != nil {
+			return fmt.Errorf("failed to get order bounds: %w", err)
+		}
+
+		// 4. Generate new order value
+		newOrder := utils.GenerateOrderBetween(beforeOrder, afterOrder)
+
+		// 5. Update the step's order
+		if err := s.stepRepo.UpdateOrderWithTx(tx, stepID, newOrder); err != nil {
+			log.Println("Failed to update step order:", err)
+			return fmt.Errorf("failed to update step order: %w", err)
+		}
+
+		step.Order = newOrder
 		return nil
 	})
 
@@ -896,43 +1071,59 @@ func (s *SOPService) ReorderSteps(draftID int, dto *dtos.ReorderStepsDTO, userID
 		return nil, err
 	}
 
-	return steps, nil
+	return step, nil
 }
 
-// ReorderStepsForTemplate updates step numbers for a template's draft
-func (s *SOPService) ReorderStepsForTemplate(templateID int, dto *dtos.ReorderStepsDTO, userID uuid.UUID) ([]models.SOPStep, error) {
-	var steps []models.SOPStep
+// ReorderStepForTemplate updates the order of a step in the template's draft
+func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+	var step *models.SOPStep
+
+	log.Printf("ReorderStep - templateID: %d, stepID: %d, beforeStepID: %v, afterStepID: %v",
+		templateID, stepID, dto.BeforeStepID, dto.AfterStepID)
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		// 1. Get the draft for this template
 		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
 		if err != nil || draft == nil {
+			log.Printf("ReorderStep - no draft found for template %d: %v", templateID, err)
 			return fmt.Errorf("no draft found for this template")
 		}
+		log.Printf("ReorderStep - found draft ID: %d", draft.ID)
 
 		// Verify the user owns this draft
 		if draft.CreatedBy.String() != userID.String() {
+			log.Printf("ReorderStep - unauthorized: user %s doesn't own draft (owner: %s)", userID.String(), draft.CreatedBy.String())
 			return fmt.Errorf("unauthorized to modify this draft")
 		}
 
-		// 2. Build the update map
-		updates := make(map[int]int)
-		for _, stepOrder := range dto.Steps {
-			updates[stepOrder.ID] = stepOrder.StepNumber
-		}
-
-		// 3. Update the step numbers
-		if err := s.stepRepo.UpdateStepNumbersWithTx(tx, updates); err != nil {
-			log.Println("Failed to reorder steps:", err)
-			return fmt.Errorf("failed to reorder steps: %w", err)
-		}
-
-		// 4. Load all steps to return
-		steps, err = s.stepRepo.GetByVersionID(draft.ID)
+		// 2. Get the step to reorder
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draft.ID)
 		if err != nil {
-			return fmt.Errorf("failed to load steps: %w", err)
+			log.Printf("ReorderStep - failed to get step %d: %v", stepID, err)
+			return fmt.Errorf("failed to get step: %w", err)
+		}
+		log.Printf("ReorderStep - current step order: %s", step.Order)
+
+		// 3. Get order values for before and after steps
+		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(draft.ID, dto.BeforeStepID, dto.AfterStepID)
+		if err != nil {
+			log.Printf("ReorderStep - failed to get order bounds: %v", err)
+			return fmt.Errorf("failed to get order bounds: %w", err)
+		}
+		log.Printf("ReorderStep - beforeOrder: '%s', afterOrder: '%s'", beforeOrder, afterOrder)
+
+		// 4. Generate new order value
+		newOrder := utils.GenerateOrderBetween(beforeOrder, afterOrder)
+		log.Printf("ReorderStep - generated new order: %s", newOrder)
+
+		// 5. Update the step's order
+		if err := s.stepRepo.UpdateOrderWithTx(tx, stepID, newOrder); err != nil {
+			log.Printf("ReorderStep - failed to update step order: %v", err)
+			return fmt.Errorf("failed to update step order: %w", err)
 		}
 
+		step.Order = newOrder
+		log.Printf("ReorderStep - successfully updated step %d to order %s", stepID, newOrder)
 		return nil
 	})
 
@@ -940,5 +1131,5 @@ func (s *SOPService) ReorderStepsForTemplate(templateID int, dto *dtos.ReorderSt
 		return nil, err
 	}
 
-	return steps, nil
+	return step, nil
 }

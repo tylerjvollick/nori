@@ -17,8 +17,8 @@
 - [ ] - updating the description
 - [ ] - navigating to /sops doesn't highlight the SOP nav item in the side bar.
 - [ ] when creating an SOP clicking "enter" adds a step. Clicking "Create SOP" when there's an empty step throws an error as all steps need a title. However, if it's the last step and it's blank let's just assume the user doesn't need it, remove it and submit.
-
-Future Features
+- [ ] log out user when unauthenticated.
+      Future Features
 
 - [] PDF generation of SOPs for printing.
 - [] AI Chat.

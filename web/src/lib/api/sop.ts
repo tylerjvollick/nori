@@ -2,8 +2,8 @@ import { apiClient } from './client';
 
 // Types matching the backend DTOs
 export interface SOPStep {
-  id?: number;
-  stepNumber: number;
+  id: number;
+  order: string;
   title: string;
   instructions?: string;
   estimatedTimeMinutes?: number;
@@ -83,7 +83,7 @@ export interface DraftListItem {
 
 // Step-specific request types
 export interface CreateStepRequest {
-  stepNumber: number;
+  afterStepId?: number;
   title: string;
   instructions?: string;
   estimatedTimeMinutes?: number;
@@ -93,7 +93,6 @@ export interface CreateStepRequest {
 }
 
 export interface UpdateStepRequest {
-  stepNumber?: number;
   title?: string;
   instructions?: string;
   estimatedTimeMinutes?: number;
@@ -102,11 +101,9 @@ export interface UpdateStepRequest {
   requiresApproval?: boolean;
 }
 
-export interface ReorderStepsRequest {
-  steps: Array<{
-    id: number;
-    stepNumber: number;
-  }>;
+export interface ReorderStepRequest {
+  beforeStepId?: number;
+  afterStepId?: number;
 }
 
 class SOPApi {
@@ -180,8 +177,8 @@ class SOPApi {
     return apiClient.delete<void>(`/sops/${templateId}/steps/${stepId}`);
   }
 
-  async reorderSteps(templateId: number, data: ReorderStepsRequest): Promise<SOPStep[]> {
-    return apiClient.patch<SOPStep[]>(`/sops/${templateId}/steps/reorder`, data);
+  async reorderStep(templateId: number, stepId: number, data: ReorderStepRequest): Promise<SOPStep> {
+    return apiClient.patch<SOPStep>(`/sops/${templateId}/steps/${stepId}/reorder`, data);
   }
 }
 

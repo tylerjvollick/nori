@@ -9,11 +9,20 @@
       materials?: string[];
       equipment?: string[];
       steps: Omit<SOPStep, 'id'>[];
+      changeSummary?: string;
     }) => void;
     onCancel?: () => void;
     isSubmitting?: boolean;
     submitButtonText?: string;
     showCancelButton?: boolean;
+    isEditMode?: boolean;
+    initialData?: {
+      name?: string;
+      description?: string;
+      materials?: string[];
+      equipment?: string[];
+      steps?: Omit<SOPStep, 'id'>[];
+    };
   }
   
   let { 
@@ -21,36 +30,45 @@
     onCancel, 
     isSubmitting = false,
     submitButtonText = 'Create SOP',
-    showCancelButton = true
+    showCancelButton = true,
+    isEditMode = false,
+    initialData
   }: SOPFormProps = $props();
 
-  let name = $state('');
-  let description = $state('');
-  let materials: string[] = $state([]);
-  let equipment: string[] = $state([]);
+  let name = $state(initialData?.name || '');
+  let description = $state(initialData?.description || '');
+  let materials: string[] = $state(initialData?.materials || []);
+  let equipment: string[] = $state(initialData?.equipment || []);
   let newMaterialInput = $state('');
   let newEquipmentInput = $state('');
-  let steps: Omit<SOPStep, 'id'>[] = $state([
-    {
-      stepNumber: 1,
-      title: '',
-      instructions: '',
-      estimatedTimeMinutes: undefined,
-      imageUrl: '',
-      videoUrl: '',
-      requiresApproval: false
-    }
-  ]);
+  let changeSummary = $state('');
+  let steps: Omit<SOPStep, 'id'>[] = $state(
+    initialData?.steps && initialData.steps.length > 0
+      ? initialData.steps
+      : [
+          {
+            order: 'a',
+            title: '',
+            instructions: '',
+            estimatedTimeMinutes: undefined,
+            imageUrl: '',
+            videoUrl: '',
+            requiresApproval: false
+          }
+        ]
+  );
   let error = $state('');
   let expandedSteps = $state<Set<number>>(new Set());
   let stepRefs: CollapsibleStep[] = [];
 
   function addStep(focusOnNew = false) {
     const newIndex = steps.length;
+    // Generate order string: 'a', 'b', 'c', ..., 'z', 'aa', 'ab', etc.
+    const order = String.fromCharCode(97 + (newIndex % 26)) + (newIndex >= 26 ? Math.floor(newIndex / 26).toString() : '');
     steps = [
       ...steps,
       {
-        stepNumber: newIndex + 1,
+        order,
         title: '',
         instructions: '',
         estimatedTimeMinutes: undefined,
@@ -97,10 +115,10 @@
 
   function removeStep(index: number) {
     steps = steps.filter((_, i) => i !== index);
-    // Renumber remaining steps
+    // Regenerate order strings for remaining steps
     steps = steps.map((step, i) => ({
       ...step,
-      stepNumber: i + 1
+      order: String.fromCharCode(97 + (i % 26)) + (i >= 26 ? Math.floor(i / 26).toString() : '')
     }));
   }
 
@@ -111,10 +129,10 @@
     const newSteps = [...steps];
     [newSteps[index], newSteps[newIndex]] = [newSteps[newIndex], newSteps[index]];
     
-    // Renumber steps
+    // Regenerate order strings after reordering
     steps = newSteps.map((step, i) => ({
       ...step,
-      stepNumber: i + 1
+      order: String.fromCharCode(97 + (i % 26)) + (i >= 26 ? Math.floor(i / 26).toString() : '')
     }));
   }
 
@@ -149,6 +167,11 @@
       return;
     }
     
+    if (isEditMode && !changeSummary.trim()) {
+      error = 'Change summary is required when updating an SOP';
+      return;
+    }
+    
     if (steps.length === 0) {
       error = 'At least one step is required';
       return;
@@ -162,7 +185,7 @@
 
     // Clean up steps data
     const cleanSteps = steps.map(step => ({
-      stepNumber: step.stepNumber,
+      order: step.order,
       title: step.title.trim(),
       instructions: step.instructions?.trim() || undefined,
       estimatedTimeMinutes: step.estimatedTimeMinutes || undefined,
@@ -176,7 +199,8 @@
       description: description.trim() || undefined,
       materials: materials.length > 0 ? materials : undefined,
       equipment: equipment.length > 0 ? equipment : undefined,
-      steps: cleanSteps
+      steps: cleanSteps,
+      changeSummary: isEditMode ? changeSummary.trim() : undefined
     });
   }
 </script>
@@ -258,6 +282,25 @@
             class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
           ></textarea>
         </div>
+
+        {#if isEditMode}
+          <div>
+            <label for="changeSummary" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Change Summary <span class="text-red-500">*</span>
+            </label>
+            <textarea
+              id="changeSummary"
+              bind:value={changeSummary}
+              placeholder="Describe what changed in this version..."
+              rows="2"
+              class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              required
+            ></textarea>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              This helps track what changed between versions
+            </p>
+          </div>
+        {/if}
 
         <!-- Materials -->
         <div>

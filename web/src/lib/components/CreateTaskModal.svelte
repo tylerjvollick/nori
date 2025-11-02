@@ -282,10 +282,10 @@
                 <div>
                   <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Steps:</h4>
                   <ol class="space-y-2">
-                    {#each selectedSOP.currentVersion.steps as step}
+                    {#each selectedSOP.currentVersion.steps as step, index}
                       <li class="text-sm text-gray-600 dark:text-gray-400">
                         <span class="font-medium text-gray-900 dark:text-white">
-                          {step.stepNumber}. {step.title}
+                          {index + 1}. {step.title}
                         </span>
                         {#if step.estimatedTimeMinutes}
                           <span class="text-xs text-gray-500 dark:text-gray-500 ml-2">

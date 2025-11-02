@@ -2,7 +2,7 @@ package dtos
 
 // CreateSOPStepDTO represents the step data when creating an SOP
 type CreateSOPStepDTO struct {
-	StepNumber           int     `json:"stepNumber" binding:"required"`
+	Order                string  `json:"order"`
 	Title                string  `json:"title" binding:"required"`
 	Instructions         *string `json:"instructions,omitempty"`
 	EstimatedTimeMinutes *int    `json:"estimatedTimeMinutes,omitempty"`
@@ -34,7 +34,7 @@ type UpdateSOPDTO struct {
 // SOPStepResponseDTO represents a step in the response
 type SOPStepResponseDTO struct {
 	ID                   int     `json:"id"`
-	StepNumber           int     `json:"stepNumber"`
+	Order                string  `json:"order"`
 	Title                string  `json:"title"`
 	Instructions         *string `json:"instructions,omitempty"`
 	EstimatedTimeMinutes *int    `json:"estimatedTimeMinutes,omitempty"`
@@ -108,7 +108,7 @@ type DraftListItemDTO struct {
 
 // CreateStepDTO represents the request to create a single step in a draft
 type CreateStepDTO struct {
-	StepNumber           int     `json:"stepNumber" binding:"required"`
+	AfterStepID          *int    `json:"afterStepId,omitempty"`
 	Title                string  `json:"title" binding:"required"`
 	Instructions         *string `json:"instructions,omitempty"`
 	EstimatedTimeMinutes *int    `json:"estimatedTimeMinutes,omitempty"`
@@ -127,13 +127,8 @@ type UpdateStepDTO struct {
 	RequiresApproval     *bool   `json:"requiresApproval,omitempty"`
 }
 
-// ReorderStepsDTO represents the request to reorder steps
-type ReorderStepsDTO struct {
-	Steps []StepOrderDTO `json:"steps" binding:"required,min=1"`
-}
-
-// StepOrderDTO represents a step's ID and its new position
-type StepOrderDTO struct {
-	ID         int `json:"id" binding:"required"`
-	StepNumber int `json:"stepNumber" binding:"required"`
+// ReorderStepDTO represents the request to reorder a single step
+type ReorderStepDTO struct {
+	BeforeStepID *int `json:"beforeStepId,omitempty"`
+	AfterStepID  *int `json:"afterStepId,omitempty"`
 }
