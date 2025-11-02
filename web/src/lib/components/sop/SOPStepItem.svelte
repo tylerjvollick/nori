@@ -50,7 +50,7 @@
         type="button"
       >
         <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
-          {displayIndex + 1}
+          {displayIndex}
         </span>
         <h3 class="text-base font-semibold text-gray-900 dark:text-white">
           {step.title}

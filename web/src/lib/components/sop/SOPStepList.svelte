@@ -42,11 +42,10 @@
 
   function toggleStep(stepId: number) {
     if (expandedSteps.has(stepId)) {
-      expandedSteps.delete(stepId);
+      expandedSteps = new Set([...expandedSteps].filter(id => id !== stepId));
     } else {
-      expandedSteps.add(stepId);
+      expandedSteps = new Set([...expandedSteps, stepId]);
     }
-    expandedSteps = expandedSteps;
   }
 
   function startAddingStep() {
@@ -67,7 +66,8 @@
 
     try {
       const newStep = await sopApi.createStep(sopId, {
-        title: newStepTitle.trim()
+        title: newStepTitle.trim(),
+        afterStepId: localSteps.length > 0 ? localSteps[localSteps.length - 1].id : undefined
       });
 
       // Reload SOP to get updated steps with correct order
@@ -111,21 +111,18 @@
       await sopStore.loadSOP(sopId);
 
       // Exit edit mode
-      editingSteps.delete(stepIndex);
-      editingSteps = editingSteps;
+      editingSteps = new Set([...editingSteps].filter(id => id !== stepIndex));
     } catch (error) {
       console.error('Failed to update step:', error);
     }
   }
 
   function startEditingStep(stepIndex: number) {
-    editingSteps.add(stepIndex);
-    editingSteps = editingSteps;
+    editingSteps = new Set([...editingSteps, stepIndex]);
   }
 
   function cancelEditingStep(stepIndex: number) {
-    editingSteps.delete(stepIndex);
-    editingSteps = editingSteps;
+    editingSteps = new Set([...editingSteps].filter(id => id !== stepIndex));
     // Reset to original values
     localSteps = [...steps];
   }
