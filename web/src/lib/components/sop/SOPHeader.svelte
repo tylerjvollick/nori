@@ -62,7 +62,7 @@
 </div>
 
 <!-- Title Section -->
-<div class="pb-6 border-b border-gray-200 dark:border-gray-700">
+<div class="px-4 pt-4 pb-6 border-b border-gray-200 dark:border-gray-700">
   {#if editing}
     <div class="space-y-3">
       <input
