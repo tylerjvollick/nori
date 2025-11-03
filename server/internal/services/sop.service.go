@@ -1116,7 +1116,75 @@ func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dto
 		newOrder := utils.GenerateOrderBetween(beforeOrder, afterOrder)
 		log.Printf("ReorderStep - generated new order: %s", newOrder)
 
-		// 5. Update the step's order
+		// 5. Check if we need to perform full rebalancing (empty string indicates edge case)
+		if newOrder == "" {
+			log.Printf("ReorderStep - edge case detected, performing full rebalancing")
+
+			// Get all steps in their current order
+			allSteps, err := s.stepRepo.GetByVersionIDWithTx(tx, draft.ID)
+			if err != nil {
+				log.Printf("ReorderStep - failed to get all steps for rebalancing: %v", err)
+				return fmt.Errorf("failed to get steps for rebalancing: %w", err)
+			}
+
+			if len(allSteps) == 0 {
+				log.Printf("ReorderStep - no steps found for rebalancing")
+				return fmt.Errorf("no steps found for rebalancing")
+			}
+
+			log.Printf("ReorderStep - rebalancing %d steps", len(allSteps))
+
+			// Build the desired final order of step IDs
+			var finalStepOrder []int
+			movedStepIncluded := false
+
+			for _, s := range allSteps {
+				// Determine where to insert the moved step
+				if !movedStepIncluded {
+					// Check if we should insert before this step
+					if (beforeOrder == "" && s.ID == allSteps[0].ID) || // Insert at beginning
+						(dto.AfterStepID != nil && s.ID == *dto.AfterStepID) { // Insert after specified step
+						finalStepOrder = append(finalStepOrder, stepID)
+						movedStepIncluded = true
+					}
+				}
+
+				// Skip the moved step in its current position
+				if s.ID != stepID {
+					finalStepOrder = append(finalStepOrder, s.ID)
+				}
+			}
+
+			// If we're inserting at the end, add it now
+			if !movedStepIncluded {
+				finalStepOrder = append(finalStepOrder, stepID)
+			}
+
+			log.Printf("ReorderStep - final step order: %v", finalStepOrder)
+
+			// Generate clean order values for all steps
+			newOrders := utils.RebalanceOrders(len(finalStepOrder))
+
+			// Update all steps with their new order values
+			for i, sid := range finalStepOrder {
+				newOrder := newOrders[i]
+				if err := s.stepRepo.UpdateOrderWithTx(tx, sid, newOrder); err != nil {
+					log.Printf("ReorderStep - failed to update step %d order to %s: %v", sid, newOrder, err)
+					return fmt.Errorf("failed to update step order: %w", err)
+				}
+				log.Printf("ReorderStep - updated step %d to order '%s'", sid, newOrder)
+
+				// Update the step variable if it's the one we're moving
+				if sid == stepID {
+					step.Order = newOrder
+				}
+			}
+
+			log.Printf("ReorderStep - full rebalancing complete")
+			return nil
+		}
+
+		// 6. Update the step's order
 		if err := s.stepRepo.UpdateOrderWithTx(tx, stepID, newOrder); err != nil {
 			log.Printf("ReorderStep - failed to update step order: %v", err)
 			return fmt.Errorf("failed to update step order: %w", err)

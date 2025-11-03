@@ -110,6 +110,9 @@
     if (!$sopStore.currentSOP) return;
     
     try {
+      // Ensure we have a draft
+      await sopStore.ensureDraft(sopId);
+      
       const draftData = {
         description: localDescription,
         materials: localMaterials,
@@ -128,8 +131,6 @@
 
       if ($sopStore.currentSOP.activeDraftId) {
         await sopStore.updateDraft($sopStore.currentSOP.activeDraftId, draftData);
-      } else {
-        await sopStore.saveDraft($sopStore.currentSOP.id, draftData);
       }
       
       editingTitle = false;
@@ -142,6 +143,9 @@
     if (!$sopStore.currentSOP) return;
     
     try {
+      // Ensure we have a draft
+      await sopStore.ensureDraft(sopId);
+      
       const draftData = {
         description: localDescription,
         materials: localMaterials,
@@ -158,11 +162,8 @@
         }))
       };
 
-      // Check if we have an active draft, if not create one
       if ($sopStore.currentSOP.activeDraftId) {
         await sopStore.updateDraft($sopStore.currentSOP.activeDraftId, draftData);
-      } else {
-        await sopStore.saveDraft($sopStore.currentSOP.id, draftData);
       }
       
       editingDescription = false;
@@ -175,6 +176,9 @@
     if (!$sopStore.currentSOP) return;
     
     try {
+      // Ensure we have a draft
+      await sopStore.ensureDraft(sopId);
+      
       const draftData = {
         description: localDescription,
         materials: localMaterials,
@@ -193,8 +197,6 @@
 
       if ($sopStore.currentSOP.activeDraftId) {
         await sopStore.updateDraft($sopStore.currentSOP.activeDraftId, draftData);
-      } else {
-        await sopStore.saveDraft($sopStore.currentSOP.id, draftData);
       }
       
       editingMaterials = false;
@@ -207,6 +209,9 @@
     if (!$sopStore.currentSOP) return;
     
     try {
+      // Ensure we have a draft
+      await sopStore.ensureDraft(sopId);
+      
       const draftData = {
         description: localDescription,
         materials: localMaterials,
@@ -225,8 +230,6 @@
 
       if ($sopStore.currentSOP.activeDraftId) {
         await sopStore.updateDraft($sopStore.currentSOP.activeDraftId, draftData);
-      } else {
-        await sopStore.saveDraft($sopStore.currentSOP.id, draftData);
       }
       
       editingEquipment = false;

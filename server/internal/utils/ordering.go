@@ -12,11 +12,62 @@ const (
 	midChar = 'm' // Roughly middle of the alphabet
 )
 
+// normalizeOrder converts any invalid order strings to use only lowercase letters
+// This handles legacy orders that may contain digits or other characters
+// IMPORTANT: Empty strings are returned as-is (they have special meaning for begin/end positioning)
+func normalizeOrder(s string) string {
+	// Empty strings indicate beginning/end positions - preserve them!
+	if s == "" {
+		return ""
+	}
+
+	// Check if string contains only valid lowercase letters
+	valid := true
+	for _, char := range s {
+		if char < minChar || char > maxChar {
+			valid = false
+			break
+		}
+	}
+
+	if valid {
+		return s
+	}
+
+	// Invalid order detected - convert to valid characters
+	// Digits sort before letters in ASCII, so convert them
+	var result strings.Builder
+	for _, char := range s {
+		if char >= '0' && char <= '9' {
+			// Map digits 0-9 to letters a-j
+			result.WriteRune(minChar + (char - '0'))
+		} else if char >= minChar && char <= maxChar {
+			result.WriteRune(char)
+		} else if char >= 'A' && char <= 'Z' {
+			// Convert uppercase to lowercase
+			result.WriteRune(char + 32)
+		} else {
+			// Invalid character, use midChar
+			result.WriteRune(midChar)
+		}
+	}
+
+	if result.Len() == 0 {
+		return string(midChar)
+	}
+
+	return result.String()
+}
+
 // GenerateOrderBetween generates a lexicographic order string between two existing orders
 // If before is empty, generates an order before after
 // If after is empty, generates an order after before
 // If both are empty, generates a default starting order
 func GenerateOrderBetween(before, after string) string {
+	// Normalize inputs to handle legacy/invalid orders
+	before = normalizeOrder(before)
+	after = normalizeOrder(after)
+
 	// Initial case - no items exist yet
 	if before == "" && after == "" {
 		return string(midChar)
@@ -37,6 +88,8 @@ func GenerateOrderBetween(before, after string) string {
 }
 
 // generateBefore creates an order string that comes before the given string
+// Returns empty string if we can't generate a value before 'a' (edge case requiring rebalance)
+// Note: input should already be normalized by caller
 func generateBefore(s string) string {
 	if len(s) == 0 {
 		return string(minChar)
@@ -44,23 +97,37 @@ func generateBefore(s string) string {
 
 	firstChar := rune(s[0])
 
-	// If it's a digit, we can decrement within digit range
-	if firstChar >= '0' && firstChar <= '9' {
-		if firstChar > '0' {
-			return string(firstChar - 1)
-		}
-		// Already at '0', prepend and add middle character
-		return string('0') + string(midChar)
-	}
-
-	// If it's a lowercase letter
-	if firstChar > minChar {
+	// If it's a lowercase letter and greater than 'a'
+	if firstChar > minChar && firstChar <= maxChar {
 		// Can decrement the first character
 		return string(firstChar - 1)
 	}
 
-	// First char is already 'a' (minChar), use digit '9' which comes before 'a' in PostgreSQL collation
-	return string('9')
+	// First char is already 'a' (minChar)
+	if firstChar == minChar {
+		// For single 'a', we can't go lower - need rebalancing
+		if len(s) == 1 {
+			return ""
+		}
+
+		// For multi-character strings starting with 'a' (like "aam", "aaa", etc.)
+		// Try to find a character we can decrement
+		for i := 1; i < len(s); i++ {
+			char := rune(s[i])
+			if char > minChar {
+				// Found a character we can decrement
+				// Build: prefix + decremented char
+				return s[:i] + string(char-1)
+			}
+		}
+
+		// All characters are 'a' (like "aaa") - can't go lower, need rebalancing
+		return ""
+	}
+
+	// Character is less than 'a' or greater than 'z' - shouldn't happen after normalization
+	// Use fractional approach as fallback
+	return string(minChar) + string(minChar) + string(midChar)
 }
 
 // generateAfter creates an order string that comes after the given string
@@ -80,7 +147,15 @@ func generateAfter(s string) string {
 }
 
 // generateBetween creates an order string between two existing strings
+// Note: inputs should already be normalized by caller
 func generateBetween(before, after string) string {
+	// Ensure inputs are properly ordered
+	if before >= after {
+		// Invalid input - before should be less than after
+		// Return a value that would sort between them by appending
+		return before + string(minChar)
+	}
+
 	// Make both strings the same length by padding with 'a'
 	maxLen := len(before)
 	if len(after) > maxLen {
@@ -105,7 +180,15 @@ func generateBetween(before, after string) string {
 		diff := afterChar - beforeChar
 		if diff > 1 {
 			// Can insert a character between them
-			result.WriteRune(beforeChar + diff/2)
+			midPoint := beforeChar + diff/2
+			// Ensure we stay within lowercase letter range
+			if midPoint >= minChar && midPoint <= maxChar {
+				result.WriteRune(midPoint)
+			} else {
+				// Fallback: use adjacent approach
+				result.WriteRune(beforeChar)
+				result.WriteRune(midChar)
+			}
 			break
 		}
 
@@ -195,9 +278,10 @@ func ValidateOrder(order string) error {
 	}
 
 	for _, char := range order {
-		// Allow digits (0-9) and lowercase letters (a-z)
-		if (char < '0' || char > '9') && (char < minChar || char > maxChar) {
-			return fmt.Errorf("order contains invalid character: %c (must be 0-9 or %c-%c)", char, minChar, maxChar)
+		// Only allow lowercase letters (a-z)
+		// Digits are no longer supported as they cause sorting issues
+		if char < minChar || char > maxChar {
+			return fmt.Errorf("order contains invalid character: %c (must be %c-%c)", char, minChar, maxChar)
 		}
 	}
 

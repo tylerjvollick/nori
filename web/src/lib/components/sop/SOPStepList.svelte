@@ -65,6 +65,9 @@
     if (!newStepTitle.trim()) return;
 
     try {
+      // Ensure we have a draft before creating a step
+      await sopStore.ensureDraft(sopId);
+      
       const newStep = await sopApi.createStep(sopId, {
         title: newStepTitle.trim(),
         afterStepId: localSteps.length > 0 ? localSteps[localSteps.length - 1].id : undefined
@@ -100,6 +103,9 @@
     const step = localSteps[stepIndex];
     
     try {
+      // Ensure we have a draft before updating a step
+      await sopStore.ensureDraft(sopId);
+      
       await sopApi.updateStep(sopId, step.id, {
         title: step.title,
         instructions: step.instructions,
@@ -144,13 +150,6 @@
     // Update localSteps based on the final order
     const newLocalSteps = e.detail.items;
     
-    // Only allow reordering in draft mode
-    if (!isDraftMode) {
-      console.log('Not in draft mode, skipping reorder');
-      localSteps = newLocalSteps;
-      return;
-    }
-    
     // Find which item was moved
     const info = e.detail.info;
     console.log('DnD finalize info:', info);
@@ -177,13 +176,16 @@
     isDragging = false;
     console.log('Stopped dragging');
     
-    // Call backend to reorder
+    // Call backend to reorder (will auto-create draft if needed)
     await handleReorder(movedItemId, newIndex, newLocalSteps);
   }
 
   async function handleReorder(stepId: number, newIndex: number, newLocalSteps: SOPStep[]) {
     try {
       isReordering = true;
+      
+      // Ensure we have a draft before reordering
+      await sopStore.ensureDraft(sopId);
       
       // Determine beforeStepId and afterStepId based on newIndex
       // beforeStepId: the step with LOWER lexicographic order (comes first in sort)
@@ -213,7 +215,7 @@
       localSteps = newLocalSteps;
       notifyChange();
       
-      // Reload the SOP to get the updated order from backend
+      // Reload the SOP to get the updated order from backend (now in draft mode)
       await sopStore.loadSOP(sopId);
       
       isReordering = false;
@@ -241,7 +243,7 @@
     
       <div 
         class="space-y-2 {isDragging ? 'dragging-active' : ''}"
-        use:dndzone={{ items: localSteps, flipDurationMs: 200, dropTargetStyle: { outline: 'none' }, dragDisabled: !isDraftMode }}
+        use:dndzone={{ items: localSteps, flipDurationMs: 200, dropTargetStyle: { outline: 'none' }, dragDisabled: false }}
         onconsider={handleDndConsider}
         onfinalize={handleDndFinalize}
       >

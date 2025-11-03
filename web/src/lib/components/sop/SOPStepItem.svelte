@@ -32,18 +32,16 @@
   <!-- Collapsed View -->
   <div class="flex items-center justify-between p-4 hover:bg-gray-50 dark:hover:bg-gray-900">
     <div class="flex items-center gap-3 flex-1">
-      {#if isDraftMode}
-        <!-- Drag handle (visible in draft mode) -->
-        <div 
-          class="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-          aria-label="Drag to reorder"
-          title="Drag to reorder"
-        >
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
-          </svg>
-        </div>
-      {/if}
+      <!-- Drag handle (always visible) -->
+      <div 
+        class="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+        aria-label="Drag to reorder"
+        title="Drag to reorder"
+      >
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
+        </svg>
+      </div>
       <button 
         class="flex items-center gap-3 flex-1 text-left"
         onclick={ontoggle}
@@ -179,15 +177,13 @@
             {/if}
           </div>
 
-          {#if isDraftMode}
-            <button
-              onclick={onedit}
-              type="button"
-              class="text-blue-600 hover:text-blue-700 text-sm font-medium"
-            >
-              Edit Step
-            </button>
-          {/if}
+          <button
+            onclick={onedit}
+            type="button"
+            class="text-blue-600 hover:text-blue-700 text-sm font-medium"
+          >
+            Edit Step
+          </button>
         </div>
       {/if}
     </div>

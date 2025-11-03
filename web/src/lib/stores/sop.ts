@@ -207,6 +207,48 @@ function createSOPStore() {
       }
     },
 
+    async ensureDraft(sopId: number): Promise<SOPTemplate> {
+      update(state => ({ ...state, loading: true, error: null }));
+      
+      try {
+        // Reload the SOP to get the latest state
+        const currentSOP = await sopApi.getSOP(sopId);
+        
+        // If we already have a draft, return it
+        if (currentSOP.activeDraftId) {
+          update(state => ({ ...state, currentSOP, loading: false }));
+          return currentSOP;
+        }
+
+        // Create a draft from the current published version
+        if (!currentSOP.currentVersion) {
+          throw new Error('No current version found to create draft from');
+        }
+
+        const draftData = {
+          description: currentSOP.currentVersion.description || '',
+          materials: currentSOP.currentVersion.materials || [],
+          equipment: currentSOP.currentVersion.equipment || [],
+          changeSummary: 'Draft created for editing',
+          steps: (currentSOP.currentVersion.steps || []).map((s: any) => ({
+            order: s.order,
+            title: s.title,
+            instructions: s.instructions,
+            estimatedTimeMinutes: s.estimatedTimeMinutes,
+            imageUrl: s.imageUrl,
+            videoUrl: s.videoUrl,
+            requiresApproval: s.requiresApproval
+          }))
+        };
+
+        return await this.saveDraft(sopId, draftData);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to ensure draft';
+        update(state => ({ ...state, error: message, loading: false }));
+        throw error;
+      }
+    },
+
     clearError() {
       update(state => ({ ...state, error: null }));
     },
