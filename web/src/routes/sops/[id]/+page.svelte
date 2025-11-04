@@ -324,6 +324,12 @@
             steps={localSteps}
             {sopId}
             {isDraftMode}
+            onStepsChange={(updatedSteps) => {
+              localSteps = updatedSteps;
+            }}
+            onEnsureDraft={async () => {
+              await sopStore.ensureDraft(sopId);
+            }}
           />
         </div>
       </div>
