@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { sopApi, type SOPTemplate, type SOPVersion, type DraftListItem } from '$lib/api/sop';
 
 interface SOPStore {
@@ -208,6 +208,14 @@ function createSOPStore() {
     },
 
     async ensureDraft(sopId: number): Promise<SOPTemplate> {
+      // First, check if we already have a draft in the store (no API call needed)
+      const storeValue = get({ subscribe });
+      
+      if (storeValue.currentSOP?.id === sopId && storeValue.currentSOP.activeDraftId) {
+        // We already have a draft, no need to reload
+        return storeValue.currentSOP;
+      }
+      
       update(state => ({ ...state, loading: true, error: null }));
       
       try {

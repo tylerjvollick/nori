@@ -1,7 +1,6 @@
 <script lang="ts">
   import { dndzone } from 'svelte-dnd-action';
   import { sopApi } from '$lib/api/sop';
-  import { sopStore } from '$lib/stores/sop';
   import type { SOPStep } from '$lib/api/sop';
   import SOPStepItem from './SOPStepItem.svelte';
   import SOPStepForm from './SOPStepForm.svelte';
@@ -11,9 +10,10 @@
     sopId: number;
     isDraftMode: boolean;
     onStepsChange?: (steps: SOPStep[]) => void;
+    onEnsureDraft?: () => Promise<void>;
   }
 
-  let { steps = [], sopId, isDraftMode = false, onStepsChange }: Props = $props();
+  let { steps = [], sopId, isDraftMode = false, onStepsChange, onEnsureDraft }: Props = $props();
 
   // Local state
   let localSteps = $state<SOPStep[]>([...steps]);
@@ -24,9 +24,6 @@
   let newStepTitleInput = $state<HTMLInputElement>();
   let isReordering = $state(false);
   let isDragging = $state(false);
-
-  // DnD uses localSteps directly - all steps from backend have IDs
-  // No need to wrap in extra objects
 
   // Update local state when props change
   $effect(() => {
@@ -66,15 +63,18 @@
 
     try {
       // Ensure we have a draft before creating a step
-      await sopStore.ensureDraft(sopId);
+      if (onEnsureDraft) {
+        await onEnsureDraft();
+      }
       
       const newStep = await sopApi.createStep(sopId, {
         title: newStepTitle.trim(),
         afterStepId: localSteps.length > 0 ? localSteps[localSteps.length - 1].id : undefined
       });
 
-      // Reload SOP to get updated steps with correct order
-      await sopStore.loadSOP(sopId);
+      // Optimistically add the step to local state
+      localSteps = [...localSteps, newStep];
+      notifyChange();
 
       // Reset form
       newStepTitle = '';
@@ -104,7 +104,9 @@
     
     try {
       // Ensure we have a draft before updating a step
-      await sopStore.ensureDraft(sopId);
+      if (onEnsureDraft) {
+        await onEnsureDraft();
+      }
       
       await sopApi.updateStep(sopId, step.id, {
         title: step.title,
@@ -113,8 +115,8 @@
         requiresApproval: step.requiresApproval
       });
 
-      // Reload SOP to get updated data
-      await sopStore.loadSOP(sopId);
+      // Optimistic update - already in localSteps
+      notifyChange();
 
       // Exit edit mode
       editingSteps = new Set([...editingSteps].filter(id => id !== stepIndex));
@@ -149,7 +151,7 @@
   async function handleDndFinalize(e: CustomEvent) {
     // Update localSteps based on the final order
     const newLocalSteps = e.detail.items;
-    
+    console.log('handleDndFinalize', { newLocalSteps }) 
     // Find which item was moved
     const info = e.detail.info;
     console.log('DnD finalize info:', info);
@@ -185,7 +187,9 @@
       isReordering = true;
       
       // Ensure we have a draft before reordering
-      await sopStore.ensureDraft(sopId);
+      if (onEnsureDraft) {
+        await onEnsureDraft();
+      }
       
       // Determine beforeStepId and afterStepId based on newIndex
       // beforeStepId: the step with LOWER lexicographic order (comes first in sort)
@@ -215,15 +219,13 @@
       localSteps = newLocalSteps;
       notifyChange();
       
-      // Reload the SOP to get the updated order from backend (now in draft mode)
-      await sopStore.loadSOP(sopId);
-      
       isReordering = false;
     } catch (error) {
       console.error('Failed to reorder step:', error);
       isReordering = false;
-      // Reload to reset to correct order
-      await sopStore.loadSOP(sopId);
+      // Reset to original order on error
+      localSteps = [...steps];
+      notifyChange();
     }
   }
 </script>
