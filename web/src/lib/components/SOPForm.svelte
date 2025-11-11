@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { SOPStep } from '$lib/api/sop';
   import CollapsibleStep from '$lib/components/CollapsibleStep.svelte';
+  import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
+  import { ChevronDown } from 'lucide-svelte';
   
   interface SOPFormProps {
     onSubmit: (data: {
@@ -60,6 +62,11 @@
   let error = $state('');
   let expandedSteps = $state<Set<number>>(new Set());
   let stepRefs: CollapsibleStep[] = [];
+  
+  // Collapsible section state
+  let materialsOpen = $state(false);
+  let equipmentOpen = $state(false);
+  let stepsOpen = $state(true); // Open by default
 
   function addStep(focusOnNew = false) {
     const newIndex = steps.length;
@@ -205,118 +212,89 @@
   }
 </script>
 
-<div class="flex flex-col max-h-[85vh]">
+<div class="space-y-6">
   {#if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+    <div class="bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded-lg">
       <p class="font-medium">Error</p>
       <p class="text-sm">{error}</p>
     </div>
   {/if}
 
-  <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="flex flex-col flex-1 min-h-0">
-    <!-- Two Column Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-6 flex-1 min-h-0 overflow-hidden">
-      <!-- Left Column - Steps -->
-      <div class="space-y-4 overflow-y-auto pr-2">
-        <div class="flex justify-between items-center mb-4">
-          <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
-          <button
-            type="button"
-            onclick={(e) => { e.preventDefault(); addStep(true); }}
-            class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-          >
-            + Add Step
-          </button>
-        </div>
+  <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-6">
+    <!-- Name -->
+    <div>
+      <label for="name" class="block text-sm font-medium text-foreground mb-2">
+        Name <span class="text-destructive">*</span>
+      </label>
+      <input
+        id="name"
+        type="text"
+        bind:value={name}
+        placeholder="e.g., Equipment Maintenance Procedure"
+        class="w-full px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
+        required
+      />
+    </div>
 
-        <div class="space-y-3">
-          {#each steps as step, index}
-            <CollapsibleStep
-              bind:this={stepRefs[index]}
-              {step}
-              {index}
-              isExpanded={expandedSteps.has(index)}
-              onUpdate={(updatedStep) => updateStep(index, updatedStep)}
-              onNext={() => handleStepNext(index)}
-              onRemove={() => removeStep(index)}
-              onToggleExpand={() => toggleStepExpanded(index)}
-              onMoveUp={() => moveStep(index, 'up')}
-              onMoveDown={() => moveStep(index, 'down')}
-              canMoveUp={index > 0}
-              canMoveDown={index < steps.length - 1}
-            />
-          {/each}
-        </div>
+    <!-- Description -->
+    <div>
+      <label for="description" class="block text-sm font-medium text-foreground mb-2">
+        Description
+      </label>
+      <textarea
+        id="description"
+        bind:value={description}
+        placeholder="Brief overview of this SOP..."
+        rows="3"
+        class="w-full px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
+      ></textarea>
+    </div>
+
+    {#if isEditMode}
+      <div>
+        <label for="changeSummary" class="block text-sm font-medium text-foreground mb-2">
+          Change Summary <span class="text-destructive">*</span>
+        </label>
+        <textarea
+          id="changeSummary"
+          bind:value={changeSummary}
+          placeholder="Describe what changed in this version..."
+          rows="2"
+          class="w-full px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
+          required
+        ></textarea>
+        <p class="text-xs text-muted-foreground mt-1">
+          This helps track what changed between versions
+        </p>
       </div>
+    {/if}
 
-      <!-- Right Column - SOP Metadata -->
-      <div class="space-y-4 overflow-y-auto">
-        <!-- SOP Details Card -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 p-4">
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">SOP Details</h3>
-          
-          <div class="space-y-4">
-            <div>
-              <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Name <span class="text-red-500">*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                bind:value={name}
-                placeholder="e.g., Equipment Maintenance Procedure"
-                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-                required
-              />
-            </div>
-
-        <div>
-          <label for="description" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Description
-          </label>
-          <textarea
-            id="description"
-            bind:value={description}
-            placeholder="Brief overview of this SOP..."
-            rows="3"
-            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-          ></textarea>
-        </div>
-
-        {#if isEditMode}
-          <div>
-            <label for="changeSummary" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Change Summary <span class="text-red-500">*</span>
-            </label>
-            <textarea
-              id="changeSummary"
-              bind:value={changeSummary}
-              placeholder="Describe what changed in this version..."
-              rows="2"
-              class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
-              required
-            ></textarea>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              This helps track what changed between versions
-            </p>
-          </div>
-        {/if}
-
-        <!-- Materials -->
-        <div>
-          <label for="materials-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Materials
-          </label>
-          <div class="space-y-2">
+    <!-- Materials (Collapsible) -->
+    <Collapsible bind:open={materialsOpen}>
+      <div class="border border-border rounded-lg">
+        <CollapsibleTrigger class="w-full flex items-center justify-between px-4 py-3 hover:bg-accent transition-colors">
+          <div class="flex items-center gap-2">
+            <ChevronDown class="w-4 h-4 text-muted-foreground transition-transform {materialsOpen ? 'rotate-180' : ''}" />
+            <span class="font-medium text-foreground">Materials</span>
             {#if materials.length > 0}
-              <ul class="space-y-2">
+              <span class="text-xs px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full">
+                {materials.length}
+              </span>
+            {/if}
+          </div>
+        </CollapsibleTrigger>
+        
+        <CollapsibleContent>
+          <div class="px-4 pb-4 pt-2 space-y-2 border-t border-border">
+            {#if materials.length > 0}
+              <ul class="space-y-2 mb-3">
                 {#each materials as material, index}
-                  <li class="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-600">
-                    <span class="text-sm text-gray-700 dark:text-gray-300">• {material}</span>
+                  <li class="flex items-center justify-between bg-background px-3 py-2 rounded border border-border">
+                    <span class="text-sm text-foreground">• {material}</span>
                     <button
                       type="button"
                       onclick={() => removeMaterial(index)}
-                      class="text-red-600 hover:text-red-700 text-xs font-medium"
+                      class="text-destructive hover:text-destructive/80 text-xs font-medium"
                     >
                       Remove
                     </button>
@@ -330,35 +308,48 @@
                 type="text"
                 bind:value={newMaterialInput}
                 placeholder="Add material (e.g., Safety goggles)..."
-                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                class="flex-1 px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
                 onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addMaterial())}
               />
               <button
                 type="button"
                 onclick={addMaterial}
-                class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 Add
               </button>
             </div>
           </div>
-        </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
 
-        <!-- Equipment -->
-        <div>
-          <label for="equipment-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Equipment
-          </label>
-          <div class="space-y-2">
+    <!-- Equipment (Collapsible) -->
+    <Collapsible bind:open={equipmentOpen}>
+      <div class="border border-border rounded-lg">
+        <CollapsibleTrigger class="w-full flex items-center justify-between px-4 py-3 hover:bg-accent transition-colors">
+          <div class="flex items-center gap-2">
+            <ChevronDown class="w-4 h-4 text-muted-foreground transition-transform {equipmentOpen ? 'rotate-180' : ''}" />
+            <span class="font-medium text-foreground">Equipment</span>
             {#if equipment.length > 0}
-              <ul class="space-y-2">
+              <span class="text-xs px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full">
+                {equipment.length}
+              </span>
+            {/if}
+          </div>
+        </CollapsibleTrigger>
+        
+        <CollapsibleContent>
+          <div class="px-4 pb-4 pt-2 space-y-2 border-t border-border">
+            {#if equipment.length > 0}
+              <ul class="space-y-2 mb-3">
                 {#each equipment as item, index}
-                  <li class="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded border border-gray-200 dark:border-gray-600">
-                    <span class="text-sm text-gray-700 dark:text-gray-300">• {item}</span>
+                  <li class="flex items-center justify-between bg-background px-3 py-2 rounded border border-border">
+                    <span class="text-sm text-foreground">• {item}</span>
                     <button
                       type="button"
                       onclick={() => removeEquipment(index)}
-                      class="text-red-600 hover:text-red-700 text-xs font-medium"
+                      class="text-destructive hover:text-destructive/80 text-xs font-medium"
                     >
                       Remove
                     </button>
@@ -372,45 +363,68 @@
                 type="text"
                 bind:value={newEquipmentInput}
                 placeholder="Add equipment (e.g., Oscilloscope)..."
-                class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                class="flex-1 px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
                 onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addEquipment())}
               />
               <button
                 type="button"
                 onclick={addEquipment}
-                class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 Add
               </button>
             </div>
           </div>
-        </div>
-          </div>
-        </div>
+        </CollapsibleContent>
       </div>
-    </div>
+    </Collapsible>
 
-    <!-- Submit Buttons -->
-    <div class="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
-      <div class="flex gap-4">
-        {#if showCancelButton}
-          <button
-            type="button"
-            onclick={onCancel}
-            class="flex-1 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-6 py-3 rounded-lg font-medium transition-colors"
-            disabled={isSubmitting}
-          >
-            Cancel
-          </button>
-        {/if}
-        <button
-          type="submit"
-          class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? 'Creating...' : submitButtonText}
-        </button>
+    <!-- Steps (Collapsible) -->
+    <Collapsible bind:open={stepsOpen}>
+      <div class="border border-border rounded-lg">
+        <CollapsibleTrigger class="w-full flex items-center justify-between px-4 py-3 hover:bg-accent transition-colors">
+          <div class="flex items-center gap-2">
+            <ChevronDown class="w-4 h-4 text-muted-foreground transition-transform {stepsOpen ? 'rotate-180' : ''}" />
+            <span class="font-medium text-foreground">Steps</span>
+            <span class="text-xs px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-full">
+              {steps.length}
+            </span>
+          </div>
+        </CollapsibleTrigger>
+        
+        <CollapsibleContent>
+          <div class="px-4 pb-4 pt-2 space-y-3 border-t border-border">
+            <div class="flex justify-end">
+              <button
+                type="button"
+                onclick={(e) => { e.preventDefault(); addStep(true); }}
+                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+              >
+                + Add Step
+              </button>
+            </div>
+
+            <div class="space-y-3">
+              {#each steps as step, index}
+                <CollapsibleStep
+                  bind:this={stepRefs[index]}
+                  {step}
+                  {index}
+                  isExpanded={expandedSteps.has(index)}
+                  onUpdate={(updatedStep) => updateStep(index, updatedStep)}
+                  onNext={() => handleStepNext(index)}
+                  onRemove={() => removeStep(index)}
+                  onToggleExpand={() => toggleStepExpanded(index)}
+                  onMoveUp={() => moveStep(index, 'up')}
+                  onMoveDown={() => moveStep(index, 'down')}
+                  canMoveUp={index > 0}
+                  canMoveDown={index < steps.length - 1}
+                />
+              {/each}
+            </div>
+          </div>
+        </CollapsibleContent>
       </div>
-    </div>
+    </Collapsible>
   </form>
 </div>

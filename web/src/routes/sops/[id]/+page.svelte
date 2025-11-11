@@ -278,10 +278,10 @@
 <div class="h-full overflow-hidden">
   {#if $sopStore.loading}
     <div class="flex justify-center items-center py-12">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
     </div>
   {:else if $sopStore.error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg m-4">
+    <div class="bg-destructive/10 border border-destructive/30 text-destructive px-4 py-3 rounded-lg m-4">
       <p class="font-medium">Error loading SOP</p>
       <p class="text-sm">{$sopStore.error}</p>
     </div>
@@ -335,9 +335,9 @@
       </div>
 
       <!-- Right Column: Sidebar -->
-      <div class="overflow-y-auto px-4 py-6 space-y-6 border-l border-gray-200 dark:border-gray-700">
+      <div class="overflow-y-auto px-4 py-6 space-y-6 border-l border-border">
         <!-- Actions -->
-        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
+        <div class="pb-6 border-b border-border">
           <div class="flex items-center justify-between gap-2">
             <!-- Left: Publish and Discard Buttons -->
             <div class="flex items-center gap-2">
@@ -364,7 +364,7 @@
             <div class="relative">
               <button
                 onclick={() => showMoreActionsMenu = !showMoreActionsMenu}
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                class="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
                 aria-label="More actions"
               >
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -374,13 +374,13 @@
               
               <!-- Dropdown menu -->
               {#if showMoreActionsMenu}
-                <div class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-10">
+                <div class="absolute right-0 mt-2 w-48 bg-card rounded-lg shadow-lg border border-border py-1 z-10">
                   <button
                     onclick={() => {
                       handleDelete();
                       showMoreActionsMenu = false;
                     }}
-                    class="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                    class="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-accent transition-colors"
                   >
                     Delete SOP
                   </button>
@@ -391,26 +391,26 @@
         </div>
 
         <!-- Metadata -->
-        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Details</h3>
+        <div class="pb-6 border-b border-border">
+          <h3 class="text-sm font-semibold text-foreground mb-3">Details</h3>
           <div class="space-y-3 text-sm">
             <div>
-              <span class="text-gray-600 dark:text-gray-400">Created:</span>
-              <span class="text-gray-900 dark:text-white ml-2">{formatDate($sopStore.currentSOP.createdAt)}</span>
+              <span class="text-muted-foreground">Created:</span>
+              <span class="text-foreground ml-2">{formatDate($sopStore.currentSOP.createdAt)}</span>
             </div>
             <div>
-              <span class="text-gray-600 dark:text-gray-400">Updated:</span>
-              <span class="text-gray-900 dark:text-white ml-2">{formatDate($sopStore.currentSOP.updatedAt)}</span>
+              <span class="text-muted-foreground">Updated:</span>
+              <span class="text-foreground ml-2">{formatDate($sopStore.currentSOP.updatedAt)}</span>
             </div>
             {#if $sopStore.currentSOP.currentVersion}
               <div class="flex items-center justify-between">
                 <div>
-                  <span class="text-gray-600 dark:text-gray-400">Version:</span>
-                  <span class="text-gray-900 dark:text-white ml-2">{$sopStore.currentSOP.currentVersion.versionNumber}</span>
+                  <span class="text-muted-foreground">Version:</span>
+                  <span class="text-foreground ml-2">{$sopStore.currentSOP.currentVersion.versionNumber}</span>
                 </div>
                 <button
                   onclick={loadVersionHistory}
-                  class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 transition-colors"
+                  class="p-1 rounded hover:bg-accent text-muted-foreground transition-colors"
                   aria-label="Show version history"
                   title="Show version history"
                 >
@@ -425,26 +425,26 @@
 
         <!-- Summary Stats -->
         {#if localSteps.length > 0}
-          <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Summary</h3>
+          <div class="pb-6 border-b border-border">
+            <h3 class="text-sm font-semibold text-foreground mb-3">Summary</h3>
             <div class="space-y-3">
               <div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Total Steps</div>
-                <div class="text-xl font-bold text-gray-900 dark:text-white">
+                <div class="text-xs text-muted-foreground mb-1">Total Steps</div>
+                <div class="text-xl font-bold text-foreground">
                   {localSteps.length}
                 </div>
               </div>
               
               <div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Estimated Time</div>
-                <div class="text-xl font-bold text-gray-900 dark:text-white">
+                <div class="text-xs text-muted-foreground mb-1">Estimated Time</div>
+                <div class="text-xl font-bold text-foreground">
                   {getTotalEstimatedTime(localSteps)} min
                 </div>
               </div>
               
               <div>
-                <div class="text-xs text-gray-600 dark:text-gray-400 mb-1">Approval Required</div>
-                <div class="text-xl font-bold text-gray-900 dark:text-white">
+                <div class="text-xs text-muted-foreground mb-1">Approval Required</div>
+                <div class="text-xl font-bold text-foreground">
                   {localSteps.filter(s => s.requiresApproval).length}
                 </div>
               </div>
@@ -453,18 +453,18 @@
         {/if}
 
         <!-- Materials -->
-        <div class="pb-6 border-b border-gray-200 dark:border-gray-700">
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Materials</h3>
+        <div class="pb-6 border-b border-border">
+          <h3 class="text-sm font-semibold text-foreground mb-3">Materials</h3>
           
           {#if editingMaterials}
             <div class="space-y-3">
               <ul class="space-y-2">
                 {#each localMaterials as material, index}
-                  <li class="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
+                  <li class="flex items-center justify-between text-sm text-foreground">
                     <span>• {material}</span>
                     <button
                       onclick={() => removeMaterial(index)}
-                      class="text-red-600 hover:text-red-700 text-xs"
+                      class="text-destructive hover:text-destructive/80 text-xs"
                     >
                       Remove
                     </button>
@@ -477,12 +477,12 @@
                   type="text"
                   bind:value={newMaterialInput}
                   placeholder="Add material..."
-                  class="flex-1 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm"
+                  class="flex-1 bg-background border border-border rounded px-2 py-1 text-sm"
                   onkeydown={(e) => e.key === 'Enter' && addMaterial()}
                 />
                 <button
                   onclick={addMaterial}
-                  class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs"
+                  class="bg-primary hover:bg-primary/90 text-white px-2 py-1 rounded text-xs"
                 >
                   Add
                 </button>
@@ -491,7 +491,7 @@
               <div class="flex gap-2">
                 <button
                   onclick={saveMaterials}
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                  class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm"
                 >
                   Save
                 </button>
@@ -500,7 +500,7 @@
                     editingMaterials = false;
                     localMaterials = $sopStore.currentSOP?.currentVersion?.materials || [];
                   }}
-                  class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm"
+                  class="bg-secondary hover:bg-secondary/90 text-white px-3 py-1 rounded text-sm"
                 >
                   Cancel
                 </button>
@@ -509,18 +509,18 @@
           {:else}
             <div>
               {#if localMaterials.length > 0}
-                <ul class="space-y-1 text-sm text-gray-700 dark:text-gray-300 mb-3">
+                <ul class="space-y-1 text-sm text-foreground mb-3">
                   {#each localMaterials as material}
                     <li>• {material}</li>
                   {/each}
                 </ul>
               {:else}
-                <p class="text-sm text-gray-500 dark:text-gray-500 mb-3">No materials listed</p>
+                <p class="text-sm text-muted-foreground mb-3">No materials listed</p>
               {/if}
               
               <button
                 onclick={() => (editingMaterials = true)}
-                class="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                class="text-primary hover:text-primary/80 text-sm font-medium"
               >
                 Edit Materials
               </button>
@@ -530,17 +530,17 @@
 
         <!-- Equipment -->
         <div>
-          <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Equipment</h3>
+          <h3 class="text-sm font-semibold text-foreground mb-3">Equipment</h3>
           
           {#if editingEquipment}
             <div class="space-y-3">
               <ul class="space-y-2">
                 {#each localEquipment as equipment, index}
-                  <li class="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
+                  <li class="flex items-center justify-between text-sm text-foreground">
                     <span>• {equipment}</span>
                     <button
                       onclick={() => removeEquipment(index)}
-                      class="text-red-600 hover:text-red-700 text-xs"
+                      class="text-destructive hover:text-destructive/80 text-xs"
                     >
                       Remove
                     </button>
@@ -553,12 +553,12 @@
                   type="text"
                   bind:value={newEquipmentInput}
                   placeholder="Add equipment..."
-                  class="flex-1 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm"
+                  class="flex-1 bg-background border border-border rounded px-2 py-1 text-sm"
                   onkeydown={(e) => e.key === 'Enter' && addEquipment()}
                 />
                 <button
                   onclick={addEquipment}
-                  class="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs"
+                  class="bg-primary hover:bg-primary/90 text-white px-2 py-1 rounded text-xs"
                 >
                   Add
                 </button>
@@ -567,7 +567,7 @@
               <div class="flex gap-2">
                 <button
                   onclick={saveEquipment}
-                  class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                  class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm"
                 >
                   Save
                 </button>
@@ -576,7 +576,7 @@
                     editingEquipment = false;
                     localEquipment = $sopStore.currentSOP?.currentVersion?.equipment || [];
                   }}
-                  class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm"
+                  class="bg-secondary hover:bg-secondary/90 text-white px-3 py-1 rounded text-sm"
                 >
                   Cancel
                 </button>
@@ -585,18 +585,18 @@
           {:else}
             <div>
               {#if localEquipment.length > 0}
-                <ul class="space-y-1 text-sm text-gray-700 dark:text-gray-300 mb-3">
+                <ul class="space-y-1 text-sm text-foreground mb-3">
                   {#each localEquipment as equipment}
                     <li>• {equipment}</li>
                   {/each}
                 </ul>
               {:else}
-                <p class="text-sm text-gray-500 dark:text-gray-500 mb-3">No equipment listed</p>
+                <p class="text-sm text-muted-foreground mb-3">No equipment listed</p>
               {/if}
               
               <button
                 onclick={() => (editingEquipment = true)}
-                class="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                class="text-primary hover:text-primary/80 text-sm font-medium"
               >
                 Edit Equipment
               </button>
@@ -611,12 +611,12 @@
 <!-- Version History Modal/Overlay (Outside main grid) -->
 {#if $sopStore.currentSOP && showVersionHistory}
   <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 max-w-4xl w-full max-h-[80vh] overflow-y-auto">
-      <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 flex items-center justify-between">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Version History</h2>
+    <div class="bg-card rounded-lg shadow-xl border border-border max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+      <div class="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
+        <h2 class="text-xl font-semibold text-foreground">Version History</h2>
         <button
           onclick={() => showVersionHistory = false}
-          class="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+          class="text-muted-foreground hover:text-foreground"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -628,44 +628,44 @@
         
         {#if $sopStore.loading}
           <div class="flex justify-center py-6">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         {:else if $sopStore.currentVersions.length === 0}
-          <p class="text-gray-600 dark:text-gray-400">No version history available</p>
+          <p class="text-muted-foreground">No version history available</p>
         {:else}
           <div class="space-y-4">
             {#each $sopStore.currentVersions as version}
-              <div class="border border-gray-200 dark:border-gray-600 rounded-lg p-4 {version.isActive ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' : ''}">
+              <div class="border border-border rounded-lg p-4 {version.isActive ? 'bg-primary/5 border-primary/30' : ''}">
                 <div class="flex justify-between items-start mb-2">
                   <div class="flex items-center gap-3">
-                    <span class="text-lg font-bold text-gray-900 dark:text-white">
+                    <span class="text-lg font-bold text-foreground">
                       Version {version.versionNumber}
                     </span>
                     {#if version.isActive}
-                      <span class="bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium">
+                      <span class="bg-primary text-primary-foreground px-2 py-1 rounded text-xs font-medium">
                         Current
                       </span>
                     {/if}
                   </div>
-                  <span class="text-sm text-gray-600 dark:text-gray-400">
+                  <span class="text-sm text-muted-foreground">
                     {formatDate(version.createdAt)}
                   </span>
                 </div>
                 
                 {#if version.changeSummary}
-                  <p class="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                  <p class="text-sm text-foreground mb-2">
                     <span class="font-medium">Changes:</span> {version.changeSummary}
                   </p>
                 {/if}
                 
                 {#if version.description}
-                  <p class="text-sm text-gray-600 dark:text-gray-400">
+                  <p class="text-sm text-muted-foreground">
                     {version.description}
                   </p>
                 {/if}
                 
                 {#if version.steps}
-                  <p class="text-xs text-gray-500 dark:text-gray-500 mt-2">
+                  <p class="text-xs text-muted-foreground mt-2">
                     {version.steps.length} steps
                   </p>
                 {/if}

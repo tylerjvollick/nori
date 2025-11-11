@@ -88,18 +88,18 @@
 <div class="container mx-auto px-4 py-8 max-w-4xl">
   {#if isLoading}
     <div class="flex justify-center items-center py-12">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary600"></div>
     </div>
   {:else}
     <div class="mb-8">
       <button
         onclick={() => goto(`/sops/${sopId}`)}
-        class="text-emerald-600 hover:text-emerald-700 mb-4 inline-flex items-center"
+        class="text-primary hover:text-primary700 mb-4 inline-flex items-center"
       >
         ← Back to SOP
       </button>
-      <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Edit SOP</h1>
-      <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+      <h1 class="text-3xl font-bold text-foreground">Edit SOP</h1>
+      <p class="text-sm text-muted-foreground mt-2">
         Updating this SOP will create a new version
       </p>
     </div>

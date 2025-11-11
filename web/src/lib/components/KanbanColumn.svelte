@@ -20,9 +20,9 @@
   };
   
   const columnColors = {
-    todo: 'text-slate-500',
-    inProgress: 'text-blue-500',
-    done: 'text-emerald-500'
+    todo: 'text-muted-foreground',
+    inProgress: 'text-blue-500 dark:text-blue-400',
+    done: 'text-primary'
   };
   
   // Transform tasks to include an `id` property required by dndzone
@@ -57,14 +57,14 @@
     <svg class="w-5 h-5 {columnColors[status]}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={columnIcons[status]} />
     </svg>
-    <h2 class="text-slate-700 dark:text-slate-300 font-medium">{title}</h2>
-    <span class="ml-auto text-slate-400 dark:text-slate-500 text-sm">
+    <h2 class="text-foreground font-medium">{title}</h2>
+    <span class="ml-auto text-muted-foreground text-sm">
       {tasks.length}
     </span>
   </div>
   
   <div
-    class="flex-1 p-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 min-h-[200px]"
+    class="flex-1 p-4 rounded-lg bg-secondary/30 min-h-[200px]"
     use:dndzone={{ items, dropTargetStyle: {} }}
     onconsider={handleDndConsider}
     onfinalize={handleDndFinalize}
@@ -82,7 +82,7 @@
         </div>
       {/each}
       {#if tasks.length === 0}
-        <div class="text-center py-12 text-slate-400 dark:text-slate-500">
+        <div class="text-center py-12 text-muted-foreground">
           No tasks
         </div>
       {/if}

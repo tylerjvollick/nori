@@ -18,9 +18,9 @@
   }: Props = $props();
 </script>
 
-<div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+<div class="border border-primary/30 rounded-lg overflow-hidden bg-primary/5">
   <div class="flex items-center gap-3 p-4">
-    <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+    <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
       {stepCount + 1}
     </span>
     <input
@@ -29,13 +29,13 @@
       onkeydown={onkeydown}
       type="text"
       placeholder="Enter step title and press Enter or Tab..."
-      class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+      class="flex-1 bg-card border border-border rounded-lg px-3 py-2 text-foreground focus:ring-2 focus:ring-blue-500 focus:border-transparent"
     />
     <button
       onclick={oncancel}
       type="button"
       aria-label="Cancel"
-      class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+      class="text-muted-foreground600 hover:text-muted-foreground900 dark:text-muted-foreground dark:hover:text-white"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
