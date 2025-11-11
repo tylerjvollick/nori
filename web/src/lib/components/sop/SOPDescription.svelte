@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '$lib/components/ui/button';
+
   interface Props {
     description: string;
     editing: boolean;
@@ -34,27 +36,29 @@
         onkeydown={handleKeydown}
       ></textarea>
       <div class="flex gap-2">
-        <button
+        <Button
           onclick={onsave}
-          class="bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 rounded text-sm"
+          size="sm"
         >
           Save
-        </button>
-        <button
+        </Button>
+        <Button
           onclick={oncanceledit}
-          class="bg-secondary/600 hover:bg-secondary/700 text-white px-3 py-1 rounded text-sm"
+          variant="secondary"
+          size="sm"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   {:else}
-    <button
-      class="text-foreground hover:text-primary600 dark:text-primary400 text-left w-full"
+    <Button
+      variant="ghost"
       onclick={onstartedit}
+      class="text-left w-full h-auto justify-start p-0"
       type="button"
     >
       {description || 'Click to add description'}
-    </button>
+    </Button>
   {/if}
 </div>

@@ -2,6 +2,7 @@
   import type { SOPStep } from '$lib/api/sop';
   import CollapsibleStep from '$lib/components/CollapsibleStep.svelte';
   import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
+  import { Button } from '$lib/components/ui/button';
   import { ChevronDown } from 'lucide-svelte';
   
   interface SOPFormProps {
@@ -291,13 +292,15 @@
                 {#each materials as material, index}
                   <li class="flex items-center justify-between bg-background px-3 py-2 rounded border border-border">
                     <span class="text-sm text-foreground">• {material}</span>
-                    <button
+                    <Button
                       type="button"
                       onclick={() => removeMaterial(index)}
-                      class="text-destructive hover:text-destructive/80 text-xs font-medium"
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive hover:text-destructive/80 text-xs font-medium h-auto p-1"
                     >
                       Remove
-                    </button>
+                    </Button>
                   </li>
                 {/each}
               </ul>
@@ -311,13 +314,12 @@
                 class="flex-1 px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
                 onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addMaterial())}
               />
-              <button
+              <Button
                 type="button"
                 onclick={addMaterial}
-                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 Add
-              </button>
+              </Button>
             </div>
           </div>
         </CollapsibleContent>
@@ -346,13 +348,15 @@
                 {#each equipment as item, index}
                   <li class="flex items-center justify-between bg-background px-3 py-2 rounded border border-border">
                     <span class="text-sm text-foreground">• {item}</span>
-                    <button
+                    <Button
                       type="button"
                       onclick={() => removeEquipment(index)}
-                      class="text-destructive hover:text-destructive/80 text-xs font-medium"
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive hover:text-destructive/80 text-xs font-medium h-auto p-1"
                     >
                       Remove
-                    </button>
+                    </Button>
                   </li>
                 {/each}
               </ul>
@@ -366,13 +370,12 @@
                 class="flex-1 px-4 py-2 border border-border rounded-lg bg-card text-foreground focus:ring-2 focus:ring-ring focus:border-transparent"
                 onkeydown={(e) => e.key === 'Enter' && (e.preventDefault(), addEquipment())}
               />
-              <button
+              <Button
                 type="button"
                 onclick={addEquipment}
-                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 Add
-              </button>
+              </Button>
             </div>
           </div>
         </CollapsibleContent>
@@ -395,13 +398,12 @@
         <CollapsibleContent>
           <div class="px-4 pb-4 pt-2 space-y-3 border-t border-border">
             <div class="flex justify-end">
-              <button
+              <Button
                 type="button"
                 onclick={(e) => { e.preventDefault(); addStep(true); }}
-                class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm transition-colors"
               >
                 + Add Step
-              </button>
+              </Button>
             </div>
 
             <div class="space-y-3">

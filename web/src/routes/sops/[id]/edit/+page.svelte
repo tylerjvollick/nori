@@ -5,6 +5,7 @@
   import { sopStore } from '$lib/stores/sop';
   import SOPForm from '$lib/components/SOPForm.svelte';
   import type { SOPStep } from '$lib/api/sop';
+  import { Button } from '$lib/components/ui/button';
 
   let originalName = '';
   let isSubmitting = $state(false);
@@ -92,12 +93,13 @@
     </div>
   {:else}
     <div class="mb-8">
-      <button
+      <Button
         onclick={() => goto(`/sops/${sopId}`)}
-        class="text-primary hover:text-primary700 mb-4 inline-flex items-center"
+        variant="link"
+        class="mb-4 h-auto p-0"
       >
         ← Back to SOP
-      </button>
+      </Button>
       <h1 class="text-3xl font-bold text-foreground">Edit SOP</h1>
       <p class="text-sm text-muted-foreground mt-2">
         Updating this SOP will create a new version

@@ -4,6 +4,7 @@
   import type { SOPTemplate } from '$lib/api/sop';
   import { X, Search, FileText, PlusCircle } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { Button } from '$lib/components/ui/button';
 
   interface CreateTaskModalProps {
     isOpen: boolean;
@@ -109,13 +110,15 @@
             {/if}
           </p>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onclick={handleClose}
-          class="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          class="p-2"
           aria-label="Close"
         >
           <X class="w-6 h-6" />
-        </button>
+        </Button>
       </div>
 
       <!-- Content -->
@@ -160,9 +163,10 @@
               <!-- SOP List -->
               <div class="grid gap-3">
                 {#each filteredSOPs as sop}
-                  <button
+                  <Button
+                    variant="outline"
                     onclick={() => handleSelectSOP(sop)}
-                    class="text-left p-4 border-2 border-border hover:border-primary500 dark:hover:border-primary500 rounded-lg transition-colors bg-card hover:bg-secondary/50 dark:hover:bg-secondary/600"
+                    class="text-left p-4 h-auto justify-start hover:border-primary"
                   >
                     <div class="flex items-start gap-3">
                       <FileText class="w-5 h-5 text-primary mt-1 flex-shrink-0" />
@@ -187,7 +191,7 @@
                       </div>
                       <PlusCircle class="w-5 h-5 text-primary flex-shrink-0" />
                     </div>
-                  </button>
+                  </Button>
                 {/each}
               </div>
             {/if}
@@ -196,12 +200,13 @@
           <!-- Task Configuration View -->
           <div class="space-y-6">
             <!-- Back Button -->
-            <button
+            <Button
+              variant="link"
               onclick={handleBackToList}
-              class="text-sm text-primary hover:text-accent-foreground dark:hover:text-primary300 font-medium flex items-center gap-2"
+              class="text-sm font-medium p-0 h-auto"
             >
               <span>← Back to SOP list</span>
-            </button>
+            </Button>
 
             <!-- Selected SOP Info -->
             <div class="bg-primary/10 border border-primary/20 rounded-lg p-4">
@@ -305,20 +310,20 @@
       <!-- Footer -->
       <div class="px-6 py-4 border-t border-border bg-background/50">
         <div class="flex gap-3 justify-end">
-          <button
+          <Button
+            variant="outline"
             onclick={handleClose}
-            class="px-6 py-2.5 rounded-lg font-medium text-foreground bg-card border border-border hover:bg-accent transition-colors"
           >
             Cancel
-          </button>
+          </Button>
           {#if selectedSOP}
-            <button
+            <Button
               onclick={handleCreateTask}
-              class="px-6 py-2.5 rounded-lg font-medium text-white bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2"
+              class="flex items-center gap-2"
             >
               <PlusCircle class="w-4 h-4" />
               Create Task
-            </button>
+            </Button>
           {/if}
         </div>
       </div>

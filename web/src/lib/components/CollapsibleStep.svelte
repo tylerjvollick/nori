@@ -1,5 +1,6 @@
 <script lang="ts">
   import { slide } from 'svelte/transition';
+  import { Button } from '$lib/components/ui/button';
   import type { SOPStep } from '$lib/api/sop';
   
   interface CollapsibleStepProps {
@@ -76,16 +77,18 @@
   <!-- Collapsed Header View -->
   <div class="flex items-center gap-2 p-3 {isExpanded ? 'border-b border-border' : ''}">
     <!-- Expand/Collapse Button -->
-    <button
+    <Button
       type="button"
       onclick={onToggleExpand}
-      class="flex-shrink-0 w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground transition-transform {isExpanded ? 'rotate-90' : ''}"
+      variant="ghost"
+      size="icon-sm"
+      class="flex-shrink-0 transition-transform {isExpanded ? 'rotate-90' : ''}"
       aria-label={isExpanded ? 'Collapse step' : 'Expand step'}
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
       </svg>
-    </button>
+    </Button>
     
     <!-- Step Number -->
     <span class="flex-shrink-0 text-sm font-medium text-muted-foreground w-8">
@@ -106,41 +109,45 @@
     <!-- Action Buttons -->
     <div class="flex-shrink-0 flex items-center gap-1">
       {#if canMoveUp}
-        <button
+        <Button
           type="button"
           onclick={onMoveUp}
-          class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Move up"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
           </svg>
-        </button>
+        </Button>
       {/if}
       
       {#if canMoveDown}
-        <button
+        <Button
           type="button"
           onclick={onMoveDown}
-          class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Move down"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
-        </button>
+        </Button>
       {/if}
       
-      <button
+      <Button
         type="button"
         onclick={onRemove}
-        class="p-1.5 text-destructive hover:text-destructive/80 hover:bg-destructive/10 rounded transition-colors"
+        variant="ghost"
+        size="icon-sm"
+        class="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
         title="Remove step"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
         </svg>
-      </button>
+      </Button>
     </div>
   </div>
   

@@ -2,6 +2,7 @@
   import type { Task } from '$lib/types/task';
   import Card from '$lib/components/ui/Card.svelte';
   import Badge from '$lib/components/ui/Badge.svelte';
+  import { Button } from '$lib/components/ui/button';
   
   interface TaskCardProps {
     task: Task;
@@ -39,8 +40,9 @@
   const progress = totalSteps > 0 ? (completedCount / totalSteps) * 100 : 0;
 </script>
 
-<button
-  class="w-full text-left"
+<Button
+  variant="ghost"
+  class="w-full text-left h-auto p-0 hover:bg-transparent"
   onclick={(e) => onclick?.(e)}
   type="button"
 >
@@ -104,4 +106,4 @@
       </div>
     </div>
   </Card>
-</button>
+</Button>

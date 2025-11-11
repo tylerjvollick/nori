@@ -16,6 +16,7 @@
 		Menu,
 		Folder
 	} from 'lucide-svelte';
+	import { Button } from '$lib/components/ui/button';
 
 	let collapsed = $state(false);
 	let spacesExpanded = $state(true);
@@ -81,9 +82,11 @@
 </script>
 
 <!-- Mobile Menu Button -->
-<button
+<Button
+	variant="outline"
+	size="icon"
 	onclick={toggleMobileSidebar}
-	class="fixed top-4 left-4 z-50 p-2 rounded-lg bg-background border border-border shadow-lg md:hidden"
+	class="fixed top-4 left-4 z-50 shadow-lg md:hidden"
 	aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
 >
 	{#if mobileOpen}
@@ -91,15 +94,16 @@
 	{:else}
 		<Menu class="w-5 h-5" />
 	{/if}
-</button>
+</Button>
 
 <!-- Mobile Overlay -->
 {#if mobileOpen}
-	<button
+	<Button
+		variant="ghost"
 		onclick={toggleMobileSidebar}
-		class="fixed inset-0 bg-black/50 z-40 md:hidden"
+		class="fixed inset-0 bg-black/50 z-40 md:hidden p-0 h-auto rounded-none"
 		aria-label="Close sidebar"
-	></button>
+	></Button>
 {/if}
 
 <!-- Sidebar -->
@@ -121,9 +125,10 @@
 		collapsed ? "justify-center" : "justify-start"
 	)}>
 		{#if !collapsed}
-			<button
+			<Button
+				variant="ghost"
 				onclick={() => navigateTo('/')}
-				class="flex items-center gap-2 hover:opacity-80 transition-opacity"
+				class="flex items-center gap-2 hover:opacity-80 p-0 h-auto"
 			>
 				<div
 					class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center"
@@ -138,11 +143,14 @@
 					</svg>
 				</div>
 				<span class="font-bold text-sidebar-foreground">Nori</span>
-			</button>
+			</Button>
 		{:else}
-			<button
+			<Button
+				variant="ghost"
+				size="icon"
 				onclick={() => navigateTo('/')}
-				class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity"
+				class="bg-sidebar-primary rounded-lg hover:opacity-80"
+				aria-label="Home"
 			>
 				<svg class="w-5 h-5 text-sidebar-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path
@@ -152,7 +160,7 @@
 						d="M13 10V3L4 14h7v7l9-11h-7z"
 					/>
 				</svg>
-			</button>
+			</Button>
 		{/if}
 	</div>
 
@@ -160,10 +168,11 @@
 	<nav class="flex-1 overflow-y-auto p-3 space-y-1">
 		<!-- Spaces Section -->
 		<div>
-			<button
+			<Button
+				variant="ghost"
 				onclick={toggleSpaces}
 				class={cn(
-					'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+					'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
 					'text-sidebar-foreground hover:bg-sidebar-accent',
 					collapsed && 'justify-center'
 				)}
@@ -176,7 +185,7 @@
 						class={cn('w-4 h-4 transition-transform', spacesExpanded && 'rotate-180')}
 					/>
 				{/if}
-			</button>
+			</Button>
 
 			<!-- Spaces List -->
 			{#if spacesExpanded && !collapsed}
@@ -187,10 +196,11 @@
 						<div class="px-3 py-1.5 text-sm text-muted-foreground">No recent spaces</div>
 					{:else}
 						{#each spaces as space}
-							<button
+							<Button
+								variant="ghost"
 								onclick={() => navigateTo(`/spaces/${space.id}`)}
 								class={cn(
-									'w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
+									'w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm',
 									isActive(`/spaces/${space.id}`)
 										? 'bg-accent text-accent-foreground font-medium'
 										: 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
@@ -198,27 +208,29 @@
 							>
 								<Folder class="w-4 h-4 shrink-0" />
 								<span class="truncate">{space.name}</span>
-							</button>
+							</Button>
 						{/each}
 					{/if}
 
 					<!-- Create Space Button -->
-					<button
+					<Button
+						variant="ghost"
 						onclick={() => (showCreateDialog = true)}
-						class="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-primary transition-colors"
+						class="w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-primary"
 					>
 						<Plus class="w-4 h-4 shrink-0" />
 						<span>Create Space</span>
-					</button>
+					</Button>
 				</div>
 			{/if}
 		</div>
 
 		<!-- SOPs -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => navigateTo('/sops')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
 				isActive('/sops')
 					? 'bg-accent text-accent-foreground'
 					: 'text-sidebar-foreground hover:bg-sidebar-accent',
@@ -230,16 +242,17 @@
 			{#if !collapsed}
 				<span>SOPs</span>
 			{/if}
-		</button>
+		</Button>
 
 		<!-- Divider -->
 		<div class="my-3 border-t border-sidebar-border"></div>
 
 		<!-- Materials (Placeholder) -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => alert('Materials feature coming soon!')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
 				'text-muted-foreground hover:bg-sidebar-accent',
 				collapsed && 'justify-center'
 			)}
@@ -249,13 +262,14 @@
 			{#if !collapsed}
 				<span>Materials</span>
 			{/if}
-		</button>
+		</Button>
 
 		<!-- Equipment (Placeholder) -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => alert('Equipment feature coming soon!')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
 				'text-muted-foreground hover:bg-sidebar-accent',
 				collapsed && 'justify-center'
 			)}
@@ -265,7 +279,7 @@
 			{#if !collapsed}
 				<span>Equipment</span>
 			{/if}
-		</button>
+		</Button>
 	</nav>
 </aside>
 
@@ -300,25 +314,24 @@
 					</div>
 				{/if}
 				<div class="flex gap-3 justify-end">
-					<button
+					<Button
 						type="button"
+						variant="outline"
 						onclick={() => {
 							showCreateDialog = false;
 							newSpaceName = '';
 							spaceStore.clearError();
 						}}
 						disabled={isCreating}
-						class="px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary rounded-lg transition-colors disabled:opacity-50"
 					>
 						Cancel
-					</button>
-					<button
+					</Button>
+					<Button
 						type="submit"
 						disabled={!newSpaceName.trim() || isCreating}
-						class="px-4 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						{isCreating ? 'Creating...' : 'Create Space'}
-					</button>
+					</Button>
 				</div>
 			</form>
 		</div>

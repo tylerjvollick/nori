@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { authStore } from '$lib/stores/auth';
   import type { User } from '$lib/api/auth';
+  import { Button } from '$lib/components/ui/button';
 
   let user: User | null = null;
   let isLoading = true;
@@ -57,8 +58,9 @@
             </p>
           </a>
 
-          <button
-            class="bg-card p-8 rounded-lg shadow-md border-2 border-transparent hover:border-primary transition-all hover:shadow-lg text-left opacity-50 cursor-not-allowed"
+          <Button
+            variant="outline"
+            class="bg-card p-8 h-auto justify-start flex-col items-start opacity-50 cursor-not-allowed"
             disabled
           >
             <div class="text-4xl mb-4">🎯</div>
@@ -67,10 +69,11 @@
               Track tasks and workflows using Lean methodologies.
             </p>
             <span class="text-xs text-primary font-medium mt-2 block">Coming Soon</span>
-          </button>
+          </Button>
 
-          <button
-            class="bg-card p-8 rounded-lg shadow-md border-2 border-transparent hover:border-primary transition-all hover:shadow-lg text-left opacity-50 cursor-not-allowed"
+          <Button
+            variant="outline"
+            class="bg-card p-8 h-auto justify-start flex-col items-start opacity-50 cursor-not-allowed"
             disabled
           >
             <div class="text-4xl mb-4">📊</div>
@@ -79,7 +82,7 @@
               Get insights into your process efficiency and bottlenecks.
             </p>
             <span class="text-xs text-primary font-medium mt-2 block">Coming Soon</span>
-          </button>
+          </Button>
         </div>
 
         <div class="mt-12 bg-primary/5 border border-primary/20 rounded-lg p-6 max-w-3xl mx-auto">

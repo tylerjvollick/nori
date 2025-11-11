@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Button } from '$lib/components/ui/button';
+
   interface Props {
     stepCount: number;
     onsave: () => void;
@@ -31,15 +33,16 @@
       placeholder="Enter step title and press Enter or Tab..."
       class="flex-1 bg-card border border-border rounded-lg px-3 py-2 text-foreground focus:ring-2 focus:ring-blue-500 focus:border-transparent"
     />
-    <button
+    <Button
       onclick={oncancel}
       type="button"
+      variant="ghost"
+      size="icon"
       aria-label="Cancel"
-      class="text-muted-foreground600 hover:text-muted-foreground900 dark:text-muted-foreground dark:hover:text-white"
     >
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
       </svg>
-    </button>
+    </Button>
   </div>
 </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SOPStep } from '$lib/api/sop';
+  import { Button } from '$lib/components/ui/button';
 
   interface Props {
     step: SOPStep;
@@ -42,9 +43,10 @@
           <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
         </svg>
       </div>
-      <button 
-        class="flex items-center gap-3 flex-1 text-left"
+      <Button 
+        class="flex items-center gap-3 flex-1 text-left h-auto p-0"
         onclick={ontoggle}
+        variant="ghost"
         type="button"
       >
         <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
@@ -65,7 +67,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         {/if}
-      </button>
+      </Button>
     </div>
     
     <div class="flex items-center gap-3">
@@ -74,8 +76,9 @@
           {step.estimatedTimeMinutes} min
         </span>
       {/if}
-      <button
-        class="text-muted-foreground"
+      <Button
+        variant="ghost"
+        size="icon"
         onclick={ontoggle}
         aria-label="Toggle step details"
         type="button"
@@ -88,7 +91,7 @@
         >
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
         </svg>
-      </button>
+      </Button>
     </div>
   </div>
 
@@ -141,20 +144,21 @@
           </div>
           
           <div class="flex gap-2">
-            <button
+            <Button
               onclick={onsave}
               type="button"
-              class="bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 rounded text-sm"
+              size="sm"
             >
               Save
-            </button>
-            <button
+            </Button>
+            <Button
               onclick={oncancel}
               type="button"
-              class="bg-secondary/600 hover:bg-secondary/700 text-white px-3 py-1 rounded text-sm"
+              variant="secondary"
+              size="sm"
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       {:else}
@@ -177,13 +181,15 @@
             {/if}
           </div>
 
-          <button
+          <Button
             onclick={onedit}
             type="button"
-            class="text-primary600 dark:text-primary400 hover:text-primary700 text-sm font-medium"
+            variant="link"
+            size="sm"
+            class="h-auto p-0"
           >
             Edit Step
-          </button>
+          </Button>
         </div>
       {/if}
     </div>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sopStore } from '$lib/stores/sop';
-  import Button from '$lib/components/ui/Button.svelte';
+  import { Button } from '$lib/components/ui/button';
   import CreateSOPModal from '$lib/components/CreateSOPModal.svelte';
   import type { SOPTemplate } from '$lib/api/sop';
   
@@ -55,18 +55,20 @@
 
   <!-- Tabs -->
   <div class="flex border-b border-border mb-6">
-    <button
-      class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'published' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
-      on:click={() => activeTab = 'published'}
+    <Button
+      variant="ghost"
+      class="px-4 py-2 h-auto rounded-none text-sm font-medium {activeTab === 'published' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
+      onclick={() => activeTab = 'published'}
     >
       Published SOPs ({$sopStore.sops.length})
-    </button>
-    <button
-      class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'drafts' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
-      on:click={() => activeTab = 'drafts'}
+    </Button>
+    <Button
+      variant="ghost"
+      class="px-4 py-2 h-auto rounded-none text-sm font-medium {activeTab === 'drafts' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
+      onclick={() => activeTab = 'drafts'}
     >
       My Drafts ({$sopStore.drafts.length})
-    </button>
+    </Button>
   </div>
 
   <!-- Search Bar -->
@@ -208,16 +210,17 @@
               >
                 Continue Editing
               </a>
-              <button
-                on:click={async () => {
+              <Button
+                variant="destructive"
+                size="sm"
+                onclick={async () => {
                   if (confirm('Are you sure you want to delete this draft?')) {
                     await sopStore.deleteDraft(draft.id);
                   }
                 }}
-                class="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-2 rounded text-sm transition-colors"
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         {/each}

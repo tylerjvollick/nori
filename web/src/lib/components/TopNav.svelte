@@ -3,6 +3,7 @@
   import { themeStore } from '$lib/stores/theme';
   import { sidebarStore } from '$lib/stores/sidebar';
   import { goto } from '$app/navigation';
+  import { Button } from '$lib/components/ui/button';
   import { Moon, Sun, Search, Plus, Menu } from 'lucide-svelte';
   import type { User } from '$lib/api/auth';
 
@@ -60,13 +61,14 @@
   <div class="max-w-7xl mx-auto px-6 py-4">
     <div class="flex items-center justify-between gap-4">
       <!-- Sidebar Toggle Button -->
-      <button
+      <Button
         onclick={toggleSidebar}
-        class="p-2 rounded-lg text-foreground hover:bg-accent transition-colors"
+        variant="ghost"
+        size="icon"
         aria-label="Toggle sidebar"
       >
         <Menu class="w-5 h-5" />
-      </button>
+      </Button>
 
       <!-- Search Bar (Placeholder for future) -->
       <div class="hidden md:flex flex-1 max-w-xl">
@@ -85,16 +87,16 @@
       <div class="flex items-center gap-3">
         <!-- Create Dropdown -->
         <div class="relative">
-          <button
+          <Button
             onclick={(e) => {
               e.stopPropagation();
               showDropdown = !showDropdown;
             }}
-            class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            class="flex items-center gap-2"
           >
             <Plus class="w-4 h-4" />
             Create
-          </button>
+          </Button>
 
           {#if showDropdown}
             <div 
@@ -103,9 +105,10 @@
               onclick={(e) => e.stopPropagation()}
               onkeydown={(e) => e.key === 'Escape' && closeDropdown()}
             >
-              <button
+              <Button
                 onclick={handleCreateTask}
-                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3"
+                variant="ghost"
+                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
               >
                 <svg class="w-5 h-5 text-primary mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -114,10 +117,11 @@
                   <div class="text-sm font-medium text-foreground">Task</div>
                   <div class="text-xs text-muted-foreground">From SOP template</div>
                 </div>
-              </button>
-              <button
+              </Button>
+              <Button
                 onclick={handleCreateSOP}
-                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3"
+                variant="ghost"
+                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
               >
                 <svg class="w-5 h-5 text-primary mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -126,15 +130,16 @@
                   <div class="text-sm font-medium text-foreground">SOP</div>
                   <div class="text-xs text-muted-foreground">Create new template</div>
                 </div>
-              </button>
+              </Button>
             </div>
           {/if}
         </div>
 
         <!-- Theme Toggle -->
-        <button
+        <Button
           onclick={toggleTheme}
-          class="p-2 rounded-lg text-foreground hover:bg-accent transition-colors"
+          variant="ghost"
+          size="icon"
           aria-label="Toggle theme"
         >
           {#if theme === 'dark'}
@@ -142,7 +147,7 @@
           {:else}
             <Moon class="w-5 h-5" />
           {/if}
-        </button>
+        </Button>
 
         <!-- User Menu -->
         {#if user}
@@ -150,12 +155,14 @@
             <span class="text-sm text-foreground hidden sm:inline">
               {user.firstName} {user.lastName}
             </span>
-            <button
+            <Button
               onclick={handleLogout}
-              class="text-sm text-foreground hover:text-primary font-medium"
+              variant="ghost"
+              size="sm"
+              class="text-sm"
             >
               Logout
-            </button>
+            </Button>
           </div>
         {/if}
       </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { Button } from '$lib/components/ui/button';
 
   interface Props {
     title: string;
@@ -48,12 +49,13 @@
 <!-- Breadcrumb -->
 <div class="sticky top-0 z-10 bg-background py-4 px-4 border-b border-border">
   <nav class="flex items-center text-sm text-muted-foreground">
-    <button
+    <Button
       onclick={() => goto('/sops')}
-      class="hover:text-primary600 dark:text-primary400 dark:hover:text-primary400 transition-colors"
+      variant="link"
+      class="h-auto p-0"
     >
       SOPs
-    </button>
+    </Button>
     <span class="mx-2">/</span>
     <span class="text-foreground font-medium truncate">
       {title}
@@ -72,28 +74,30 @@
         onkeydown={handleKeydown}
       />
       <div class="flex gap-2">
-        <button
+        <Button
           onclick={onsave}
-          class="bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1 rounded text-sm"
+          size="sm"
         >
           Save
-        </button>
-        <button
+        </Button>
+        <Button
           onclick={oncanceledit}
-          class="bg-secondary/600 hover:bg-secondary/700 text-white px-3 py-1 rounded text-sm"
+          variant="secondary"
+          size="sm"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   {:else}
-    <button
-      class="text-3xl font-bold text-foreground hover:text-primary600 dark:text-primary400 text-left w-full"
+    <Button
+      variant="ghost"
       onclick={onstartedit}
+      class="text-3xl font-bold text-left w-full h-auto justify-start p-0"
       type="button"
     >
       {title}
-    </button>
+    </Button>
   {/if}
   
   {#if isDraftMode}

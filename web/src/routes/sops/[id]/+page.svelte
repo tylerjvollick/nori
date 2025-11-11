@@ -4,7 +4,7 @@
   import { goto } from '$app/navigation';
   import { sopStore } from '$lib/stores/sop';
   import type { SOPStep } from '$lib/api/sop';
-  import Button from '$lib/components/ui/Button.svelte';
+  import { Button } from '$lib/components/ui/button';
   import SOPHeader from '$lib/components/sop/SOPHeader.svelte';
   import SOPDescription from '$lib/components/sop/SOPDescription.svelte';
   import SOPStepList from '$lib/components/sop/SOPStepList.svelte';
@@ -362,28 +362,31 @@
             
             <!-- Right: Three-dot menu -->
             <div class="relative">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onclick={() => showMoreActionsMenu = !showMoreActionsMenu}
-                class="p-2 rounded-lg hover:bg-accent text-muted-foreground transition-colors"
+                class="p-2 h-auto"
                 aria-label="More actions"
               >
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                 </svg>
-              </button>
+              </Button>
               
               <!-- Dropdown menu -->
               {#if showMoreActionsMenu}
                 <div class="absolute right-0 mt-2 w-48 bg-card rounded-lg shadow-lg border border-border py-1 z-10">
-                  <button
+                  <Button
+                    variant="ghost"
                     onclick={() => {
                       handleDelete();
                       showMoreActionsMenu = false;
                     }}
-                    class="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-accent transition-colors"
+                    class="w-full justify-start px-4 py-2 h-auto text-sm text-destructive hover:bg-accent"
                   >
                     Delete SOP
-                  </button>
+                  </Button>
                 </div>
               {/if}
             </div>
@@ -408,16 +411,18 @@
                   <span class="text-muted-foreground">Version:</span>
                   <span class="text-foreground ml-2">{$sopStore.currentSOP.currentVersion.versionNumber}</span>
                 </div>
-                <button
+                <Button
                   onclick={loadVersionHistory}
-                  class="p-1 rounded hover:bg-accent text-muted-foreground transition-colors"
+                  variant="ghost"
+                  size="icon"
+                  class="h-auto p-1"
                   aria-label="Show version history"
                   title="Show version history"
                 >
                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                </button>
+                </Button>
               </div>
             {/if}
           </div>
@@ -462,12 +467,14 @@
                 {#each localMaterials as material, index}
                   <li class="flex items-center justify-between text-sm text-foreground">
                     <span>• {material}</span>
-                    <button
+                    <Button
                       onclick={() => removeMaterial(index)}
-                      class="text-destructive hover:text-destructive/80 text-xs"
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive hover:text-destructive/80 text-xs h-auto p-1"
                     >
                       Remove
-                    </button>
+                    </Button>
                   </li>
                 {/each}
               </ul>
@@ -480,30 +487,32 @@
                   class="flex-1 bg-background border border-border rounded px-2 py-1 text-sm"
                   onkeydown={(e) => e.key === 'Enter' && addMaterial()}
                 />
-                <button
+                <Button
                   onclick={addMaterial}
-                  class="bg-primary hover:bg-primary/90 text-white px-2 py-1 rounded text-xs"
+                  size="sm"
+                  class="text-xs h-auto px-2 py-1"
                 >
                   Add
-                </button>
+                </Button>
               </div>
               
               <div class="flex gap-2">
-                <button
+                <Button
                   onclick={saveMaterials}
-                  class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm"
+                  size="sm"
                 >
                   Save
-                </button>
-                <button
+                </Button>
+                <Button
                   onclick={() => {
                     editingMaterials = false;
                     localMaterials = $sopStore.currentSOP?.currentVersion?.materials || [];
                   }}
-                  class="bg-secondary hover:bg-secondary/90 text-white px-3 py-1 rounded text-sm"
+                  variant="secondary"
+                  size="sm"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           {:else}
@@ -518,12 +527,14 @@
                 <p class="text-sm text-muted-foreground mb-3">No materials listed</p>
               {/if}
               
-              <button
+              <Button
                 onclick={() => (editingMaterials = true)}
-                class="text-primary hover:text-primary/80 text-sm font-medium"
+                variant="link"
+                size="sm"
+                class="h-auto p-0"
               >
                 Edit Materials
-              </button>
+              </Button>
             </div>
           {/if}
         </div>
@@ -538,12 +549,14 @@
                 {#each localEquipment as equipment, index}
                   <li class="flex items-center justify-between text-sm text-foreground">
                     <span>• {equipment}</span>
-                    <button
+                    <Button
                       onclick={() => removeEquipment(index)}
-                      class="text-destructive hover:text-destructive/80 text-xs"
+                      variant="ghost"
+                      size="sm"
+                      class="text-destructive hover:text-destructive/80 text-xs h-auto p-1"
                     >
                       Remove
-                    </button>
+                    </Button>
                   </li>
                 {/each}
               </ul>
@@ -556,30 +569,32 @@
                   class="flex-1 bg-background border border-border rounded px-2 py-1 text-sm"
                   onkeydown={(e) => e.key === 'Enter' && addEquipment()}
                 />
-                <button
+                <Button
                   onclick={addEquipment}
-                  class="bg-primary hover:bg-primary/90 text-white px-2 py-1 rounded text-xs"
+                  size="sm"
+                  class="text-xs h-auto px-2 py-1"
                 >
                   Add
-                </button>
+                </Button>
               </div>
               
               <div class="flex gap-2">
-                <button
+                <Button
                   onclick={saveEquipment}
-                  class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm"
+                  size="sm"
                 >
                   Save
-                </button>
-                <button
+                </Button>
+                <Button
                   onclick={() => {
                     editingEquipment = false;
                     localEquipment = $sopStore.currentSOP?.currentVersion?.equipment || [];
                   }}
-                  class="bg-secondary hover:bg-secondary/90 text-white px-3 py-1 rounded text-sm"
+                  variant="secondary"
+                  size="sm"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           {:else}
@@ -594,12 +609,14 @@
                 <p class="text-sm text-muted-foreground mb-3">No equipment listed</p>
               {/if}
               
-              <button
+              <Button
                 onclick={() => (editingEquipment = true)}
-                class="text-primary hover:text-primary/80 text-sm font-medium"
+                variant="link"
+                size="sm"
+                class="h-auto p-0"
               >
                 Edit Equipment
-              </button>
+              </Button>
             </div>
           {/if}
         </div>
@@ -614,14 +631,16 @@
     <div class="bg-card rounded-lg shadow-xl border border-border max-w-4xl w-full max-h-[80vh] overflow-y-auto">
       <div class="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
         <h2 class="text-xl font-semibold text-foreground">Version History</h2>
-        <button
+        <Button
           onclick={() => showVersionHistory = false}
-          class="text-muted-foreground hover:text-foreground"
+          variant="ghost"
+          size="icon"
+          class="h-auto p-0"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
-        </button>
+        </Button>
       </div>
       
       <div class="p-6">

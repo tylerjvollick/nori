@@ -3,6 +3,7 @@
   import { authStore } from '$lib/stores/auth';
   import { authApi } from '$lib/api/auth';
   import type { LoginRequest } from '$lib/api/auth';
+  import { Button } from '$lib/components/ui/button';
 
   let email = '';
   let password = '';
@@ -109,19 +110,17 @@
       {/if}
 
       <div>
-        <button
+        <Button
           type="submit"
           disabled={isLoading}
-          class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          class="w-full"
         >
           {#if isLoading}
-            <span class="absolute left-1/2 transform -translate-x-1/2">
-              Signing in...
-            </span>
+            Signing in...
           {:else}
             Sign in
           {/if}
-        </button>
+        </Button>
       </div>
     </form>
   </div>

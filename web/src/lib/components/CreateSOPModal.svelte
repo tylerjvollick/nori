@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import SOPForm from './SOPForm.svelte';
   import * as Dialog from '$lib/components/ui/dialog';
+  import { Button } from '$lib/components/ui/button';
 
   interface CreateSOPModalProps {
     isOpen: boolean;
@@ -86,22 +87,23 @@
     <!-- Sticky Footer -->
     <Dialog.Footer class="border-t border-border px-6 py-4 bg-card flex-shrink-0 sm:justify-start">
       <div class="flex gap-4 w-full">
-        <button
+        <Button
           type="button"
+          variant="secondary"
           onclick={handleCancel}
-          class="flex-1 bg-secondary hover:bg-secondary/80 text-secondary-foreground px-6 py-3 rounded-lg font-medium transition-colors"
+          class="flex-1"
           disabled={isSubmitting}
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onclick={triggerSubmit}
-          class="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="flex-1"
           disabled={isSubmitting}
         >
           {isSubmitting ? 'Creating...' : 'Create SOP'}
-        </button>
+        </Button>
       </div>
     </Dialog.Footer>
   </Dialog.Content>

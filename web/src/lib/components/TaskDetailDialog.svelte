@@ -197,9 +197,11 @@
               <Card class="p-4 {task.completedSteps.includes(index) ? 'bg-primary/5' : ''}">
                 <div class="flex items-start gap-4">
                   <!-- Checkbox -->
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onclick={() => toggleStepComplete(index)}
-                    class="flex-shrink-0 mt-1"
+                    class="flex-shrink-0 mt-1 p-0 h-auto"
                   >
                     {#if task.completedSteps.includes(index)}
                       <svg class="w-6 h-6 text-primary" fill="currentColor" viewBox="0 0 24 24">
@@ -210,7 +212,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     {/if}
-                  </button>
+                  </Button>
                   
                   <!-- Step Content -->
                   <div class="flex-1 min-w-0">
@@ -231,9 +233,11 @@
                         <div class="text-sm font-mono text-foreground min-w-[80px] text-right">
                           {getStepTimeDisplay(index)}
                         </div>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onclick={() => toggleStepTimer(index)}
-                          class="p-2 rounded-lg hover:bg-accent transition-colors {isStepTimerActive(index) ? 'text-destructive' : 'text-primary'}"
+                          class="p-2 {isStepTimerActive(index) ? 'text-destructive hover:text-destructive' : 'text-primary hover:text-primary'}"
                           title={isStepTimerActive(index) ? 'Pause timer' : 'Start timer'}
                         >
                           {#if isStepTimerActive(index)}
@@ -245,7 +249,7 @@
                               <path d="M8 5v14l11-7z" />
                             </svg>
                           {/if}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                     
@@ -276,24 +280,27 @@
           <Card class="p-4">
             <h3 class="font-semibold text-foreground mb-3">Status</h3>
             <div class="space-y-2">
-              <button
+              <Button
+                variant={task.status === 'todo' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('todo')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'todo' ? 'bg-secondary/50 border-border' : 'border-border hover:bg-accent'}"
+                class="w-full justify-start"
               >
                 <span class="text-sm text-foreground">To Do</span>
-              </button>
-              <button
+              </Button>
+              <Button
+                variant={task.status === 'inProgress' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('inProgress')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'inProgress' ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800' : 'border-border hover:bg-accent'}"
+                class="w-full justify-start"
               >
                 <span class="text-sm text-foreground">In Progress</span>
-              </button>
-              <button
+              </Button>
+              <Button
+                variant={task.status === 'done' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('done')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'done' ? 'bg-primary/10 border-primary/30' : 'border-border hover:bg-accent'}"
+                class="w-full justify-start"
               >
                 <span class="text-sm text-foreground">Done</span>
-              </button>
+              </Button>
             </div>
           </Card>
 
