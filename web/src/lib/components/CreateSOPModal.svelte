@@ -54,11 +54,11 @@
 </script>
 
 <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
-  <Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0">
+  <Dialog.Content class="sm:max-w-6xl max-w-6xl max-h-[90vh] flex flex-col p-0 gap-0">
     <!-- Header -->
     <Dialog.Header class="px-6 py-4 border-b border-border bg-accent flex-shrink-0 sm:text-left">
       <Dialog.Title class="text-2xl font-bold text-foreground">
-        Create New SOP
+        Create New SOPs
       </Dialog.Title>
       <Dialog.Description class="text-sm text-muted-foreground mt-1">
         Define a standard operating procedure template
