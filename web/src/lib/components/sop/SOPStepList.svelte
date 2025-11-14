@@ -3,7 +3,6 @@
   import { sopApi } from '$lib/api/sop';
   import type { SOPStep } from '$lib/api/sop';
   import SOPStepItem from './SOPStepItem.svelte';
-  import SOPStepForm from './SOPStepForm.svelte';
   import { Button } from '$lib/components/ui/button';
 
   interface Props {
@@ -23,7 +22,6 @@
   let creatingNewStep = $state(false);
   let newStepTitle = $state('');
   let newStepTitleInput = $state<HTMLInputElement>();
-  let isReordering = $state(false);
   let isDragging = $state(false);
 
   // Update local state when props change
