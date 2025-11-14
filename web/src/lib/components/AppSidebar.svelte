@@ -16,6 +16,7 @@
 		Menu,
 		Folder
 	} from 'lucide-svelte';
+	import { Button } from '$lib/components/ui/button';
 
 	let collapsed = $state(false);
 	let spacesExpanded = $state(true);
@@ -81,9 +82,11 @@
 </script>
 
 <!-- Mobile Menu Button -->
-<button
+<Button
+	variant="outline"
+	size="icon"
 	onclick={toggleMobileSidebar}
-	class="fixed top-4 left-4 z-50 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg md:hidden"
+	class="fixed top-4 left-4 z-50 shadow-lg md:hidden"
 	aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
 >
 	{#if mobileOpen}
@@ -91,21 +94,22 @@
 	{:else}
 		<Menu class="w-5 h-5" />
 	{/if}
-</button>
+</Button>
 
 <!-- Mobile Overlay -->
 {#if mobileOpen}
-	<button
+	<Button
+		variant="ghost"
 		onclick={toggleMobileSidebar}
-		class="fixed inset-0 bg-black/50 z-40 md:hidden"
+		class="fixed inset-0 bg-black/50 z-40 md:hidden p-0 h-auto rounded-none"
 		aria-label="Close sidebar"
-	></button>
+	></Button>
 {/if}
 
 <!-- Sidebar -->
 <aside
 	class={cn(
-		'fixed left-0 top-0 h-screen bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 z-50 flex flex-col',
+		'fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 z-50 flex flex-col',
 		// Desktop
 		'hidden md:flex',
 		collapsed ? 'w-16' : 'w-64',
@@ -117,18 +121,19 @@
 >
 	<!-- Sidebar Header -->
 	<div class={cn(
-		"h-16 flex items-center px-4 border-b border-gray-200 dark:border-gray-700",
+		"h-16 flex items-center px-4 border-b border-sidebar-border",
 		collapsed ? "justify-center" : "justify-start"
 	)}>
 		{#if !collapsed}
-			<button
+			<Button
+				variant="ghost"
 				onclick={() => navigateTo('/')}
-				class="flex items-center gap-2 hover:opacity-80 transition-opacity"
+				class="flex items-center gap-2 hover:opacity-80 p-0 h-auto"
 			>
 				<div
-					class="w-8 h-8 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center"
+					class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center"
 				>
-					<svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<svg class="w-5 h-5 text-sidebar-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path
 							stroke-linecap="round"
 							stroke-linejoin="round"
@@ -137,14 +142,17 @@
 						/>
 					</svg>
 				</div>
-				<span class="font-bold text-gray-900 dark:text-white">Nori</span>
-			</button>
+				<span class="font-bold text-sidebar-foreground">Nori</span>
+			</Button>
 		{:else}
-			<button
+			<Button
+				variant="ghost"
+				size="icon"
 				onclick={() => navigateTo('/')}
-				class="w-8 h-8 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity"
+				class="bg-sidebar-primary rounded-lg hover:opacity-80"
+				aria-label="Home"
 			>
-				<svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<svg class="w-5 h-5 text-sidebar-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path
 						stroke-linecap="round"
 						stroke-linejoin="round"
@@ -152,7 +160,7 @@
 						d="M13 10V3L4 14h7v7l9-11h-7z"
 					/>
 				</svg>
-			</button>
+			</Button>
 		{/if}
 	</div>
 
@@ -160,11 +168,12 @@
 	<nav class="flex-1 overflow-y-auto p-3 space-y-1">
 		<!-- Spaces Section -->
 		<div>
-			<button
+			<Button
+				variant="ghost"
 				onclick={toggleSpaces}
 				class={cn(
-					'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-					'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800',
+					'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
+					'text-sidebar-foreground hover:bg-sidebar-accent',
 					collapsed && 'justify-center'
 				)}
 				title={collapsed ? 'Spaces' : ''}
@@ -176,52 +185,55 @@
 						class={cn('w-4 h-4 transition-transform', spacesExpanded && 'rotate-180')}
 					/>
 				{/if}
-			</button>
+			</Button>
 
 			<!-- Spaces List -->
 			{#if spacesExpanded && !collapsed}
-				<div class="ml-4 mt-1 space-y-1 border-l border-gray-200 dark:border-gray-700 pl-4">
+				<div class="ml-4 mt-1 space-y-1 border-l border-sidebar-border pl-4">
 					{#if $spaceStore.isLoading}
-						<div class="px-3 py-1.5 text-sm text-gray-400">Loading...</div>
+						<div class="px-3 py-1.5 text-sm text-muted-foreground">Loading...</div>
 					{:else if spaces.length === 0}
-						<div class="px-3 py-1.5 text-sm text-gray-400">No recent spaces</div>
+						<div class="px-3 py-1.5 text-sm text-muted-foreground">No recent spaces</div>
 					{:else}
 						{#each spaces as space}
-							<button
+							<Button
+								variant="ghost"
 								onclick={() => navigateTo(`/spaces/${space.id}`)}
 								class={cn(
-									'w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
+									'w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm',
 									isActive(`/spaces/${space.id}`)
-										? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-medium'
-										: 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+										? 'bg-accent text-accent-foreground font-medium'
+										: 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
 								)}
 							>
 								<Folder class="w-4 h-4 shrink-0" />
 								<span class="truncate">{space.name}</span>
-							</button>
+							</Button>
 						{/each}
 					{/if}
 
 					<!-- Create Space Button -->
-					<button
+					<Button
+						variant="ghost"
 						onclick={() => (showCreateDialog = true)}
-						class="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-gray-500 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+						class="w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-primary"
 					>
 						<Plus class="w-4 h-4 shrink-0" />
 						<span>Create Space</span>
-					</button>
+					</Button>
 				</div>
 			{/if}
 		</div>
 
 		<!-- SOPs -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => navigateTo('/sops')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
 				isActive('/sops')
-					? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
-					: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800',
+					? 'bg-accent text-accent-foreground'
+					: 'text-sidebar-foreground hover:bg-sidebar-accent',
 				collapsed && 'justify-center'
 			)}
 			title={collapsed ? 'SOPs' : ''}
@@ -230,17 +242,18 @@
 			{#if !collapsed}
 				<span>SOPs</span>
 			{/if}
-		</button>
+		</Button>
 
 		<!-- Divider -->
-		<div class="my-3 border-t border-gray-200 dark:border-gray-700"></div>
+		<div class="my-3 border-t border-sidebar-border"></div>
 
 		<!-- Materials (Placeholder) -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => alert('Materials feature coming soon!')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-				'text-gray-500 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
+				'text-muted-foreground hover:bg-sidebar-accent',
 				collapsed && 'justify-center'
 			)}
 			title={collapsed ? 'Materials' : ''}
@@ -249,14 +262,15 @@
 			{#if !collapsed}
 				<span>Materials</span>
 			{/if}
-		</button>
+		</Button>
 
 		<!-- Equipment (Placeholder) -->
-		<button
+		<Button
+			variant="ghost"
 			onclick={() => alert('Equipment feature coming soon!')}
 			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-				'text-gray-500 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800',
+				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
+				'text-muted-foreground hover:bg-sidebar-accent',
 				collapsed && 'justify-center'
 			)}
 			title={collapsed ? 'Equipment' : ''}
@@ -265,15 +279,15 @@
 			{#if !collapsed}
 				<span>Equipment</span>
 			{/if}
-		</button>
+		</Button>
 	</nav>
 </aside>
 
 <!-- Create Space Dialog -->
 {#if showCreateDialog}
 	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-		<div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
-			<h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Create New Space</h2>
+		<div class="bg-card rounded-lg shadow-xl max-w-md w-full p-6">
+			<h2 class="text-xl font-semibold text-card-foreground mb-4">Create New Space</h2>
 			<form
 				onsubmit={(e) => {
 					e.preventDefault();
@@ -281,7 +295,7 @@
 				}}
 			>
 				<div class="mb-4">
-					<label for="space-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+					<label for="space-name" class="block text-sm font-medium text-foreground mb-2">
 						Space Name
 					</label>
 					<input
@@ -289,36 +303,35 @@
 						type="text"
 						bind:value={newSpaceName}
 						placeholder="e.g., Marketing, Engineering, HR"
-						class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+						class="w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
 						disabled={isCreating}
 						autofocus
 					/>
 				</div>
 				{#if $spaceStore.error}
-					<div class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
+					<div class="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
 						{$spaceStore.error}
 					</div>
 				{/if}
 				<div class="flex gap-3 justify-end">
-					<button
+					<Button
 						type="button"
+						variant="outline"
 						onclick={() => {
 							showCreateDialog = false;
 							newSpaceName = '';
 							spaceStore.clearError();
 						}}
 						disabled={isCreating}
-						class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
 					>
 						Cancel
-					</button>
-					<button
+					</Button>
+					<Button
 						type="submit"
 						disabled={!newSpaceName.trim() || isCreating}
-						class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						{isCreating ? 'Creating...' : 'Create Space'}
-					</button>
+					</Button>
 				</div>
 			</form>
 		</div>

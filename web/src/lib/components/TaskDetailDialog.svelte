@@ -123,13 +123,13 @@
   function getStatusColor(status: string): string {
     switch (status) {
       case 'todo':
-        return 'bg-slate-100 text-slate-700 border-slate-200';
+        return 'bg-secondary text-secondary-foreground border-border';
       case 'inProgress':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
+        return 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800';
       case 'done':
-        return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        return 'bg-primary/10 text-primary border-primary/20';
       default:
-        return 'bg-slate-100 text-slate-700 border-slate-200';
+        return 'bg-secondary text-secondary-foreground border-border';
     }
   }
   
@@ -141,9 +141,9 @@
   {#if task}
     <div class="flex flex-col max-h-[90vh]">
       <!-- Header with Title and Badges -->
-      <div class="p-6 border-b border-slate-200 dark:border-slate-700">
+      <div class="p-6 border-b border-border">
         <div class="space-y-3">
-          <h2 class="text-2xl font-bold text-slate-900 dark:text-white">
+          <h2 class="text-2xl font-bold text-foreground">
             {task.sop.name}
           </h2>
           <div class="flex items-center gap-2 flex-wrap">
@@ -151,12 +151,12 @@
               {task.status === 'todo' ? 'To Do' : task.status === 'inProgress' ? 'In Progress' : 'Done'}
             </Badge>
             {#if task.sop.currentVersion}
-              <Badge variant="outline" class="bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:border-slate-600">
+              <Badge variant="outline" class="bg-secondary text-secondary-foreground border-border">
                 v{task.sop.currentVersion.versionNumber}
               </Badge>
             {/if}
             {#if task.assignedTo}
-              <Badge variant="outline" class="bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800">
+              <Badge variant="outline" class="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800">
                 <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
@@ -174,53 +174,55 @@
           <!-- Progress -->
           <div class="space-y-2">
             <div class="flex items-center justify-between text-sm">
-              <span class="text-slate-600 dark:text-slate-400">Progress</span>
-              <span class="text-slate-900 dark:text-white font-medium">
+              <span class="text-muted-foreground">Progress</span>
+              <span class="text-foreground font-medium">
                 {task.completedSteps.length} / {getSteps().length} steps
               </span>
             </div>
-            <div class="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+            <div class="w-full bg-secondary rounded-full h-2">
               <div
-                class="bg-emerald-500 h-2 rounded-full transition-all"
+                class="bg-primary h-2 rounded-full transition-all"
                 style="width: {getProgress()}%"
               ></div>
             </div>
           </div>
 
-          <div class="border-t border-slate-200 dark:border-slate-700"></div>
+          <div class="border-t border-border"></div>
 
           <!-- Steps -->
           <div class="space-y-4">
-            <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Procedure Steps</h3>
+            <h3 class="text-lg font-semibold text-foreground">Procedure Steps</h3>
             
             {#each getSteps() as step, index}
-              <Card class="p-4 {task.completedSteps.includes(index) ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''}">
+              <Card class="p-4 {task.completedSteps.includes(index) ? 'bg-primary/5' : ''}">
                 <div class="flex items-start gap-4">
                   <!-- Checkbox -->
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onclick={() => toggleStepComplete(index)}
-                    class="flex-shrink-0 mt-1"
+                    class="flex-shrink-0 mt-1 p-0 h-auto"
                   >
                     {#if task.completedSteps.includes(index)}
-                      <svg class="w-6 h-6 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
+                      <svg class="w-6 h-6 text-primary" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     {:else}
-                      <svg class="w-6 h-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg class="w-6 h-6 text-muted-foreground hover:text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     {/if}
-                  </button>
+                  </Button>
                   
                   <!-- Step Content -->
                   <div class="flex-1 min-w-0">
                     <div class="flex items-start justify-between gap-4">
                       <div class="flex-1">
-                        <h4 class="font-medium text-slate-900 dark:text-white mb-1">
+                        <h4 class="font-medium text-foreground mb-1">
                           Step {index + 1}: {step.title}
                         </h4>
                         {#if step.instructions}
-                          <p class="text-sm text-slate-600 dark:text-slate-400">
+                          <p class="text-sm text-muted-foreground">
                             {step.instructions}
                           </p>
                         {/if}
@@ -228,12 +230,14 @@
                       
                       <!-- Timer Controls -->
                       <div class="flex items-center gap-2">
-                        <div class="text-sm font-mono text-slate-700 dark:text-slate-300 min-w-[80px] text-right">
+                        <div class="text-sm font-mono text-foreground min-w-[80px] text-right">
                           {getStepTimeDisplay(index)}
                         </div>
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onclick={() => toggleStepTimer(index)}
-                          class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors {isStepTimerActive(index) ? 'text-red-600' : 'text-emerald-600'}"
+                          class="p-2 {isStepTimerActive(index) ? 'text-destructive hover:text-destructive' : 'text-primary hover:text-primary'}"
                           title={isStepTimerActive(index) ? 'Pause timer' : 'Start timer'}
                         >
                           {#if isStepTimerActive(index)}
@@ -245,12 +249,12 @@
                               <path d="M8 5v14l11-7z" />
                             </svg>
                           {/if}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                     
                     {#if step.estimatedTimeMinutes}
-                      <div class="mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <div class="mt-2 text-xs text-muted-foreground flex items-center gap-1">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
@@ -264,7 +268,7 @@
             
             {#if getSteps().length === 0}
               <Card class="p-8 text-center">
-                <p class="text-slate-500 dark:text-slate-400">No steps defined for this SOP</p>
+                <p class="text-muted-foreground">No steps defined for this SOP</p>
               </Card>
             {/if}
           </div>
@@ -274,34 +278,37 @@
         <div class="space-y-4 overflow-y-auto">
           <!-- Status Card -->
           <Card class="p-4">
-            <h3 class="font-semibold text-slate-900 dark:text-white mb-3">Status</h3>
+            <h3 class="font-semibold text-foreground mb-3">Status</h3>
             <div class="space-y-2">
-              <button
+              <Button
+                variant={task.status === 'todo' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('todo')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'todo' ? 'bg-slate-100 border-slate-300 dark:bg-slate-700 dark:border-slate-600' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}"
+                class="w-full justify-start"
               >
-                <span class="text-sm text-slate-700 dark:text-slate-300">To Do</span>
-              </button>
-              <button
+                <span class="text-sm text-foreground">To Do</span>
+              </Button>
+              <Button
+                variant={task.status === 'inProgress' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('inProgress')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'inProgress' ? 'bg-blue-100 border-blue-300 dark:bg-blue-900/20 dark:border-blue-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}"
+                class="w-full justify-start"
               >
-                <span class="text-sm text-slate-700 dark:text-slate-300">In Progress</span>
-              </button>
-              <button
+                <span class="text-sm text-foreground">In Progress</span>
+              </Button>
+              <Button
+                variant={task.status === 'done' ? 'secondary' : 'outline'}
                 onclick={() => handleStatusChange('done')}
-                class="w-full p-2 text-left rounded-lg border transition-colors {task.status === 'done' ? 'bg-emerald-100 border-emerald-300 dark:bg-emerald-900/20 dark:border-emerald-800' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}"
+                class="w-full justify-start"
               >
-                <span class="text-sm text-slate-700 dark:text-slate-300">Done</span>
-              </button>
+                <span class="text-sm text-foreground">Done</span>
+              </Button>
             </div>
           </Card>
 
           <!-- Materials -->
           {#if materials.length > 0}
             <Card class="p-4">
-              <h3 class="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <h3 class="font-semibold text-foreground mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
                 </svg>
                 Materials
@@ -313,9 +320,9 @@
                       type="checkbox"
                       checked={task.materialsChecked.includes(material)}
                       onchange={() => toggleMaterial(material)}
-                      class="w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+                      class="w-4 h-4 text-primary border-input rounded focus:ring-ring"
                     />
-                    <span class="text-sm text-slate-700 dark:text-slate-300">{material}</span>
+                    <span class="text-sm text-foreground">{material}</span>
                   </label>
                 {/each}
               </div>
@@ -325,8 +332,8 @@
           <!-- Equipment -->
           {#if equipment.length > 0}
             <Card class="p-4">
-              <h3 class="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <h3 class="font-semibold text-foreground mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
                 Equipment
@@ -338,9 +345,9 @@
                       type="checkbox"
                       checked={task.equipmentChecked.includes(item)}
                       onchange={() => toggleEquipment(item)}
-                      class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                      class="w-4 h-4 text-primary border-input rounded focus:ring-ring"
                     />
-                    <span class="text-sm text-slate-700 dark:text-slate-300">{item}</span>
+                    <span class="text-sm text-foreground">{item}</span>
                   </label>
                 {/each}
               </div>
@@ -350,7 +357,7 @@
       </div>
 
       <!-- Footer -->
-      <div class="border-t border-slate-200 dark:border-slate-700 p-6">
+      <div class="border-t border-border p-6">
         <div class="flex justify-end gap-4">
           <Button variant="outline" onclick={onClose}>
             Close

@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { authApi } from '$lib/api/auth';
   import type { RegisterRequest } from '$lib/api/auth';
+  import { Button } from '$lib/components/ui/button';
 
   let firstName = '';
   let lastName = '';
@@ -66,15 +67,15 @@
   <title>Register - Nori</title>
 </svelte:head>
 
-<div class="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen flex items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8">
   <div class="max-w-md w-full space-y-8">
     <div>
-      <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
+      <h2 class="mt-6 text-center text-3xl font-extrabold text-foreground">
         Create your account
       </h2>
-      <p class="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+      <p class="mt-2 text-center text-sm text-muted-foreground">
         Or
-        <a href="/login" class="font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300">
+        <a href="/login" class="font-medium text-primary hover:text-primary/80">
           sign in to existing account
         </a>
       </p>
@@ -89,7 +90,7 @@
             name="firstName"
             type="text"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-t-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="First Name"
             bind:value={firstName}
           />
@@ -101,7 +102,7 @@
             name="lastName"
             type="text"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Last Name"
             bind:value={lastName}
           />
@@ -114,7 +115,7 @@
             type="email"
             autocomplete="email"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Email address"
             bind:value={email}
           />
@@ -127,7 +128,7 @@
             type="password"
             autocomplete="new-password"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Password"
             bind:value={password}
           />
@@ -140,7 +141,7 @@
             type="password"
             autocomplete="new-password"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white bg-white dark:bg-gray-800 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm"
+            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-b-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Confirm Password"
             bind:value={confirmPassword}
             on:keypress={handleKeyPress}
@@ -149,31 +150,29 @@
       </div>
 
       {#if error}
-        <div class="rounded-md bg-red-50 dark:bg-red-900/30 p-4">
-          <div class="text-sm text-red-700 dark:text-red-400">{error}</div>
+        <div class="rounded-md bg-destructive/10 p-4">
+          <div class="text-sm text-destructive">{error}</div>
         </div>
       {/if}
 
       {#if success}
-        <div class="rounded-md bg-green-50 dark:bg-green-900/30 p-4">
-          <div class="text-sm text-green-700 dark:text-green-400">{success}</div>
+        <div class="rounded-md bg-primary/10 p-4">
+          <div class="text-sm text-primary">{success}</div>
         </div>
       {/if}
 
       <div>
-        <button
+        <Button
           type="submit"
           disabled={isLoading}
-          class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="w-full"
         >
           {#if isLoading}
-            <span class="absolute left-1/2 transform -translate-x-1/2">
-              Creating account...
-            </span>
+            Creating account...
           {:else}
             Create account
           {/if}
-        </button>
+        </Button>
       </div>
     </form>
   </div>

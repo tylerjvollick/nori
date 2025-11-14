@@ -3,7 +3,7 @@
   import { sopApi } from '$lib/api/sop';
   import type { SOPStep } from '$lib/api/sop';
   import SOPStepItem from './SOPStepItem.svelte';
-  import SOPStepForm from './SOPStepForm.svelte';
+  import { Button } from '$lib/components/ui/button';
 
   interface Props {
     steps: SOPStep[];
@@ -22,7 +22,6 @@
   let creatingNewStep = $state(false);
   let newStepTitle = $state('');
   let newStepTitleInput = $state<HTMLInputElement>();
-  let isReordering = $state(false);
   let isDragging = $state(false);
 
   // Update local state when props change
@@ -234,13 +233,13 @@
   {#if localSteps && localSteps.length > 0}
     <div>
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
-        <button
+        <h2 class="text-xl font-semibold text-foreground">Steps</h2>
+        <Button
           onclick={startAddingStep}
-          class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+          size="sm"
         >
           + Add Step
-        </button>
+        </Button>
       </div>
     
       <div 
@@ -266,9 +265,9 @@
 
         <!-- New Step Form -->
         {#if creatingNewStep}
-          <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+          <div class="border border-primary/30 rounded-lg overflow-hidden bg-primary/5">
             <div class="flex items-center gap-3 p-4">
-              <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+              <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
                 {localSteps.length + 1}
               </span>
               <input
@@ -277,17 +276,18 @@
                 bind:value={newStepTitle}
                 onkeydown={handleNewStepKeydown}
                 placeholder="Enter step title and press Enter or Tab..."
-                class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                class="flex-1 bg-card border border-border rounded-lg px-3 py-2 text-foreground focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
-              <button
+              <Button
                 onclick={cancelAddingStep}
-                class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                variant="ghost"
+                size="icon"
                 aria-label="Cancel"
               >
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>
+              </Button>
             </div>
           </div>
         {/if}
@@ -297,19 +297,19 @@
     <!-- No steps yet -->
     <div>
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Steps</h2>
-        <button
+        <h2 class="text-xl font-semibold text-foreground">Steps</h2>
+        <Button
           onclick={startAddingStep}
-          class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg transition-colors"
+          size="sm"
         >
           + Add Step
-        </button>
+        </Button>
       </div>
       
       {#if creatingNewStep}
-        <div class="border border-blue-500 dark:border-blue-600 rounded-lg overflow-hidden bg-blue-50 dark:bg-blue-900/20">
+        <div class="border border-primary/30 rounded-lg overflow-hidden bg-primary/5">
           <div class="flex items-center gap-3 p-4">
-            <span class="inline-flex items-center justify-center w-8 h-8 bg-blue-600 text-white rounded-full font-bold text-sm flex-shrink-0">
+            <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
               1
             </span>
             <input
@@ -318,21 +318,22 @@
               bind:value={newStepTitle}
               onkeydown={handleNewStepKeydown}
               placeholder="Enter step title and press Enter or Tab..."
-              class="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              class="flex-1 bg-card border border-border rounded-lg px-3 py-2 text-foreground focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-            <button
+            <Button
               onclick={cancelAddingStep}
-              class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+              variant="ghost"
+              size="icon"
               aria-label="Cancel"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </Button>
           </div>
         </div>
       {:else}
-        <p class="text-gray-600 dark:text-gray-400 text-sm">No steps yet. Click "Add Step" to create your first step.</p>
+        <p class="text-muted-foreground text-sm">No steps yet. Click "Add Step" to create your first step.</p>
       {/if}
     </div>
   {/if}

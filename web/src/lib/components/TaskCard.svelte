@@ -2,6 +2,7 @@
   import type { Task } from '$lib/types/task';
   import Card from '$lib/components/ui/Card.svelte';
   import Badge from '$lib/components/ui/Badge.svelte';
+  import { Button } from '$lib/components/ui/button';
   
   interface TaskCardProps {
     task: Task;
@@ -24,13 +25,13 @@
   function getStatusColor(status: string): string {
     switch (status) {
       case 'todo':
-        return 'bg-slate-100 text-slate-700 border-slate-200';
+        return 'bg-secondary text-secondary-foreground border-border';
       case 'inProgress':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
+        return 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800';
       case 'done':
-        return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        return 'bg-primary/10 text-primary border-primary/20';
       default:
-        return 'bg-slate-100 text-slate-700 border-slate-200';
+        return 'bg-secondary text-secondary-foreground border-border';
     }
   }
   
@@ -39,19 +40,20 @@
   const progress = totalSteps > 0 ? (completedCount / totalSteps) * 100 : 0;
 </script>
 
-<button
-  class="w-full text-left"
+<Button
+  variant="ghost"
+  class="w-full text-left h-auto p-0 hover:bg-transparent"
   onclick={(e) => onclick?.(e)}
   type="button"
 >
   <Card 
-    class="p-4 cursor-pointer hover:shadow-md transition-all border border-slate-200 dark:border-slate-700 {isDragging ? 'opacity-50' : 'opacity-100'}"
+    class="p-4 cursor-pointer hover:shadow-md transition-all border border-border {isDragging ? 'opacity-50' : 'opacity-100'}"
   >
     <div class="space-y-3">
       <div>
-        <h3 class="text-slate-900 dark:text-slate-100 font-medium mb-1">{task.sop.name}</h3>
+        <h3 class="text-foreground font-medium mb-1">{task.sop.name}</h3>
         {#if task.sop.currentVersion?.description}
-          <p class="text-slate-500 dark:text-slate-400 text-sm line-clamp-2">
+          <p class="text-muted-foreground text-sm line-clamp-2">
             {task.sop.currentVersion.description}
           </p>
         {/if}
@@ -60,13 +62,13 @@
       <!-- Progress Bar -->
       {#if totalSteps > 0}
         <div class="space-y-1">
-          <div class="flex justify-between text-xs text-slate-500 dark:text-slate-400">
+          <div class="flex justify-between text-xs text-muted-foreground">
             <span>Progress</span>
             <span>{completedCount}/{totalSteps} steps</span>
           </div>
-          <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
+          <div class="w-full bg-secondary rounded-full h-2">
             <div 
-              class="bg-emerald-500 h-2 rounded-full transition-all"
+              class="bg-primary h-2 rounded-full transition-all"
               style="width: {progress}%"
             ></div>
           </div>
@@ -79,14 +81,14 @@
           {task.status === 'todo' ? 'To Do' : task.status === 'inProgress' ? 'In Progress' : 'Done'}
         </Badge>
         {#if task.sop.currentVersion}
-          <Badge variant="outline" class="bg-slate-100 text-slate-600 border-slate-200">
+          <Badge variant="outline" class="bg-secondary text-secondary-foreground border-border">
             v{task.sop.currentVersion.versionNumber}
           </Badge>
         {/if}
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+      <div class="flex items-center gap-4 text-sm text-muted-foreground">
         {#if task.assignedTo}
           <div class="flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -104,4 +106,4 @@
       </div>
     </div>
   </Card>
-</button>
+</Button>

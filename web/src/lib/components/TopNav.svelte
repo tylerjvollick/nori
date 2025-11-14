@@ -3,6 +3,7 @@
   import { themeStore } from '$lib/stores/theme';
   import { sidebarStore } from '$lib/stores/sidebar';
   import { goto } from '$app/navigation';
+  import { Button } from '$lib/components/ui/button';
   import { Moon, Sun, Search, Plus, Menu } from 'lucide-svelte';
   import type { User } from '$lib/api/auth';
 
@@ -56,27 +57,28 @@
 
 <svelte:window onclick={closeDropdown} />
 
-<header class="border-b border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm sticky top-0 z-40">
+<header class="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
   <div class="max-w-7xl mx-auto px-6 py-4">
     <div class="flex items-center justify-between gap-4">
       <!-- Sidebar Toggle Button -->
-      <button
+      <Button
         onclick={toggleSidebar}
-        class="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        variant="ghost"
+        size="icon"
         aria-label="Toggle sidebar"
       >
         <Menu class="w-5 h-5" />
-      </button>
+      </Button>
 
       <!-- Search Bar (Placeholder for future) -->
       <div class="hidden md:flex flex-1 max-w-xl">
         <div class="relative w-full">
-          <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search SOPs, tasks... (coming soon)"
             disabled
-            class="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-400 cursor-not-allowed"
+            class="w-full pl-10 pr-4 py-2 border border-border rounded-lg bg-background text-muted-foreground cursor-not-allowed"
           />
         </div>
       </div>
@@ -85,56 +87,59 @@
       <div class="flex items-center gap-3">
         <!-- Create Dropdown -->
         <div class="relative">
-          <button
+          <Button
             onclick={(e) => {
               e.stopPropagation();
               showDropdown = !showDropdown;
             }}
-            class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            class="flex items-center gap-2"
           >
             <Plus class="w-4 h-4" />
             Create
-          </button>
+          </Button>
 
           {#if showDropdown}
             <div 
               role="menu"
-              class="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50"
+              class="absolute right-0 mt-2 w-56 bg-card rounded-lg shadow-lg border border-border py-1 z-50"
               onclick={(e) => e.stopPropagation()}
               onkeydown={(e) => e.key === 'Escape' && closeDropdown()}
             >
-              <button
+              <Button
                 onclick={handleCreateTask}
-                class="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-start gap-3"
+                variant="ghost"
+                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
               >
-                <svg class="w-5 h-5 text-emerald-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg class="w-5 h-5 text-primary mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
                 <div>
-                  <div class="text-sm font-medium text-gray-900 dark:text-white">Task</div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400">From SOP template</div>
+                  <div class="text-sm font-medium text-foreground">Task</div>
+                  <div class="text-xs text-muted-foreground">From SOP template</div>
                 </div>
-              </button>
-              <button
+              </Button>
+              <Button
                 onclick={handleCreateSOP}
-                class="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-start gap-3"
+                variant="ghost"
+                class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
               >
-                <svg class="w-5 h-5 text-emerald-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg class="w-5 h-5 text-primary mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 <div>
-                  <div class="text-sm font-medium text-gray-900 dark:text-white">SOP</div>
-                  <div class="text-xs text-gray-500 dark:text-gray-400">Create new template</div>
+                  <div class="text-sm font-medium text-foreground">SOP</div>
+                  <div class="text-xs text-muted-foreground">Create new template</div>
                 </div>
-              </button>
+              </Button>
             </div>
           {/if}
         </div>
 
         <!-- Theme Toggle -->
-        <button
+        <Button
           onclick={toggleTheme}
-          class="p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          variant="ghost"
+          size="icon"
           aria-label="Toggle theme"
         >
           {#if theme === 'dark'}
@@ -142,20 +147,22 @@
           {:else}
             <Moon class="w-5 h-5" />
           {/if}
-        </button>
+        </Button>
 
         <!-- User Menu -->
         {#if user}
-          <div class="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700">
-            <span class="text-sm text-gray-700 dark:text-gray-300 hidden sm:inline">
+          <div class="flex items-center gap-3 pl-3 border-l border-border">
+            <span class="text-sm text-foreground hidden sm:inline">
               {user.firstName} {user.lastName}
             </span>
-            <button
+            <Button
               onclick={handleLogout}
-              class="text-sm text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium"
+              variant="ghost"
+              size="sm"
+              class="text-sm"
             >
               Logout
-            </button>
+            </Button>
           </div>
         {/if}
       </div>
