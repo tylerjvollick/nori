@@ -27,6 +27,43 @@
     oncancel,
     onedit
   }: Props = $props();
+
+  // State for inline title editing
+  let editingTitle = $state(false);
+  let editedTitle = $state('');
+  let titleInputRef: HTMLInputElement | null = $state(null);
+
+  function startTitleEdit() {
+    editedTitle = step.title;
+    editingTitle = true;
+    // Focus the input after it's rendered
+    setTimeout(() => {
+      titleInputRef?.focus();
+      titleInputRef?.select();
+    }, 0);
+  }
+
+  function saveTitleEdit() {
+    if (editedTitle.trim()) {
+      step.title = editedTitle.trim();
+    }
+    editingTitle = false;
+  }
+
+  function cancelTitleEdit() {
+    editingTitle = false;
+    editedTitle = '';
+  }
+
+  function handleTitleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveTitleEdit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelTitleEdit();
+    }
+  }
 </script>
 
 <div class="step-item border rounded-lg overflow-hidden group border-border">
@@ -43,30 +80,76 @@
           <path d="M7 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 2zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 14zm6-8a2 2 0 1 0-.001-4.001A2 2 0 0 0 13 6zm0 2a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 8zm0 6a2 2 0 1 0 .001 4.001A2 2 0 0 0 13 14z" />
         </svg>
       </div>
-      <button 
-        class="flex items-center gap-3 flex-1 text-left h-auto p-0"
-        onclick={ontoggle}
-        type="button"
-      >
-        <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
-          {displayIndex}
-        </span>
-        <h3 class="text-base font-semibold text-foreground">
-          {step.title}
-        </h3>
-        {#if step.instructions}
-          <svg 
-            class="w-4 h-4 text-muted-foreground dark:text-muted-foreground500 flex-shrink-0" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-            aria-label="Has instructions"
+
+      <span class="inline-flex items-center justify-center w-8 h-8 bg-primary text-primary-foreground rounded-full font-bold text-sm flex-shrink-0">
+        {displayIndex}
+      </span>
+
+      {#if editingTitle}
+        <!-- Title Edit Mode -->
+        <div class="flex items-center gap-2 flex-1">
+          <input
+            bind:this={titleInputRef}
+            bind:value={editedTitle}
+            onkeydown={handleTitleKeydown}
+            type="text"
+            class="flex-1 bg-card border border-border rounded px-2 py-1 text-base font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onclick={saveTitleEdit}
+            aria-label="Accept"
+            type="button"
+            class="text-green-600 hover:text-green-700 hover:bg-green-100 dark:hover:bg-green-900"
           >
-            <title>Has instructions</title>
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        {/if}
-      </button>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onclick={cancelTitleEdit}
+            aria-label="Cancel"
+            type="button"
+            class="text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </Button>
+        </div>
+      {:else}
+        <!-- Title View Mode with hover edit -->
+        <div class="flex items-center gap-2 flex-1 group/title">
+          <h3 class="text-base font-semibold text-foreground">
+            {step.title}
+          </h3>
+          <button
+            onclick={startTitleEdit}
+            type="button"
+            class="opacity-0 group-hover/title:opacity-100 transition-opacity p-1 hover:bg-accent rounded"
+            aria-label="Edit title"
+          >
+            <svg class="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+          {#if step.instructions}
+            <svg 
+              class="w-4 h-4 text-muted-foreground dark:text-muted-foreground500 flex-shrink-0" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+              aria-label="Has instructions"
+            >
+              <title>Has instructions</title>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          {/if}
+        </div>
+      {/if}
     </div>
     
     <div class="flex items-center gap-3">
