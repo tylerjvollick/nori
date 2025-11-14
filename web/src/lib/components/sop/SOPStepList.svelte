@@ -17,7 +17,6 @@
 
   // Local state
   let localSteps = $state<SOPStep[]>([...steps]);
-  let expandedSteps = $state(new Set<number>());
   let creatingNewStep = $state(false);
   let newStepTitle = $state('');
   let newStepTitleInput = $state<HTMLInputElement>();
@@ -33,14 +32,6 @@
   function notifyChange() {
     if (onStepsChange) {
       onStepsChange(localSteps);
-    }
-  }
-
-  function toggleStep(stepId: number) {
-    if (expandedSteps.has(stepId)) {
-      expandedSteps = new Set([...expandedSteps].filter(id => id !== stepId));
-    } else {
-      expandedSteps = new Set([...expandedSteps, stepId]);
     }
   }
 
@@ -238,8 +229,7 @@
             displayIndex={index + 1}
             {sopId}
             {isDraftMode}
-            expanded={expandedSteps.has(step.id)}
-            ontoggle={() => toggleStep(step.id)}
+            expanded={false}
             onFieldUpdate={(updates) => updateStepField(index, updates)}
           />
         {/each}

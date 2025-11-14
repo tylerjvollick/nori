@@ -290,23 +290,88 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
       <!-- Left Column: Main Content -->
       <div class="lg:col-span-2 flex flex-col overflow-hidden">
-        <!-- Header with Breadcrumb and Title -->
-        <SOPHeader
-          bind:title={localTitle}
-          editing={editingTitle}
-          {isDraftMode}
-          versionNumber={$sopStore.currentSOP.currentVersion?.versionNumber}
-          lastUpdated={$sopStore.currentSOP.currentVersion?.updatedAt || $sopStore.currentSOP.updatedAt}
-          onstartedit={() => editingTitle = true}
-          oncanceledit={() => {
-            editingTitle = false;
-            localTitle = $sopStore.currentSOP?.name || '';
-          }}
-          onsave={saveTitle}
-        />
+        <!-- Sticky Breadcrumb -->
+        <div class="sticky top-0 z-10 bg-background py-4 px-4 border-b border-border">
+          <nav class="flex items-center text-sm text-muted-foreground">
+            <Button
+              onclick={() => goto('/sops')}
+              variant="link"
+              class="h-auto p-0"
+            >
+              SOPs
+            </Button>
+            <span class="mx-2">/</span>
+            <span class="text-foreground font-medium truncate">
+              {localTitle}
+            </span>
+          </nav>
+        </div>
 
         <!-- Scrollable Content -->
         <div class="flex-1 overflow-y-auto px-4 py-6 space-y-6">
+          <!-- Editable Title -->
+          <div class="py-6 pt-4 border-b border-border -mx-4 px-4 -mt-6">
+            {#if editingTitle}
+              <div class="space-y-3">
+                <input
+                  type="text"
+                  bind:value={localTitle}
+                  class="w-full text-3xl font-bold text-foreground bg-background border border-border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') saveTitle();
+                    if (e.key === 'Escape') {
+                      editingTitle = false;
+                      localTitle = $sopStore.currentSOP?.name || '';
+                    }
+                  }}
+                />
+                <div class="flex gap-2">
+                  <Button
+                    onclick={saveTitle}
+                    size="sm"
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    onclick={() => {
+                      editingTitle = false;
+                      localTitle = $sopStore.currentSOP?.name || '';
+                    }}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            {:else}
+              <Button
+                variant="ghost"
+                onclick={() => editingTitle = true}
+                class="text-3xl font-bold text-left w-full h-auto justify-start p-0"
+                type="button"
+              >
+                {localTitle}
+              </Button>
+            {/if}
+            
+            {#if isDraftMode}
+              <div class="flex items-center gap-2 mt-2">
+                <span class="text-xs px-2 py-1 bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800 rounded-full font-medium">
+                  DRAFT MODE
+                </span>
+                <p class="text-sm text-muted-foreground">
+                  Last updated: {formatDate($sopStore.currentSOP.currentVersion?.updatedAt || $sopStore.currentSOP.updatedAt)}
+                </p>
+              </div>
+            {:else if $sopStore.currentSOP.currentVersion?.versionNumber}
+              <p class="text-sm text-muted-foreground mt-2">
+                Version {$sopStore.currentSOP.currentVersion.versionNumber} • 
+                Last updated: {formatDate($sopStore.currentSOP.currentVersion?.updatedAt || $sopStore.currentSOP.updatedAt)}
+              </p>
+            {/if}
+          </div>
+
           <!-- Description -->
           <SOPDescription
             bind:description={localDescription}

@@ -8,6 +8,7 @@
     isDraftMode: boolean;
     versionNumber?: number;
     lastUpdated: string;
+    showBreadcrumb?: boolean;
     ontitlechange?: (title: string) => void;
     onstartedit?: () => void;
     oncanceledit?: () => void;
@@ -20,6 +21,7 @@
     isDraftMode,
     versionNumber,
     lastUpdated,
+    showBreadcrumb = true,
     ontitlechange,
     onstartedit,
     oncanceledit,
@@ -46,22 +48,24 @@
   }
 </script>
 
-<!-- Breadcrumb -->
-<div class="sticky top-0 z-10 bg-background py-4 px-4 border-b border-border">
-  <nav class="flex items-center text-sm text-muted-foreground">
-    <Button
-      onclick={() => goto('/sops')}
-      variant="link"
-      class="h-auto p-0"
-    >
-      SOPs
-    </Button>
-    <span class="mx-2">/</span>
-    <span class="text-foreground font-medium truncate">
-      {title}
-    </span>
-  </nav>
-</div>
+{#if showBreadcrumb}
+  <!-- Breadcrumb -->
+  <div class="py-4 px-4 border-b border-border bg-background">
+    <nav class="flex items-center text-sm text-muted-foreground">
+      <Button
+        onclick={() => goto('/sops')}
+        variant="link"
+        class="h-auto p-0"
+      >
+        SOPs
+      </Button>
+      <span class="mx-2">/</span>
+      <span class="text-foreground font-medium truncate">
+        {title}
+      </span>
+    </nav>
+  </div>
+{/if}
 
 <!-- Title Section -->
 <div class="px-4 pt-4 pb-6 border-b border-border">

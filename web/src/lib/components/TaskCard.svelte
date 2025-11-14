@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Task } from '$lib/types/task';
   import Card from '$lib/components/ui/Card.svelte';
-  import Badge from '$lib/components/ui/Badge.svelte';
+  import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   
   interface TaskCardProps {

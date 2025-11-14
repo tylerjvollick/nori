@@ -4,7 +4,7 @@
   import { taskStore } from '$lib/stores/task';
   import Dialog from '$lib/components/ui/Dialog.svelte';
   import Button from '$lib/components/ui/Button.svelte';
-  import Badge from '$lib/components/ui/Badge.svelte';
+  import { Badge } from '$lib/components/ui/badge';
   import Card from '$lib/components/ui/Card.svelte';
   
   interface TaskDetailDialogProps {
