@@ -18,11 +18,11 @@
   // Local state
   let localSteps = $state<SOPStep[]>([...steps]);
   let expandedSteps = $state(new Set<number>());
-  let editingSteps = $state(new Set<number>());
   let creatingNewStep = $state(false);
   let newStepTitle = $state('');
   let newStepTitleInput = $state<HTMLInputElement>();
   let isDragging = $state(false);
+  let isReordering = $state(false);
 
   // Update local state when props change
   $effect(() => {
@@ -96,7 +96,7 @@
     }
   }
 
-  async function saveStep(stepIndex: number) {
+  async function updateStepField(stepIndex: number, updates: Partial<SOPStep>) {
     if (!localSteps[stepIndex]) return;
 
     const step = localSteps[stepIndex];
@@ -107,31 +107,14 @@
         await onEnsureDraft();
       }
       
-      await sopApi.updateStep(sopId, step.id, {
-        title: step.title,
-        instructions: step.instructions,
-        estimatedTimeMinutes: step.estimatedTimeMinutes,
-        requiresApproval: step.requiresApproval
-      });
+      await sopApi.updateStep(sopId, step.id, updates);
 
-      // Optimistic update - already in localSteps
+      // Update local state
+      localSteps[stepIndex] = { ...step, ...updates };
       notifyChange();
-
-      // Exit edit mode
-      editingSteps = new Set([...editingSteps].filter(id => id !== stepIndex));
     } catch (error) {
       console.error('Failed to update step:', error);
     }
-  }
-
-  function startEditingStep(stepIndex: number) {
-    editingSteps = new Set([...editingSteps, stepIndex]);
-  }
-
-  function cancelEditingStep(stepIndex: number) {
-    editingSteps = new Set([...editingSteps].filter(id => id !== stepIndex));
-    // Reset to original values
-    localSteps = [...steps];
   }
 
   // DnD event handlers
@@ -253,13 +236,11 @@
             bind:step={localSteps[index]}
             stepIndex={index}
             displayIndex={index + 1}
+            {sopId}
             {isDraftMode}
             expanded={expandedSteps.has(step.id)}
-            editing={editingSteps.has(index)}
             ontoggle={() => toggleStep(step.id)}
-            onsave={() => saveStep(index)}
-            oncancel={() => cancelEditingStep(index)}
-            onedit={() => startEditingStep(index)}
+            onFieldUpdate={(updates) => updateStepField(index, updates)}
           />
         {/each}
 
