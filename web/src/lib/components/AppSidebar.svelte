@@ -23,7 +23,11 @@
 	import type { ComponentProps } from 'svelte';
 	import type { User } from '$lib/api/auth';
 
-	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
+	let {
+		ref = $bindable(null),
+		collapsible = "icon",
+		...restProps
+	}: ComponentProps<typeof Sidebar.Root> = $props();
 
 	let spaces = $derived($spaceStore.recentSpaces);
 	let user = $state<User | null>(null);
@@ -94,12 +98,12 @@
 	];
 </script>
 
-<Sidebar.Root {...restProps} bind:ref>
+<Sidebar.Root {collapsible} {...restProps} bind:ref>
 	<Sidebar.Header>
-		<div class="flex items-center gap-2 px-4 py-3">
-			<div class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
+		<div class="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center h-(--header-height)">
+			<div class="size-10 bg-sidebar-primary rounded-lg flex items-center justify-center shrink-0">
 				<svg
-					class="w-5 h-5 text-sidebar-primary-foreground"
+					class="size-6 text-sidebar-primary-foreground"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -112,7 +116,7 @@
 					/>
 				</svg>
 			</div>
-			<span class="font-bold text-sidebar-foreground">Nori</span>
+			<span class="font-bold text-sidebar-foreground group-data-[collapsible=icon]:hidden">Nori</span>
 		</div>
 	</Sidebar.Header>
 
