@@ -72,8 +72,6 @@
     // Handle upload success
     uppy.on('upload-success', async (file, response) => {
       console.log('Upload completed:', file?.name);
-      // Refresh media list after upload completes
-      await refreshMediaList();
     });
 
     // Handle upload error
@@ -84,7 +82,9 @@
     });
 
     // Handle all uploads complete
-    uppy.on('complete', (result) => {
+    uppy.on('complete', async (result) => {
+      // Refresh media list after all uploads complete
+      await refreshMediaList();
       uploading = false;
       uploadProgress = 0;
       if (fileInputRef) fileInputRef.value = '';
@@ -327,7 +327,7 @@
         Uploading... {uploadProgress}%
       {:else}
         <Upload class="w-4 h-4 mr-2" />
-        Upload Media (Multiple)
+        Upload Media
       {/if}
     </Button>
     
