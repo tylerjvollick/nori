@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log"
 	"os"
 	"strconv"
 
@@ -56,11 +57,18 @@ func New() *App {
 	spaceService := services.NewSpaceService(spaceRepo, userRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
 
+	// Initialize tus service for chunked uploads
+	tusService, err := services.NewTusService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
+	if err != nil {
+		log.Fatal("Failed to initialize tus service: " + err.Error())
+	}
+
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
 	sopMediaHandler := handlers.NewSOPStepMediaHandler(sopMediaService)
+	tusHandler := handlers.NewTusHandler(tusService)
 	spaceHandler := handlers.NewSpaceHandler(spaceService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
@@ -68,11 +76,16 @@ func New() *App {
 		BodyLimit: int(maxUploadSize), // Use the configured max upload size
 	})
 
-	// Add CORS middleware
+	// Add CORS middleware with TUS-specific headers
+	// TUS built-in CORS is disabled, so Fiber handles all CORS
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http://localhost:5173,http://localhost:5174",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
-		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+		AllowOrigins: "http://localhost:5173,http://localhost:5174",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, Content-Length, " +
+			"Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, " +
+			"Upload-Defer-Length, Upload-Concat, X-Requested-With",
+		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+		ExposeHeaders: "Tus-Resumable, Tus-Version, Tus-Extension, " +
+			"Upload-Offset, Upload-Length, Upload-Metadata, Location, Content-Length",
 		AllowCredentials: true,
 	}))
 
@@ -82,6 +95,7 @@ func New() *App {
 	userHandler.RegisterUserRoutes(app)
 	sopHandler.RegisterSOPRoutes(app)
 	sopMediaHandler.RegisterMediaRoutes(app)
+	tusHandler.RegisterTusRoutes(app)
 	spaceHandler.RegisterSpaceRoutes(app)
 
 	return &App{

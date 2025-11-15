@@ -9,6 +9,7 @@
     <h1>CORS Test</h1>
     <button id="testHealth">Test Health Endpoint</button>
     <button id="testLogin">Test Login Endpoint</button>
+    <button id="testTusUpload">Test TUS Upload</button>
     <div id="result"></div>
 
     <script>
@@ -40,6 +41,42 @@
                 result.innerHTML = `<pre>Login: ${JSON.stringify(data, null, 2)}</pre>`;
             } catch (error) {
                 result.innerHTML = `<pre>Error: ${error.message}</pre>`;
+            }
+        });
+
+        document.getElementById('testTusUpload').addEventListener('click', async () => {
+            try {
+                result.innerHTML = '<pre>Creating TUS upload...</pre>';
+                
+                // Step 1: Create upload
+                const createResponse = await fetch('http://localhost:8080/api/tus/', {
+                    method: 'POST',
+                    headers: {
+                        'Tus-Resumable': '1.0.0',
+                        'Upload-Length': '100',
+                        'Upload-Metadata': 'filename dGVzdC5qcGc=,filetype aW1hZ2UvanBlZw==,stepId MQ=='
+                    }
+                });
+                
+                const uploadUrl = createResponse.headers.get('Location');
+                result.innerHTML = `<pre>Upload created: ${uploadUrl}\n\nUploading chunk...</pre>`;
+                
+                // Step 2: Upload chunk
+                const data = new Uint8Array(100).fill(0);
+                const patchResponse = await fetch(uploadUrl, {
+                    method: 'PATCH',
+                    headers: {
+                        'Tus-Resumable': '1.0.0',
+                        'Upload-Offset': '0',
+                        'Content-Type': 'application/offset+octet-stream'
+                    },
+                    body: data
+                });
+                
+                const offset = patchResponse.headers.get('Upload-Offset');
+                result.innerHTML = `<pre>✅ Upload successful!\n\nUpload URL: ${uploadUrl}\nFinal Offset: ${offset} bytes</pre>`;
+            } catch (error) {
+                result.innerHTML = `<pre>❌ Error: ${error.message}\n\n${error.stack}</pre>`;
             }
         });
     </script>

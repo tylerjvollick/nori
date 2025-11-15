@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { dndzone } from 'svelte-dnd-action';
+  import { onMount, onDestroy } from 'svelte';
   import { sopApi } from '$lib/api/sop';
   import type { SOPStepMedia } from '$lib/api/sop';
   import { Button } from '$lib/components/ui/button';
   import * as Carousel from '$lib/components/ui/carousel';
   import * as Dialog from '$lib/components/ui/dialog';
   import { Image, Trash2, Upload, X, Video } from 'lucide-svelte';
+  import Uppy from '@uppy/core';
+  import Tus from '@uppy/tus';
 
   interface Props {
     sopId: number;
@@ -19,17 +21,92 @@
   // Local state
   let localPhotos = $state<SOPStepMedia[]>([...photos]);
   let uploading = $state(false);
-  let isDragging = $state(false);
+  let uploadProgress = $state(0);
   let fileInputRef = $state<HTMLInputElement>();
   let selectedPhotoIndex = $state<number | null>(null);
   let deletingPhotoId = $state<number | null>(null);
   let fullscreenDialogOpen = $state(false);
   let fullscreenCarouselApi = $state<any>();
+  let uppy: Uppy | null = null;
 
   // Update local state when props change
   $effect(() => {
     localPhotos = [...photos];
   });
+
+  onMount(() => {
+    // Initialize Uppy with tus plugin
+    uppy = new Uppy({
+      restrictions: {
+        maxFileSize: 1024 * 1024 * 1024, // 1GB
+        allowedFileTypes: ['image/*', 'video/*']
+      },
+      autoProceed: true
+    });
+
+    // Configure tus plugin
+    uppy.use(Tus, {
+      endpoint: 'http://localhost:8080/api/tus/',
+      chunkSize: 5 * 1024 * 1024, // 5MB chunks
+      retryDelays: [0, 1000, 3000, 5000],
+      removeFingerprintOnSuccess: true,
+      withCredentials: false, // Don't send cookies (not needed for TUS uploads)
+      headers: {
+        // CORS headers are handled by browser
+      }
+    });
+
+    // Track upload progress
+    uppy.on('upload-progress', (file, progress) => {
+      if (file && progress.bytesTotal) {
+        uploadProgress = Math.round((progress.bytesUploaded / progress.bytesTotal) * 100);
+      }
+    });
+
+    // Handle upload start
+    uppy.on('upload', () => {
+      uploading = true;
+      uploadProgress = 0;
+    });
+
+    // Handle upload success
+    uppy.on('upload-success', async (file, response) => {
+      console.log('Upload completed:', file?.name);
+      // Refresh media list after upload completes
+      await refreshMediaList();
+    });
+
+    // Handle upload error
+    uppy.on('upload-error', (file, error) => {
+      console.error('Upload failed:', error);
+      alert(`Upload failed: ${error.message}`);
+      uploading = false;
+    });
+
+    // Handle all uploads complete
+    uppy.on('complete', (result) => {
+      uploading = false;
+      uploadProgress = 0;
+      if (fileInputRef) fileInputRef.value = '';
+    });
+  });
+
+  onDestroy(() => {
+    if (uppy) {
+      uppy.cancelAll();
+      uppy = null;
+    }
+  });
+
+  async function refreshMediaList() {
+    try {
+      const mediaItems = await sopApi.getStepMedia(sopId, stepId);
+      localPhotos = mediaItems;
+      notifyChange();
+    } catch (error) {
+      console.error('Failed to refresh media list:', error);
+    }
+  }
 
   // Notify parent of changes
   function notifyChange() {
@@ -61,29 +138,17 @@
       return;
     }
 
-    // Validate file size (1GB max)
-    const maxSize = 1024 * 1024 * 1024; // 1GB
-    if (file.size > maxSize) {
-      alert('File size must be less than 1GB');
-      return;
-    }
-
-    try {
-      uploading = true;
-      const newMedia = await sopApi.uploadStepMedia(sopId, stepId, file);
-      
-      // Add to local state
-      localPhotos = [...localPhotos, newMedia];
-      notifyChange();
-      
-      // Reset file input
-      if (target) target.value = '';
-    } catch (error) {
-      console.error('Failed to upload media:', error);
-      alert('Failed to upload media. Please try again.');
-    } finally {
-      uploading = false;
-    }
+    // Add metadata for server processing
+    uppy?.addFile({
+      name: file.name,
+      type: file.type,
+      data: file,
+      meta: {
+        stepId: stepId.toString(),
+        filename: file.name,
+        filetype: file.type
+      }
+    });
   }
 
   async function deletePhoto(photoId: number) {
@@ -118,37 +183,6 @@
   function closeLightbox() {
     fullscreenDialogOpen = false;
     selectedPhotoIndex = null;
-  }
-
-  // DnD event handlers
-  function handleDndConsider(e: CustomEvent) {
-    localPhotos = e.detail.items;
-    if (!isDragging) {
-      isDragging = true;
-    }
-  }
-
-  async function handleDndFinalize(e: CustomEvent) {
-    const newLocalPhotos = e.detail.items;
-    const info = e.detail.info;
-    
-    if (!info) {
-      localPhotos = newLocalPhotos;
-      isDragging = false;
-      return;
-    }
-    
-    const movedItemId = info.id;
-    const newIndex = newLocalPhotos.findIndex((item: any) => item.id === movedItemId);
-    
-    if (newIndex === -1) {
-      localPhotos = newLocalPhotos;
-      isDragging = false;
-      return;
-    }
-    
-    isDragging = false;
-    await handleReorder(movedItemId, newIndex, newLocalPhotos);
   }
 
   async function handleReorder(photoId: number, newIndex: number, newLocalPhotos: SOPStepMedia[]) {
@@ -265,7 +299,7 @@
   {/if}
 
   <!-- Upload Button (moved to bottom) -->
-  <div>
+  <div class="space-y-2">
     <input
       bind:this={fileInputRef}
       type="file"
@@ -286,12 +320,22 @@
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        Uploading...
+        Uploading... {uploadProgress}%
       {:else}
         <Upload class="w-4 h-4 mr-2" />
         Upload Media
       {/if}
     </Button>
+    
+    {#if uploading}
+      <!-- Progress bar -->
+      <div class="w-full bg-muted rounded-full h-2 overflow-hidden">
+        <div 
+          class="bg-primary h-full transition-all duration-300" 
+          style="width: {uploadProgress}%"
+        ></div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -354,9 +398,4 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<style>
-  /* Smooth transitions for drag and drop */
-  :global(.photo-grid-item) {
-    transition: transform 200ms ease;
-  }
-</style>
+

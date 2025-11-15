@@ -70,7 +70,7 @@
 
  	<!-- Main Content Area with Sidebar Offset -->
  	<div
- 		class="transition-all duration-300 h-screen flex flex-col"
+ 		class="transition-all duration-300 h-screen flex flex-col [--header-height:calc(--spacing(14))]"
  		style="margin-left: {collapsed ? '4rem' : '16rem'};"
  	>
  		<TopNav onCreateTask={handleOpenCreateTask} onCreateSOP={handleOpenCreateSOP} />

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@source './lib/components'
+@source './routes'
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -117,4 +120,3 @@
     @apply bg-background text-foreground;
   }
 }
-

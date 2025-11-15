@@ -121,7 +121,7 @@
 >
 	<!-- Sidebar Header -->
 	<div class={cn(
-		"h-16 flex items-center px-4 border-b border-sidebar-border",
+		"h-(--header-height) flex items-center px-4 border-b border-sidebar-border",
 		collapsed ? "justify-center" : "justify-start"
 	)}>
 		{#if !collapsed}

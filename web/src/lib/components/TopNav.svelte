@@ -57,9 +57,7 @@
 
 <svelte:window onclick={closeDropdown} />
 
-<header class="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
-  <div class="max-w-7xl mx-auto px-6 py-4">
-    <div class="flex items-center justify-between gap-4">
+<header class="h-(--header-height) border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40 flex items-center justify-between gap-4 px-2">
       <!-- Sidebar Toggle Button -->
       <Button
         onclick={toggleSidebar}
@@ -166,6 +164,4 @@
           </div>
         {/if}
       </div>
-    </div>
-  </div>
 </header>
