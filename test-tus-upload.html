@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TUS Upload Test</title>
+</head>
+<body>
+    <h1>TUS Upload Test</h1>
+    <input type="file" id="fileInput">
+    <button onclick="testUpload()">Upload</button>
+    <div id="status"></div>
+    <div id="progress"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@uppy/core@3.9.3/dist/uppy.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@uppy/tus@3.5.4/dist/uppy.min.js"></script>
+    
+    <script>
+        const uppy = new Uppy.Uppy({
+            restrictions: {
+                maxFileSize: 1024 * 1024 * 1024,
+                allowedFileTypes: ['image/*', 'video/*']
+            },
+            autoProceed: false
+        });
+
+        uppy.use(Uppy.Tus, {
+            endpoint: 'http://localhost:8080/api/tus/',
+            chunkSize: 5 * 1024 * 1024,
+            retryDelays: [0, 1000, 3000],
+            removeFingerprintOnSuccess: true
+        });
+
+        uppy.on('upload-progress', (file, progress) => {
+            document.getElementById('progress').textContent = 
+                `Uploading: ${Math.round((progress.bytesUploaded / progress.bytesTotal) * 100)}%`;
+        });
+
+        uppy.on('upload-success', (file, response) => {
+            document.getElementById('status').textContent = 'Upload completed!';
+            console.log('Success:', response);
+        });
+
+        uppy.on('upload-error', (file, error) => {
+            document.getElementById('status').textContent = `Error: ${error.message}`;
+            console.error('Upload error:', error);
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                uppy.addFile({
+                    name: file.name,
+                    type: file.type,
+                    data: file,
+                    meta: {
+                        stepId: '123',
+                        filename: file.name,
+                        filetype: file.type
+                    }
+                });
+            }
+        });
+
+        function testUpload() {
+            uppy.upload();
+        }
+    </script>
+</body>
+</html>

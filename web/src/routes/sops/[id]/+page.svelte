@@ -26,9 +26,24 @@
   let newMaterialInput = $state('');
   let newEquipmentInput = $state('');
 
-  // Derived values using $derived
-  let sopId = $derived(parseInt($page.params.id || '0'));
+  let sopId = $state(0);
   let isDraftMode = $derived($sopStore.currentSOP?.currentVersion?.status === 'draft');
+
+  // Load SOP when params become available or change
+  let lastLoadedId = $state<number | null>(null);
+  $effect(() => {
+    // Access $page reactively within effect
+    const params = $page?.params;
+    if (params?.id) {
+      const id = parseInt(params.id);
+      if (id > 0 && id !== lastLoadedId) {
+        console.log('Loading SOP with ID:', id);
+        sopId = id;
+        lastLoadedId = id;
+        sopStore.loadSOP(id);
+      }
+    }
+  });
 
   // Update local state when SOP changes
   $effect(() => {
@@ -39,10 +54,6 @@
       localEquipment = $sopStore.currentSOP.currentVersion?.equipment || [];
       localSteps = $sopStore.currentSOP.currentVersion?.steps || [];
     }
-  });
-
-  onMount(async () => {
-    await sopStore.loadSOP(sopId);
   });
 
   async function loadVersionHistory() {

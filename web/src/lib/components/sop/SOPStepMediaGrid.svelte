@@ -130,25 +130,28 @@
     
     if (!files || files.length === 0) return;
 
-    const file = files[0];
-    
-    // Validate file type
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-      alert('Please select an image or video file');
-      return;
-    }
-
-    // Add metadata for server processing
-    uppy?.addFile({
-      name: file.name,
-      type: file.type,
-      data: file,
-      meta: {
-        stepId: stepId.toString(),
-        filename: file.name,
-        filetype: file.type
+    // Process all selected files
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      // Validate file type
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        alert(`File "${file.name}" is not a valid image or video file. Skipping.`);
+        continue;
       }
-    });
+
+      // Add metadata for server processing
+      uppy?.addFile({
+        name: file.name,
+        type: file.type,
+        data: file,
+        meta: {
+          stepId: stepId.toString(),
+          filename: file.name,
+          filetype: file.type
+        }
+      });
+    }
   }
 
   async function deletePhoto(photoId: number) {
@@ -304,9 +307,10 @@
       bind:this={fileInputRef}
       type="file"
       accept="image/*,video/*"
+      multiple
       onchange={handleFileSelect}
       class="hidden"
-      aria-label="Upload photo or video"
+      aria-label="Upload photos or videos"
     />
     <Button
       onclick={openFileDialog}
@@ -323,7 +327,7 @@
         Uploading... {uploadProgress}%
       {:else}
         <Upload class="w-4 h-4 mr-2" />
-        Upload Media
+        Upload Media (Multiple)
       {/if}
     </Button>
     
