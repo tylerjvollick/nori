@@ -106,8 +106,8 @@ export interface ReorderStepRequest {
   afterStepId?: number;
 }
 
-// Photo-specific types
-export interface SOPStepPhoto {
+// Media-specific types (photos and videos)
+export interface SOPStepMedia {
   id: number;
   sopStepId: number;
   uuid: string;
@@ -115,14 +115,21 @@ export interface SOPStepPhoto {
   fileName: string;
   mimeType: string;
   fileSize: number;
+  duration?: number; // Duration in seconds (for videos)
   order: string;
   createdAt: string;
 }
 
-export interface ReorderPhotoRequest {
-  beforePhotoId?: number;
-  afterPhotoId?: number;
+// Backwards compatibility alias
+export type SOPStepPhoto = SOPStepMedia;
+
+export interface ReorderMediaRequest {
+  beforeMediaId?: number;
+  afterMediaId?: number;
 }
+
+// Backwards compatibility alias
+export type ReorderPhotoRequest = ReorderMediaRequest;
 
 class SOPApi {
   async getAllSOPs(): Promise<SOPTemplate[]> {
@@ -199,29 +206,55 @@ class SOPApi {
     return apiClient.patch<SOPStep>(`/sops/${templateId}/steps/${stepId}/reorder`, data);
   }
 
-  // Photo operations
-  async uploadStepPhoto(templateId: number, stepId: number, file: File): Promise<SOPStepPhoto> {
+  // Media operations (photos and videos)
+  async uploadStepMedia(templateId: number, stepId: number, file: File): Promise<SOPStepMedia> {
     const formData = new FormData();
-    formData.append('photo', file);
-    return apiClient.uploadFile<SOPStepPhoto>(`/sops/${templateId}/steps/${stepId}/photos`, formData);
+    formData.append('media', file);
+    return apiClient.uploadFile<SOPStepMedia>(`/sops/${templateId}/steps/${stepId}/media`, formData);
   }
 
-  async getStepPhotos(templateId: number, stepId: number): Promise<SOPStepPhoto[]> {
-    return apiClient.get<SOPStepPhoto[]>(`/sops/${templateId}/steps/${stepId}/photos`);
+  async getStepMedia(templateId: number, stepId: number): Promise<SOPStepMedia[]> {
+    return apiClient.get<SOPStepMedia[]>(`/sops/${templateId}/steps/${stepId}/media`);
   }
 
-  async deleteStepPhoto(photoId: number): Promise<void> {
-    return apiClient.delete<void>(`/photos/${photoId}`);
+  async deleteStepMedia(mediaId: number): Promise<void> {
+    return apiClient.delete<void>(`/media/${mediaId}`);
   }
 
-  async reorderStepPhoto(photoId: number, data: ReorderPhotoRequest): Promise<SOPStepPhoto> {
-    return apiClient.patch<SOPStepPhoto>(`/photos/${photoId}/reorder`, data);
+  async reorderStepMedia(mediaId: number, data: ReorderMediaRequest): Promise<SOPStepMedia> {
+    return apiClient.patch<SOPStepMedia>(`/media/${mediaId}/reorder`, data);
   }
 
-  getPhotoUrl(uuid: string): string {
-    // Return the full URL for the photo
+  getMediaUrl(uuid: string): string {
+    // Return the full URL for the media
     const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
-    return `${baseUrl}/photos/${uuid}`;
+    return `${baseUrl}/media/${uuid}`;
+  }
+
+  // Backwards compatibility methods (deprecated, use media methods instead)
+  /** @deprecated Use uploadStepMedia instead */
+  async uploadStepPhoto(templateId: number, stepId: number, file: File): Promise<SOPStepMedia> {
+    return this.uploadStepMedia(templateId, stepId, file);
+  }
+
+  /** @deprecated Use getStepMedia instead */
+  async getStepPhotos(templateId: number, stepId: number): Promise<SOPStepMedia[]> {
+    return this.getStepMedia(templateId, stepId);
+  }
+
+  /** @deprecated Use deleteStepMedia instead */
+  async deleteStepPhoto(photoId: number): Promise<void> {
+    return this.deleteStepMedia(photoId);
+  }
+
+  /** @deprecated Use reorderStepMedia instead */
+  async reorderStepPhoto(photoId: number, data: ReorderMediaRequest): Promise<SOPStepMedia> {
+    return this.reorderStepMedia(photoId, data);
+  }
+
+  /** @deprecated Use getMediaUrl instead */
+  getPhotoUrl(uuid: string): string {
+    return this.getMediaUrl(uuid);
   }
 }
 

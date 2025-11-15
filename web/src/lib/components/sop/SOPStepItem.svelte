@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { SOPStep, SOPStepPhoto } from '$lib/api/sop';
+  import type { SOPStep, SOPStepMedia } from '$lib/api/sop';
   import { sopApi } from '$lib/api/sop';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
   import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
   import { Clock } from 'lucide-svelte';
-  import SOPStepPhotoGrid from './SOPStepPhotoGrid.svelte'; 
+  import SOPStepMediaGrid from './SOPStepMediaGrid.svelte'; 
 
   interface Props {
     step: SOPStep;
@@ -40,12 +40,12 @@
   let descriptionTextareaRef: HTMLTextAreaElement | null = $state(null);
   let timeInputRef: HTMLInputElement | null = $state(null);
 
-  // Photo state
-  let stepPhotos = $state<SOPStepPhoto[]>([]);
+  // Media state
+  let stepPhotos = $state<SOPStepMedia[]>([]);
   let loadingPhotos = $state(false);
   let photosLoaded = $state(false);
 
-  // Load photos when expanded
+  // Load media when expanded
   $effect(() => {
     if (expanded && !photosLoaded && !loadingPhotos) {
       loadPhotos();
@@ -55,17 +55,17 @@
   async function loadPhotos() {
     try {
       loadingPhotos = true;
-      stepPhotos = await sopApi.getStepPhotos(sopId, step.id);
+      stepPhotos = await sopApi.getStepMedia(sopId, step.id);
       photosLoaded = true;
     } catch (error) {
-      console.error('Failed to load photos:', error);
+      console.error('Failed to load media:', error);
       photosLoaded = true; // Mark as loaded even on error to show the upload button
     } finally {
       loadingPhotos = false;
     }
   }
 
-  function handlePhotosChange(photos: SOPStepPhoto[]) {
+  function handlePhotosChange(photos: SOPStepMedia[]) {
     stepPhotos = photos;
   }
 
@@ -279,13 +279,13 @@
     <!-- Expanded View -->
     <CollapsibleContent>
       <div class="border-t border-border p-4 bg-background space-y-4">
-        <!-- Photos Section (moved to top) -->
+        <!-- Media Section (moved to top) -->
         <div>
-          <h4 class="text-sm font-medium text-foreground mb-2">Photos</h4>
+          <h4 class="text-sm font-medium text-foreground mb-2">Media</h4>
           {#if loadingPhotos}
-            <div class="text-sm text-muted-foreground">Loading photos...</div>
+            <div class="text-sm text-muted-foreground">Loading media...</div>
           {:else}
-            <SOPStepPhotoGrid
+            <SOPStepMediaGrid
               {sopId}
               stepId={step.id}
               photos={stepPhotos}

@@ -17,32 +17,32 @@ import (
 	"gorm.io/gorm"
 )
 
-type SOPStepPhotoService struct {
+type SOPStepMediaService struct {
 	db              *gorm.DB
-	photoRepo       *repositories.SOPStepPhotoRepository
+	mediaRepo       *repositories.SOPStepMediaRepository
 	stepRepo        *repositories.SOPStepRepository
 	uploadDir       string
 	maxUploadSize   int64
 	allowedMimeTypes map[string]bool
 }
 
-func NewSOPStepPhotoService(
+func NewSOPStepMediaService(
 	db *gorm.DB,
-	photoRepo *repositories.SOPStepPhotoRepository,
+	mediaRepo *repositories.SOPStepMediaRepository,
 	stepRepo *repositories.SOPStepRepository,
 	uploadDir string,
 	maxUploadSize int64,
 	allowedMimeTypes []string,
-) *SOPStepPhotoService {
+) *SOPStepMediaService {
 	// Convert allowed mime types to map for fast lookup
 	mimeMap := make(map[string]bool)
 	for _, mimeType := range allowedMimeTypes {
 		mimeMap[mimeType] = true
 	}
 
-	return &SOPStepPhotoService{
+	return &SOPStepMediaService{
 		db:               db,
-		photoRepo:        photoRepo,
+		mediaRepo:        mediaRepo,
 		stepRepo:         stepRepo,
 		uploadDir:        uploadDir,
 		maxUploadSize:    maxUploadSize,
@@ -50,8 +50,8 @@ func NewSOPStepPhotoService(
 	}
 }
 
-// UploadPhoto uploads a photo for a step
-func (s *SOPStepPhotoService) UploadPhoto(stepID int, file *multipart.FileHeader) (*models.SOPStepPhoto, error) {
+// UploadMedia uploads media (photo or video) for a step
+func (s *SOPStepMediaService) UploadMedia(stepID int, file *multipart.FileHeader) (*models.SOPStepMedia, error) {
 	// Verify step exists
 	step, err := s.stepRepo.GetByID(stepID)
 	if err != nil {
@@ -85,6 +85,12 @@ func (s *SOPStepPhotoService) UploadPhoto(stepID int, file *multipart.FileHeader
 			ext = ".webp"
 		case "image/gif":
 			ext = ".gif"
+		case "video/mp4":
+			ext = ".mp4"
+		case "video/quicktime":
+			ext = ".mov"
+		case "video/webm":
+			ext = ".webm"
 		default:
 			ext = ".bin"
 		}
@@ -131,7 +137,7 @@ func (s *SOPStepPhotoService) UploadPhoto(stepID int, file *multipart.FileHeader
 	}
 
 	// Get the last order for this step
-	lastOrder, err := s.photoRepo.GetLastOrderByStepID(stepID)
+	lastOrder, err := s.mediaRepo.GetLastOrderByStepID(stepID)
 	if err != nil {
 		// Clean up file if database operation fails
 		os.Remove(fullPath)
@@ -142,7 +148,7 @@ func (s *SOPStepPhotoService) UploadPhoto(stepID int, file *multipart.FileHeader
 	newOrder := utils.GenerateOrderBetween(lastOrder, "")
 
 	// Create database record
-	photo := &models.SOPStepPhoto{
+	media := &models.SOPStepMedia{
 		SOPStepID: stepID,
 		UUID:      fileUUID,
 		FilePath:  relativePath,
@@ -152,68 +158,68 @@ func (s *SOPStepPhotoService) UploadPhoto(stepID int, file *multipart.FileHeader
 		Order:     newOrder,
 	}
 
-	if err := s.photoRepo.Create(photo); err != nil {
+	if err := s.mediaRepo.Create(media); err != nil {
 		// Clean up file if database operation fails
 		os.Remove(fullPath)
-		log.Println("Failed to create photo record:", err)
-		return nil, fmt.Errorf("failed to create photo record: %w", err)
+		log.Println("Failed to create media record:", err)
+		return nil, fmt.Errorf("failed to create media record: %w", err)
 	}
 
-	return photo, nil
+	return media, nil
 }
 
-// GetPhotosByStepID gets all photos for a step
-func (s *SOPStepPhotoService) GetPhotosByStepID(stepID int) ([]models.SOPStepPhoto, error) {
-	return s.photoRepo.GetByStepID(stepID)
+// GetMediaByStepID gets all media for a step
+func (s *SOPStepMediaService) GetMediaByStepID(stepID int) ([]models.SOPStepMedia, error) {
+	return s.mediaRepo.GetByStepID(stepID)
 }
 
-// GetPhotoByUUID gets a photo by its UUID
-func (s *SOPStepPhotoService) GetPhotoByUUID(uuid string) (*models.SOPStepPhoto, error) {
-	return s.photoRepo.GetByUUID(uuid)
+// GetMediaByUUID gets media by its UUID
+func (s *SOPStepMediaService) GetMediaByUUID(uuid string) (*models.SOPStepMedia, error) {
+	return s.mediaRepo.GetByUUID(uuid)
 }
 
-// GetPhotoFilePath gets the full file path for a photo
-func (s *SOPStepPhotoService) GetPhotoFilePath(photo *models.SOPStepPhoto) string {
-	return filepath.Join(s.uploadDir, photo.FilePath)
+// GetMediaFilePath gets the full file path for media
+func (s *SOPStepMediaService) GetMediaFilePath(media *models.SOPStepMedia) string {
+	return filepath.Join(s.uploadDir, media.FilePath)
 }
 
-// DeletePhoto deletes a photo and its file
-func (s *SOPStepPhotoService) DeletePhoto(photoID int) error {
-	// Get photo record
-	photo, err := s.photoRepo.GetByID(photoID)
+// DeleteMedia deletes media and its file
+func (s *SOPStepMediaService) DeleteMedia(mediaID int) error {
+	// Get media record
+	media, err := s.mediaRepo.GetByID(mediaID)
 	if err != nil {
 		return err
 	}
 
 	// Delete file
-	fullPath := s.GetPhotoFilePath(photo)
+	fullPath := s.GetMediaFilePath(media)
 	if err := os.Remove(fullPath); err != nil {
 		// Log error but don't fail - file might already be deleted
 		log.Printf("Warning: failed to delete file %s: %v", fullPath, err)
 	}
 
 	// Delete database record
-	if err := s.photoRepo.Delete(photoID); err != nil {
-		return fmt.Errorf("failed to delete photo record: %w", err)
+	if err := s.mediaRepo.Delete(mediaID); err != nil {
+		return fmt.Errorf("failed to delete media record: %w", err)
 	}
 
 	return nil
 }
 
-// ReorderPhoto updates the order of a photo
-func (s *SOPStepPhotoService) ReorderPhoto(photoID int, beforePhotoID, afterPhotoID *int) (*models.SOPStepPhoto, error) {
-	var photo *models.SOPStepPhoto
+// ReorderMedia updates the order of media
+func (s *SOPStepMediaService) ReorderMedia(mediaID int, beforeMediaID, afterMediaID *int) (*models.SOPStepMedia, error) {
+	var media *models.SOPStepMedia
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Get the photo
+		// Get the media
 		var err error
-		photo, err = s.photoRepo.GetByID(photoID)
+		media, err = s.mediaRepo.GetByID(mediaID)
 		if err != nil {
 			return err
 		}
 
-		// Get order values for before and after photos
-		beforeOrder, afterOrder, err := s.photoRepo.GetOrderBeforeAndAfter(photo.SOPStepID, beforePhotoID, afterPhotoID)
+		// Get order values for before and after media
+		beforeOrder, afterOrder, err := s.mediaRepo.GetOrderBeforeAndAfter(media.SOPStepID, beforeMediaID, afterMediaID)
 		if err != nil {
 			return fmt.Errorf("failed to get order bounds: %w", err)
 		}
@@ -221,12 +227,12 @@ func (s *SOPStepPhotoService) ReorderPhoto(photoID int, beforePhotoID, afterPhot
 		// Generate new order value
 		newOrder := utils.GenerateOrderBetween(beforeOrder, afterOrder)
 
-		// Update the photo's order
-		if err := s.photoRepo.UpdateOrderWithTx(tx, photoID, newOrder); err != nil {
-			return fmt.Errorf("failed to update photo order: %w", err)
+		// Update the media's order
+		if err := s.mediaRepo.UpdateOrderWithTx(tx, mediaID, newOrder); err != nil {
+			return fmt.Errorf("failed to update media order: %w", err)
 		}
 
-		photo.Order = newOrder
+		media.Order = newOrder
 		return nil
 	})
 
@@ -234,7 +240,7 @@ func (s *SOPStepPhotoService) ReorderPhoto(photoID int, beforePhotoID, afterPhot
 		return nil, err
 	}
 
-	return photo, nil
+	return media, nil
 }
 
 // ParseAllowedMimeTypes parses a comma-separated string of mime types

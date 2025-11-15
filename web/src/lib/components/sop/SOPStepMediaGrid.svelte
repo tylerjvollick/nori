@@ -1,23 +1,23 @@
 <script lang="ts">
   import { dndzone } from 'svelte-dnd-action';
   import { sopApi } from '$lib/api/sop';
-  import type { SOPStepPhoto } from '$lib/api/sop';
+  import type { SOPStepMedia } from '$lib/api/sop';
   import { Button } from '$lib/components/ui/button';
   import * as Carousel from '$lib/components/ui/carousel';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { Image, Trash2, Upload, X } from 'lucide-svelte';
+  import { Image, Trash2, Upload, X, Video } from 'lucide-svelte';
 
   interface Props {
     sopId: number;
     stepId: number;
-    photos?: SOPStepPhoto[];
-    onPhotosChange?: (photos: SOPStepPhoto[]) => void;
+    photos?: SOPStepMedia[];
+    onPhotosChange?: (photos: SOPStepMedia[]) => void;
   }
 
   let { sopId, stepId, photos = [], onPhotosChange }: Props = $props();
 
   // Local state
-  let localPhotos = $state<SOPStepPhoto[]>([...photos]);
+  let localPhotos = $state<SOPStepMedia[]>([...photos]);
   let uploading = $state(false);
   let isDragging = $state(false);
   let fileInputRef = $state<HTMLInputElement>();
@@ -38,6 +38,11 @@
     }
   }
 
+  // Check if media is a video
+  function isVideo(mimeType: string): boolean {
+    return mimeType.startsWith('video/');
+  }
+
   function openFileDialog() {
     fileInputRef?.click();
   }
@@ -51,51 +56,51 @@
     const file = files[0];
     
     // Validate file type
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+      alert('Please select an image or video file');
       return;
     }
 
-    // Validate file size (10MB max)
-    const maxSize = 10 * 1024 * 1024;
+    // Validate file size (1GB max)
+    const maxSize = 1024 * 1024 * 1024; // 1GB
     if (file.size > maxSize) {
-      alert('File size must be less than 10MB');
+      alert('File size must be less than 1GB');
       return;
     }
 
     try {
       uploading = true;
-      const newPhoto = await sopApi.uploadStepPhoto(sopId, stepId, file);
+      const newMedia = await sopApi.uploadStepMedia(sopId, stepId, file);
       
       // Add to local state
-      localPhotos = [...localPhotos, newPhoto];
+      localPhotos = [...localPhotos, newMedia];
       notifyChange();
       
       // Reset file input
       if (target) target.value = '';
     } catch (error) {
-      console.error('Failed to upload photo:', error);
-      alert('Failed to upload photo. Please try again.');
+      console.error('Failed to upload media:', error);
+      alert('Failed to upload media. Please try again.');
     } finally {
       uploading = false;
     }
   }
 
   async function deletePhoto(photoId: number) {
-    if (!confirm('Are you sure you want to delete this photo?')) {
+    if (!confirm('Are you sure you want to delete this media?')) {
       return;
     }
 
     try {
       deletingPhotoId = photoId;
-      await sopApi.deleteStepPhoto(photoId);
+      await sopApi.deleteStepMedia(photoId);
       
       // Remove from local state
       localPhotos = localPhotos.filter(p => p.id !== photoId);
       notifyChange();
     } catch (error) {
-      console.error('Failed to delete photo:', error);
-      alert('Failed to delete photo. Please try again.');
+      console.error('Failed to delete media:', error);
+      alert('Failed to delete media. Please try again.');
     } finally {
       deletingPhotoId = null;
     }
@@ -146,28 +151,28 @@
     await handleReorder(movedItemId, newIndex, newLocalPhotos);
   }
 
-  async function handleReorder(photoId: number, newIndex: number, newLocalPhotos: SOPStepPhoto[]) {
+  async function handleReorder(photoId: number, newIndex: number, newLocalPhotos: SOPStepMedia[]) {
     try {
-      let beforePhotoId: number | undefined;
-      let afterPhotoId: number | undefined;
+      let beforeMediaId: number | undefined;
+      let afterMediaId: number | undefined;
       
       if (newIndex > 0) {
-        beforePhotoId = newLocalPhotos[newIndex - 1].id;
+        beforeMediaId = newLocalPhotos[newIndex - 1].id;
       }
       
       if (newIndex < newLocalPhotos.length - 1) {
-        afterPhotoId = newLocalPhotos[newIndex + 1].id;
+        afterMediaId = newLocalPhotos[newIndex + 1].id;
       }
       
-      await sopApi.reorderStepPhoto(photoId, {
-        beforePhotoId,
-        afterPhotoId
+      await sopApi.reorderStepMedia(photoId, {
+        beforeMediaId,
+        afterMediaId
       });
       
       localPhotos = newLocalPhotos;
       notifyChange();
     } catch (error) {
-      console.error('Failed to reorder photo:', error);
+      console.error('Failed to reorder media:', error);
       localPhotos = [...photos];
       notifyChange();
     }
@@ -190,18 +195,36 @@
         {#each localPhotos as photo, index (photo.id)}
           <Carousel.Item class="md:basis-1/2 lg:basis-1/3">
             <div class="relative group aspect-square rounded-lg overflow-hidden border border-border bg-muted">
-              <!-- Photo -->
+              <!-- Media (Photo or Video) -->
               <button
                 onclick={() => openLightbox(index)}
                 class="w-full h-full"
                 type="button"
-                aria-label="View photo"
+                aria-label={isVideo(photo.mimeType) ? "View video" : "View photo"}
               >
-                <img
-                  src={sopApi.getPhotoUrl(photo.uuid)}
-                  alt={photo.fileName}
-                  class="w-full h-full object-cover transition-transform group-hover:scale-105"
-                />
+                {#if isVideo(photo.mimeType)}
+                  <video
+                    src={sopApi.getMediaUrl(photo.uuid)}
+                    class="w-full h-full object-cover"
+                    muted
+                    loop
+                    preload="metadata"
+                  >
+                    <track kind="captions" />
+                  </video>
+                  <!-- Video overlay indicator -->
+                  <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div class="bg-black/50 rounded-full p-3">
+                      <Video class="w-8 h-8 text-white" />
+                    </div>
+                  </div>
+                {:else}
+                  <img
+                    src={sopApi.getMediaUrl(photo.uuid)}
+                    alt={photo.fileName}
+                    class="w-full h-full object-cover transition-transform group-hover:scale-105"
+                  />
+                {/if}
               </button>
 
               <!-- Overlay on hover -->
@@ -237,7 +260,7 @@
   {:else}
     <div class="text-center py-8 border-2 border-dashed border-border rounded-lg">
       <Image class="w-12 h-12 mx-auto text-muted-foreground mb-2" />
-      <p class="text-sm text-muted-foreground">No photos yet. Upload your first photo.</p>
+      <p class="text-sm text-muted-foreground">No media yet. Upload your first photo or video.</p>
     </div>
   {/if}
 
@@ -246,10 +269,10 @@
     <input
       bind:this={fileInputRef}
       type="file"
-      accept="image/*"
+      accept="image/*,video/*"
       onchange={handleFileSelect}
       class="hidden"
-      aria-label="Upload photo"
+      aria-label="Upload photo or video"
     />
     <Button
       onclick={openFileDialog}
@@ -266,7 +289,7 @@
         Uploading...
       {:else}
         <Upload class="w-4 h-4 mr-2" />
-        Upload Photo
+        Upload Media
       {/if}
     </Button>
   </div>
@@ -274,7 +297,7 @@
 
 <!-- Fullscreen Dialog with Single-Photo Carousel -->
 <Dialog.Root bind:open={fullscreenDialogOpen}>
-  <Dialog.Content class="sm:max-w-6xl  max-h-[90vh] max-w-[95vw] max-h-[95vh] p-0 border-0 bg-black">
+  <Dialog.Content class="sm:max-w-[90vw]  max-h-[90vh] max-w-[95vw] max-h-[95vh] p-0 border-0 bg-black">
     <div class="relative w-full h-full">
       <!-- Close button -->
       <button
@@ -293,11 +316,21 @@
             {#each localPhotos as photo (photo.id)}
               <Carousel.Item class="h-full">
                 <div class="flex items-center justify-center h-full p-4">
-                  <img
-                    src={sopApi.getPhotoUrl(photo.uuid)}
-                    alt={photo.fileName}
-                    class="max-w-full max-h-full object-contain"
-                  />
+                  {#if isVideo(photo.mimeType)}
+                    <video
+                      src={sopApi.getMediaUrl(photo.uuid)}
+                      controls
+                      class="max-w-full max-h-full object-contain"
+                    >
+                      <track kind="captions" />
+                    </video>
+                  {:else}
+                    <img
+                      src={sopApi.getMediaUrl(photo.uuid)}
+                      alt={photo.fileName}
+                      class="max-w-full max-h-full object-contain"
+                    />
+                  {/if}
                 </div>
               </Carousel.Item>
             {/each}

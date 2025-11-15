@@ -29,7 +29,7 @@ func New() *App {
 	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
 	sopVersionRepo := repositories.NewSOPTemplateVersionRepository(database.DB)
 	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
-	sopStepPhotoRepo := repositories.NewSOPStepPhotoRepository(database.DB)
+	sopStepMediaRepo := repositories.NewSOPStepMediaRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
 
 	// Get photo upload configuration from environment
@@ -52,7 +52,7 @@ func New() *App {
 	// Services
 	userService := services.NewUserService(userRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
-	sopPhotoService := services.NewSOPStepPhotoService(database.DB, sopStepPhotoRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
+	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
 
@@ -60,11 +60,13 @@ func New() *App {
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
-	sopPhotoHandler := handlers.NewSOPStepPhotoHandler(sopPhotoService)
+	sopMediaHandler := handlers.NewSOPStepMediaHandler(sopMediaService)
 	spaceHandler := handlers.NewSpaceHandler(spaceService)
 
-	// Fiber instance with CORS
-	app := fiber.New()
+	// Fiber instance with CORS and increased body limit for media uploads
+	app := fiber.New(fiber.Config{
+		BodyLimit: int(maxUploadSize), // Use the configured max upload size
+	})
 
 	// Add CORS middleware
 	app.Use(cors.New(cors.Config{
@@ -79,7 +81,7 @@ func New() *App {
 	authHandler.RegisterAuthRoutes(app)
 	userHandler.RegisterUserRoutes(app)
 	sopHandler.RegisterSOPRoutes(app)
-	sopPhotoHandler.RegisterPhotoRoutes(app)
+	sopMediaHandler.RegisterMediaRoutes(app)
 	spaceHandler.RegisterSpaceRoutes(app)
 
 	return &App{
