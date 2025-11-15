@@ -1,9 +1,11 @@
 <script lang="ts">
-  import type { SOPStep } from '$lib/api/sop';
+  import type { SOPStep, SOPStepPhoto } from '$lib/api/sop';
+  import { sopApi } from '$lib/api/sop';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
   import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
-  import { Clock } from 'lucide-svelte'; 
+  import { Clock } from 'lucide-svelte';
+  import SOPStepPhotoGrid from './SOPStepPhotoGrid.svelte'; 
 
   interface Props {
     step: SOPStep;
@@ -37,6 +39,35 @@
   let titleInputRef: HTMLInputElement | null = $state(null);
   let descriptionTextareaRef: HTMLTextAreaElement | null = $state(null);
   let timeInputRef: HTMLInputElement | null = $state(null);
+
+  // Photo state
+  let stepPhotos = $state<SOPStepPhoto[]>([]);
+  let loadingPhotos = $state(false);
+  let photosLoaded = $state(false);
+
+  // Load photos when expanded
+  $effect(() => {
+    if (expanded && !photosLoaded && !loadingPhotos) {
+      loadPhotos();
+    }
+  });
+
+  async function loadPhotos() {
+    try {
+      loadingPhotos = true;
+      stepPhotos = await sopApi.getStepPhotos(sopId, step.id);
+      photosLoaded = true;
+    } catch (error) {
+      console.error('Failed to load photos:', error);
+      photosLoaded = true; // Mark as loaded even on error to show the upload button
+    } finally {
+      loadingPhotos = false;
+    }
+  }
+
+  function handlePhotosChange(photos: SOPStepPhoto[]) {
+    stepPhotos = photos;
+  }
 
   // Title editing
   function startTitleEdit() {
@@ -141,7 +172,8 @@
       <div class="flex items-center gap-3 flex-1">
         <!-- Drag handle (always visible) -->
         <div 
-          class="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-muted-foreground600 dark:hover:text-muted-foreground300"
+          data-drag-handle
+          class="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground p-1 rounded transition-colors"
           aria-label="Drag to reorder"
           title="Drag to reorder"
         >
@@ -247,6 +279,21 @@
     <!-- Expanded View -->
     <CollapsibleContent>
       <div class="border-t border-border p-4 bg-background space-y-4">
+        <!-- Photos Section (moved to top) -->
+        <div>
+          <h4 class="text-sm font-medium text-foreground mb-2">Photos</h4>
+          {#if loadingPhotos}
+            <div class="text-sm text-muted-foreground">Loading photos...</div>
+          {:else}
+            <SOPStepPhotoGrid
+              {sopId}
+              stepId={step.id}
+              photos={stepPhotos}
+              onPhotosChange={handlePhotosChange}
+            />
+          {/if}
+        </div>
+
         <!-- Description Field -->
         {#if editingDescription}
           <div class="space-y-2">

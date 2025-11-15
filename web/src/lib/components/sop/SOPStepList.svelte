@@ -21,7 +21,7 @@
   let newStepTitle = $state('');
   let newStepTitleInput = $state<HTMLInputElement>();
   let isDragging = $state(false);
-  let isReordering = $state(false);
+  let dragDisabled = $state(true);
 
   // Update local state when props change
   $effect(() => {
@@ -108,30 +108,42 @@
     }
   }
 
+  // Handle pointer down on drag handle
+  function handlePointerDown(e: PointerEvent) {
+    const target = e.target as HTMLElement;
+    const dragHandle = target.closest('[data-drag-handle]');
+    
+    if (dragHandle) {
+      // Enable dragging when clicking on the handle
+      dragDisabled = false;
+    } else {
+      // Disable dragging when clicking elsewhere
+      dragDisabled = true;
+    }
+  }
+
   // DnD event handlers
   function handleDndConsider(e: CustomEvent) {
     // Update localSteps based on the new order during dragging
     localSteps = e.detail.items;
-    console.log('handleDndConsider', localSteps.map(e => ({ id: e.id, order: e.order })))
 
     // Track if we're actively dragging
     if (!isDragging) {
       isDragging = true;
-      console.log('Started dragging');
     }
   }
 
   async function handleDndFinalize(e: CustomEvent) {
     // Update localSteps based on the final order
     const newLocalSteps = e.detail.items;
-    console.log('handleDndFinalize', { newLocalSteps }) 
     // Find which item was moved
     const info = e.detail.info;
-    console.log('DnD finalize info:', info);
+    
+    // Reset drag disabled state
+    dragDisabled = true;
     
     // Check if this was a real drag (not just a click)
     if (!info) {
-      console.log('No info, skipping reorder');
       localSteps = newLocalSteps;
       return;
     }
@@ -139,17 +151,13 @@
     const movedItemId = info.id;
     const newIndex = newLocalSteps.findIndex((item: any) => item.id === movedItemId);
     
-    console.log('Moved item:', movedItemId, 'to index:', newIndex);
-    
     if (newIndex === -1) {
-      console.log('Invalid index, skipping reorder');
       localSteps = newLocalSteps;
       return;
     }
     
     // Reset dragging state first
     isDragging = false;
-    console.log('Stopped dragging');
     
     // Call backend to reorder (will auto-create draft if needed)
     await handleReorder(movedItemId, newIndex, newLocalSteps);
@@ -157,8 +165,6 @@
 
   async function handleReorder(stepId: number, newIndex: number, newLocalSteps: SOPStep[]) {
     try {
-      isReordering = true;
-      
       // Ensure we have a draft before reordering
       if (onEnsureDraft) {
         await onEnsureDraft();
@@ -180,8 +186,6 @@
         afterStepId = newLocalSteps[newIndex + 1].id;
       }
       
-      console.log('Reorder API call:', { stepId, beforeStepId, afterStepId, newIndex });
-      
       // Call backend API
       await sopApi.reorderStep(sopId, stepId, {
         beforeStepId,
@@ -191,11 +195,8 @@
       // Update local state optimistically
       localSteps = newLocalSteps;
       notifyChange();
-      
-      isReordering = false;
     } catch (error) {
       console.error('Failed to reorder step:', error);
-      isReordering = false;
       // Reset to original order on error
       localSteps = [...steps];
       notifyChange();
@@ -218,9 +219,10 @@
     
       <div 
         class="space-y-2 {isDragging ? 'dragging-active' : ''}"
-        use:dndzone={{ items: localSteps, flipDurationMs: 200, dropTargetStyle: { outline: 'none' }, dragDisabled: false }}
+        use:dndzone={{ items: localSteps, flipDurationMs: 200, dropTargetStyle: { outline: 'none' }, dragDisabled }}
         onconsider={handleDndConsider}
         onfinalize={handleDndFinalize}
+        onpointerdown={handlePointerDown}
       >
         {#each localSteps as step, index (step.id)}
           <SOPStepItem

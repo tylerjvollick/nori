@@ -10,10 +10,15 @@ services:
       DB_PASSWORD: password
       DB_NAME: nori
       DB_PORT: 5432
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE: 10485760
+      ALLOWED_MIME_TYPES: image/jpeg,image/png,image/webp,image/gif
     depends_on:
       - database
     ports:
       - "8080:8080"
+    volumes:
+      - nori_uploads:/app/uploads
 
   nori-web:
     container_name: nori-web
@@ -47,3 +52,4 @@ services:
 
 volumes:
   postgres_data:
+  nori_uploads:

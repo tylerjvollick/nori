@@ -106,6 +106,24 @@ export interface ReorderStepRequest {
   afterStepId?: number;
 }
 
+// Photo-specific types
+export interface SOPStepPhoto {
+  id: number;
+  sopStepId: number;
+  uuid: string;
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  order: string;
+  createdAt: string;
+}
+
+export interface ReorderPhotoRequest {
+  beforePhotoId?: number;
+  afterPhotoId?: number;
+}
+
 class SOPApi {
   async getAllSOPs(): Promise<SOPTemplate[]> {
     return apiClient.get<SOPTemplate[]>('/sops/');
@@ -179,6 +197,31 @@ class SOPApi {
 
   async reorderStep(templateId: number, stepId: number, data: ReorderStepRequest): Promise<SOPStep> {
     return apiClient.patch<SOPStep>(`/sops/${templateId}/steps/${stepId}/reorder`, data);
+  }
+
+  // Photo operations
+  async uploadStepPhoto(templateId: number, stepId: number, file: File): Promise<SOPStepPhoto> {
+    const formData = new FormData();
+    formData.append('photo', file);
+    return apiClient.uploadFile<SOPStepPhoto>(`/sops/${templateId}/steps/${stepId}/photos`, formData);
+  }
+
+  async getStepPhotos(templateId: number, stepId: number): Promise<SOPStepPhoto[]> {
+    return apiClient.get<SOPStepPhoto[]>(`/sops/${templateId}/steps/${stepId}/photos`);
+  }
+
+  async deleteStepPhoto(photoId: number): Promise<void> {
+    return apiClient.delete<void>(`/photos/${photoId}`);
+  }
+
+  async reorderStepPhoto(photoId: number, data: ReorderPhotoRequest): Promise<SOPStepPhoto> {
+    return apiClient.patch<SOPStepPhoto>(`/photos/${photoId}/reorder`, data);
+  }
+
+  getPhotoUrl(uuid: string): string {
+    // Return the full URL for the photo
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+    return `${baseUrl}/photos/${uuid}`;
   }
 }
 

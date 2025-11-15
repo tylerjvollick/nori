@@ -69,6 +69,27 @@ export class ApiClient {
       body: data ? JSON.stringify(data) : undefined,
     });
   }
+
+  async uploadFile<T>(endpoint: string, formData: FormData): Promise<T> {
+    const url = `${this.baseURL}${endpoint}`;
+    const headers = {
+      // Don't set Content-Type, let browser set it with boundary
+      ...this.getAuthHeaders(),
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Network error' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  }
 }
 
 export const apiClient = new ApiClient();

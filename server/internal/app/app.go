@@ -1,6 +1,9 @@
 package app
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/tylerjvollick/nori/internal/database"
@@ -26,11 +29,30 @@ func New() *App {
 	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
 	sopVersionRepo := repositories.NewSOPTemplateVersionRepository(database.DB)
 	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
+	sopStepPhotoRepo := repositories.NewSOPStepPhotoRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
+
+	// Get photo upload configuration from environment
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "./uploads"
+	}
+
+	maxUploadSizeStr := os.Getenv("MAX_UPLOAD_SIZE")
+	maxUploadSize := int64(10485760) // Default 10MB
+	if maxUploadSizeStr != "" {
+		if size, err := strconv.ParseInt(maxUploadSizeStr, 10, 64); err == nil {
+			maxUploadSize = size
+		}
+	}
+
+	allowedMimeTypesStr := os.Getenv("ALLOWED_MIME_TYPES")
+	allowedMimeTypes := services.ParseAllowedMimeTypes(allowedMimeTypesStr)
 
 	// Services
 	userService := services.NewUserService(userRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
+	sopPhotoService := services.NewSOPStepPhotoService(database.DB, sopStepPhotoRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
 
@@ -38,6 +60,7 @@ func New() *App {
 	authHandler := handlers.NewAuthHandler(authService)
 	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
+	sopPhotoHandler := handlers.NewSOPStepPhotoHandler(sopPhotoService)
 	spaceHandler := handlers.NewSpaceHandler(spaceService)
 
 	// Fiber instance with CORS
@@ -56,6 +79,7 @@ func New() *App {
 	authHandler.RegisterAuthRoutes(app)
 	userHandler.RegisterUserRoutes(app)
 	sopHandler.RegisterSOPRoutes(app)
+	sopPhotoHandler.RegisterPhotoRoutes(app)
 	spaceHandler.RegisterSpaceRoutes(app)
 
 	return &App{
