@@ -286,7 +286,7 @@
 
 </script>
 
-<div class="h-full overflow-hidden">
+<div class="flex-1 h-full overflow-hidden flex flex-col">
   {#if $sopStore.loading}
     <div class="flex justify-center items-center py-12">
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -298,11 +298,11 @@
     </div>
   {:else if $sopStore.currentSOP}
     <!-- Two Column Layout -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+    <div class="flex flex-1 gap-0 overflow-hidden">
       <!-- Left Column: Main Content -->
-      <div class="lg:col-span-2 flex flex-col overflow-hidden">
+      <div class="flex-1 lg:w-2/3 flex flex-col overflow-hidden border-r border-border">
         <!-- Sticky Breadcrumb -->
-        <div class="sticky top-0 z-10 bg-background py-4 px-4 border-b border-border">
+        <div class="flex-shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 py-4 px-4 border-b border-border">
           <nav class="flex items-center text-sm text-muted-foreground">
             <Button
               onclick={() => goto('/sops')}
@@ -411,7 +411,7 @@
       </div>
 
       <!-- Right Column: Sidebar -->
-      <div class="overflow-y-auto px-4 py-6 space-y-6 border-l border-border">
+      <div class="flex-shrink-0 w-full lg:w-1/3 overflow-y-auto px-4 py-6 space-y-6">
         <!-- Actions -->
         <div class="pb-6 border-b border-border">
           <div class="flex items-center justify-between gap-2">
@@ -703,7 +703,7 @@
 
 <!-- Version History Modal/Overlay (Outside main grid) -->
 {#if $sopStore.currentSOP && showVersionHistory}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-30">
     <div class="bg-card rounded-lg shadow-xl border border-border max-w-4xl w-full max-h-[80vh] overflow-y-auto">
       <div class="sticky top-0 bg-card border-b border-border p-6 flex items-center justify-between">
         <h2 class="text-xl font-semibold text-foreground">Version History</h2>

@@ -1,60 +1,47 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { sidebarStore } from '$lib/stores/sidebar';
 	import { spaceStore } from '$lib/stores/space';
-	import type { Space } from '$lib/api/space';
-	import { cn } from '$lib/utils';
+	import { authStore } from '$lib/stores/auth';
+	import * as Sidebar from '$lib/components/ui/sidebar';
+	import * as Collapsible from '$lib/components/ui/collapsible';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
 	import {
 		LayoutGrid,
-		Plus,
 		FileText,
 		Package,
 		Wrench,
-		ChevronDown,
-		X,
-		Menu,
-		Folder
+		Folder,
+		Plus,
+		ChevronRight,
+		Ellipsis,
+		LogOut,
+		User as UserIcon
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
+	import type { ComponentProps } from 'svelte';
+	import type { User } from '$lib/api/auth';
 
-	let collapsed = $state(false);
-	let spacesExpanded = $state(true);
-	let mobileOpen = $state(false);
+	let { ref = $bindable(null), ...restProps }: ComponentProps<typeof Sidebar.Root> = $props();
+
+	let spaces = $derived($spaceStore.recentSpaces);
+	let user = $state<User | null>(null);
 	let showCreateDialog = $state(false);
 	let newSpaceName = $state('');
 	let isCreating = $state(false);
 
-	// Subscribe to sidebar store
-	sidebarStore.subscribe((state) => {
-		collapsed = state.collapsed;
-		spacesExpanded = state.spacesExpanded;
+	const sidebar = useSidebar();
+
+	// Subscribe to auth store
+	authStore.subscribe((state) => {
+		user = state.user;
 	});
 
 	// Load recent spaces on mount
 	onMount(() => {
 		spaceStore.loadRecentSpaces();
 	});
-
-	// Get recent spaces from store using derived state
-	let spaces = $derived($spaceStore.recentSpaces);
-
-	function toggleSidebar() {
-		sidebarStore.toggle();
-	}
-
-	function toggleSpaces() {
-		sidebarStore.toggleSpaces();
-	}
-
-	function toggleMobileSidebar() {
-		mobileOpen = !mobileOpen;
-	}
-
-	function navigateTo(href: string) {
-		goto(href);
-		mobileOpen = false; // Close mobile sidebar on navigation
-	}
 
 	function isActive(href: string): boolean {
 		if (typeof window === 'undefined') return false;
@@ -73,86 +60,50 @@
 		if (space) {
 			newSpaceName = '';
 			showCreateDialog = false;
-			// Refresh recent spaces
 			spaceStore.loadRecentSpaces();
-			// Navigate to the new space
 			goto(`/spaces/${space.id}`);
 		}
 	}
+
+	function handleLogout() {
+		authStore.logout();
+		goto('/login');
+	}
+
+	// Navigation structure
+	const navMain = [
+		{
+			title: 'SOPs',
+			url: '/sops',
+			icon: FileText,
+			isActive: isActive('/sops')
+		}
+	];
+
+	const navResources = [
+		{
+			title: 'Materials',
+			url: '#',
+			icon: Package
+		},
+		{
+			title: 'Equipment',
+			url: '#',
+			icon: Wrench
+		}
+	];
 </script>
 
-<!-- Mobile Menu Button -->
-<Button
-	variant="outline"
-	size="icon"
-	onclick={toggleMobileSidebar}
-	class="fixed top-4 left-4 z-50 shadow-lg md:hidden"
-	aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
->
-	{#if mobileOpen}
-		<X class="w-5 h-5" />
-	{:else}
-		<Menu class="w-5 h-5" />
-	{/if}
-</Button>
-
-<!-- Mobile Overlay -->
-{#if mobileOpen}
-	<Button
-		variant="ghost"
-		onclick={toggleMobileSidebar}
-		class="fixed inset-0 bg-black/50 z-40 md:hidden p-0 h-auto rounded-none"
-		aria-label="Close sidebar"
-	></Button>
-{/if}
-
-<!-- Sidebar -->
-<aside
-	class={cn(
-		'fixed left-0 top-0 h-screen bg-sidebar border-r border-sidebar-border transition-all duration-300 z-50 flex flex-col',
-		// Desktop
-		'hidden md:flex',
-		collapsed ? 'w-16' : 'w-64',
-		// Mobile
-		'md:translate-x-0',
-		mobileOpen ? 'flex translate-x-0' : '-translate-x-full',
-		mobileOpen && 'w-64'
-	)}
->
-	<!-- Sidebar Header -->
-	<div class={cn(
-		"h-(--header-height) flex items-center px-4 border-b border-sidebar-border",
-		collapsed ? "justify-center" : "justify-start"
-	)}>
-		{#if !collapsed}
-			<Button
-				variant="ghost"
-				onclick={() => navigateTo('/')}
-				class="flex items-center gap-2 hover:opacity-80 p-0 h-auto"
-			>
-				<div
-					class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center"
+<Sidebar.Root {...restProps} bind:ref>
+	<Sidebar.Header>
+		<div class="flex items-center gap-2 px-4 py-3">
+			<div class="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
+				<svg
+					class="w-5 h-5 text-sidebar-primary-foreground"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
 				>
-					<svg class="w-5 h-5 text-sidebar-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M13 10V3L4 14h7v7l9-11h-7z"
-						/>
-					</svg>
-				</div>
-				<span class="font-bold text-sidebar-foreground">Nori</span>
-			</Button>
-		{:else}
-			<Button
-				variant="ghost"
-				size="icon"
-				onclick={() => navigateTo('/')}
-				class="bg-sidebar-primary rounded-lg hover:opacity-80"
-				aria-label="Home"
-			>
-				<svg class="w-5 h-5 text-sidebar-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path
 						stroke-linecap="round"
 						stroke-linejoin="round"
@@ -160,128 +111,185 @@
 						d="M13 10V3L4 14h7v7l9-11h-7z"
 					/>
 				</svg>
-			</Button>
-		{/if}
-	</div>
-
-	<!-- Navigation -->
-	<nav class="flex-1 overflow-y-auto p-3 space-y-1">
-		<!-- Spaces Section -->
-		<div>
-			<Button
-				variant="ghost"
-				onclick={toggleSpaces}
-				class={cn(
-					'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
-					'text-sidebar-foreground hover:bg-sidebar-accent',
-					collapsed && 'justify-center'
-				)}
-				title={collapsed ? 'Spaces' : ''}
-			>
-				<LayoutGrid class="w-5 h-5 shrink-0" />
-				{#if !collapsed}
-					<span class="flex-1 text-left">Spaces</span>
-					<ChevronDown
-						class={cn('w-4 h-4 transition-transform', spacesExpanded && 'rotate-180')}
-					/>
-				{/if}
-			</Button>
-
-			<!-- Spaces List -->
-			{#if spacesExpanded && !collapsed}
-				<div class="ml-4 mt-1 space-y-1 border-l border-sidebar-border pl-4">
-					{#if $spaceStore.isLoading}
-						<div class="px-3 py-1.5 text-sm text-muted-foreground">Loading...</div>
-					{:else if spaces.length === 0}
-						<div class="px-3 py-1.5 text-sm text-muted-foreground">No recent spaces</div>
-					{:else}
-						{#each spaces as space}
-							<Button
-								variant="ghost"
-								onclick={() => navigateTo(`/spaces/${space.id}`)}
-								class={cn(
-									'w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm',
-									isActive(`/spaces/${space.id}`)
-										? 'bg-accent text-accent-foreground font-medium'
-										: 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-								)}
-							>
-								<Folder class="w-4 h-4 shrink-0" />
-								<span class="truncate">{space.name}</span>
-							</Button>
-						{/each}
-					{/if}
-
-					<!-- Create Space Button -->
-					<Button
-						variant="ghost"
-						onclick={() => (showCreateDialog = true)}
-						class="w-full flex items-center gap-2 px-3 py-1.5 h-auto justify-start text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-primary"
-					>
-						<Plus class="w-4 h-4 shrink-0" />
-						<span>Create Space</span>
-					</Button>
-				</div>
-			{/if}
+			</div>
+			<span class="font-bold text-sidebar-foreground">Nori</span>
 		</div>
+	</Sidebar.Header>
 
-		<!-- SOPs -->
-		<Button
-			variant="ghost"
-			onclick={() => navigateTo('/sops')}
-			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
-				isActive('/sops')
-					? 'bg-accent text-accent-foreground'
-					: 'text-sidebar-foreground hover:bg-sidebar-accent',
-				collapsed && 'justify-center'
-			)}
-			title={collapsed ? 'SOPs' : ''}
-		>
-			<FileText class="w-5 h-5 shrink-0" />
-			{#if !collapsed}
-				<span>SOPs</span>
-			{/if}
-		</Button>
+	<Sidebar.Content>
+		<!-- Spaces Section with Collapsible -->
+		<Sidebar.Group>
+			<Sidebar.GroupLabel>Workspace</Sidebar.GroupLabel>
+			<Sidebar.Menu>
+				<Collapsible.Root open={true} class="group/collapsible">
+					{#snippet child({ props })}
+						<Sidebar.MenuItem {...props}>
+							<Collapsible.Trigger>
+								{#snippet child({ props })}
+									<Sidebar.MenuButton {...props} tooltipContent="Spaces">
+										<LayoutGrid />
+										<span>Spaces</span>
+										<ChevronRight
+											class="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90"
+										/>
+									</Sidebar.MenuButton>
+								{/snippet}
+							</Collapsible.Trigger>
+							<Collapsible.Content>
+								<Sidebar.MenuSub>
+									{#if $spaceStore.isLoading}
+										<Sidebar.MenuSubItem>
+											<span class="text-sm text-muted-foreground pl-8">Loading...</span>
+										</Sidebar.MenuSubItem>
+									{:else if spaces.length === 0}
+										<Sidebar.MenuSubItem>
+											<span class="text-sm text-muted-foreground pl-8">No spaces yet</span>
+										</Sidebar.MenuSubItem>
+									{:else}
+										{#each spaces as space (space.id)}
+											<Sidebar.MenuSubItem>
+												<Sidebar.MenuSubButton
+													isActive={isActive(`/spaces/${space.id}`)}
+													onclick={() => goto(`/spaces/${space.id}`)}
+												>
+													{#snippet child({ props })}
+														<a href={`/spaces/${space.id}`} {...props}>
+															<Folder />
+															<span>{space.name}</span>
+														</a>
+													{/snippet}
+												</Sidebar.MenuSubButton>
+											</Sidebar.MenuSubItem>
+										{/each}
+									{/if}
+									<!-- Create Space Button -->
+									<Sidebar.MenuSubItem>
+										<Sidebar.MenuSubButton
+											onclick={() => (showCreateDialog = true)}
+											class="text-muted-foreground"
+										>
+											{#snippet child({ props })}
+												<button type="button" {...props}>
+													<Plus />
+													<span>Create Space</span>
+												</button>
+											{/snippet}
+										</Sidebar.MenuSubButton>
+									</Sidebar.MenuSubItem>
+								</Sidebar.MenuSub>
+							</Collapsible.Content>
+						</Sidebar.MenuItem>
+					{/snippet}
+				</Collapsible.Root>
 
-		<!-- Divider -->
-		<div class="my-3 border-t border-sidebar-border"></div>
+				<!-- SOPs -->
+				{#each navMain as item (item.title)}
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton
+							isActive={item.isActive}
+							onclick={() => goto(item.url)}
+							tooltipContent={item.title}
+						>
+							{#snippet child({ props })}
+								<a href={item.url} {...props}>
+									<item.icon />
+									<span>{item.title}</span>
+								</a>
+							{/snippet}
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
+				{/each}
+			</Sidebar.Menu>
+		</Sidebar.Group>
 
-		<!-- Materials (Placeholder) -->
-		<Button
-			variant="ghost"
-			onclick={() => alert('Materials feature coming soon!')}
-			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
-				'text-muted-foreground hover:bg-sidebar-accent',
-				collapsed && 'justify-center'
-			)}
-			title={collapsed ? 'Materials' : ''}
-		>
-			<Package class="w-5 h-5 shrink-0" />
-			{#if !collapsed}
-				<span>Materials</span>
-			{/if}
-		</Button>
+		<Sidebar.Separator />
 
-		<!-- Equipment (Placeholder) -->
-		<Button
-			variant="ghost"
-			onclick={() => alert('Equipment feature coming soon!')}
-			class={cn(
-				'w-full flex items-center gap-3 px-3 py-2 h-auto text-sm font-medium',
-				'text-muted-foreground hover:bg-sidebar-accent',
-				collapsed && 'justify-center'
-			)}
-			title={collapsed ? 'Equipment' : ''}
-		>
-			<Wrench class="w-5 h-5 shrink-0" />
-			{#if !collapsed}
-				<span>Equipment</span>
-			{/if}
-		</Button>
-	</nav>
-</aside>
+		<!-- Resources Section -->
+		<Sidebar.Group class="group-data-[collapsible=icon]:hidden">
+			<Sidebar.GroupLabel>Resources</Sidebar.GroupLabel>
+			<Sidebar.Menu>
+				{#each navResources as item (item.title)}
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton onclick={() => alert(`${item.title} feature coming soon!`)}>
+							{#snippet child({ props })}
+								<button type="button" {...props}>
+									<item.icon />
+									<span>{item.title}</span>
+								</button>
+							{/snippet}
+						</Sidebar.MenuButton>
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								{#snippet child({ props: actionProps })}
+									<Sidebar.MenuAction showOnHover {...actionProps}>
+										<Ellipsis />
+										<span class="sr-only">More</span>
+									</Sidebar.MenuAction>
+								{/snippet}
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content
+								class="w-48 rounded-lg"
+								side={sidebar.isMobile ? 'bottom' : 'right'}
+								align={sidebar.isMobile ? 'end' : 'start'}
+							>
+								<DropdownMenu.Item disabled>
+									<span class="text-muted-foreground">Coming Soon</span>
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					</Sidebar.MenuItem>
+				{/each}
+			</Sidebar.Menu>
+		</Sidebar.Group>
+	</Sidebar.Content>
+
+	<Sidebar.Footer>
+		<!-- User Menu -->
+		{#if user}
+			<Sidebar.Menu>
+				<Sidebar.MenuItem>
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
+							{#snippet child({ props: triggerProps })}
+								<Sidebar.MenuButton
+									size="lg"
+									class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+									{...triggerProps}
+								>
+									<div
+										class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground"
+									>
+										<UserIcon class="size-4" />
+									</div>
+									<div class="grid flex-1 text-left text-sm leading-tight">
+										<span class="truncate font-semibold"
+											>{user?.firstName} {user?.lastName}</span
+										>
+										<span class="truncate text-xs text-muted-foreground">{user?.email}</span>
+									</div>
+									<ChevronRight class="ml-auto size-4" />
+								</Sidebar.MenuButton>
+							{/snippet}
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content
+							class="w-56 rounded-lg"
+							side={sidebar.isMobile ? 'bottom' : 'right'}
+							align="end"
+						>
+							<DropdownMenu.Separator />
+							<DropdownMenu.Item onclick={handleLogout}>
+								<LogOut />
+								<span>Log out</span>
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
+				</Sidebar.MenuItem>
+			</Sidebar.Menu>
+		{/if}
+	</Sidebar.Footer>
+
+	<Sidebar.Rail />
+</Sidebar.Root>
 
 <!-- Create Space Dialog -->
 {#if showCreateDialog}
@@ -305,11 +313,12 @@
 						placeholder="e.g., Marketing, Engineering, HR"
 						class="w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
 						disabled={isCreating}
-						autofocus
 					/>
 				</div>
 				{#if $spaceStore.error}
-					<div class="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
+					<div
+						class="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive"
+					>
 						{$spaceStore.error}
 					</div>
 				{/if}
@@ -326,10 +335,7 @@
 					>
 						Cancel
 					</Button>
-					<Button
-						type="submit"
-						disabled={!newSpaceName.trim() || isCreating}
-					>
+					<Button type="submit" disabled={!newSpaceName.trim() || isCreating}>
 						{isCreating ? 'Creating...' : 'Create Space'}
 					</Button>
 				</div>
