@@ -79,7 +79,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Add API key detection (`nori_` prefix) branch
   - Extract active Space from `X-Space-ID` header or user's RecentSpaces
 
-- [ ] **Replace bitmask permissions with role check**
+- [x] **Replace bitmask permissions with role check**
   - Remove `permissions.go` bitmask system
   - Create `RequireAdmin()` middleware — checks `user.Role == admin`
   - Create `RequireSpaceAccess(spaceID)` middleware — admins pass
