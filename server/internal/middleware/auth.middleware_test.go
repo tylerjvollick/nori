@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -152,6 +153,155 @@ func TestRequireAdmin_Unauthorized_NilAuthDTO(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// RequirePasswordChanged Tests
+
+func TestRequirePasswordChanged_Success_PasswordAlreadyChanged(t *testing.T) {
+	app := fiber.New()
+
+	userID := uuid.New()
+	accountID := uuid.New()
+	role := models.RoleUser
+
+	// Setup route with RequirePasswordChanged middleware
+	app.Use(func(c *fiber.Ctx) error {
+		authDTO := &dtos.AuthDTO{
+			User: models.User{
+				ID:                 userID,
+				Role:               &role,
+				MustChangePassword: false, // Password already changed
+			},
+			AccountID: accountID,
+		}
+		c.Locals("authDTO", authDTO)
+		return c.Next()
+	})
+	app.Use(RequirePasswordChanged())
+	app.Get("/data", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/data", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestRequirePasswordChanged_Forbidden_MustChangePassword(t *testing.T) {
+	app := fiber.New()
+
+	userID := uuid.New()
+	accountID := uuid.New()
+	role := models.RoleUser
+
+	// Setup route with RequirePasswordChanged middleware
+	app.Use(func(c *fiber.Ctx) error {
+		authDTO := &dtos.AuthDTO{
+			User: models.User{
+				ID:                 userID,
+				Role:               &role,
+				MustChangePassword: true, // User must change password
+			},
+			AccountID: accountID,
+		}
+		c.Locals("authDTO", authDTO)
+		return c.Next()
+	})
+	app.Use(RequirePasswordChanged())
+	app.Get("/data", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/data", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// Verify the response contains the specific error code
+	var responseBody map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&responseBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "Password change required", responseBody["error"])
+	assert.Equal(t, "MUST_CHANGE_PASSWORD", responseBody["code"])
+}
+
+func TestRequirePasswordChanged_Forbidden_AdminMustChangePassword(t *testing.T) {
+	app := fiber.New()
+
+	userID := uuid.New()
+	accountID := uuid.New()
+	role := models.RoleAdmin
+
+	// Setup route with RequirePasswordChanged middleware
+	// Even admins must change password if flag is set
+	app.Use(func(c *fiber.Ctx) error {
+		authDTO := &dtos.AuthDTO{
+			User: models.User{
+				ID:                 userID,
+				Role:               &role,
+				MustChangePassword: true,
+			},
+			AccountID: accountID,
+		}
+		c.Locals("authDTO", authDTO)
+		return c.Next()
+	})
+	app.Use(RequirePasswordChanged())
+	app.Get("/admin", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	// Verify the response contains the specific error code
+	var responseBody map[string]interface{}
+	err = json.NewDecoder(resp.Body).Decode(&responseBody)
+	assert.NoError(t, err)
+	assert.Equal(t, "Password change required", responseBody["error"])
+	assert.Equal(t, "MUST_CHANGE_PASSWORD", responseBody["code"])
+}
+
+func TestRequirePasswordChanged_Unauthorized_MissingAuthDTO(t *testing.T) {
+	app := fiber.New()
+
+	// Setup route without setting authDTO
+	app.Use(RequirePasswordChanged())
+	app.Get("/data", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/data", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestRequirePasswordChanged_Unauthorized_NilAuthDTO(t *testing.T) {
+	app := fiber.New()
+
+	// Setup route with nil authDTO
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals("authDTO", nil)
+		return c.Next()
+	})
+	app.Use(RequirePasswordChanged())
+	app.Get("/data", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/data", nil)
 	resp, err := app.Test(req)
 
 	assert.NoError(t, err)

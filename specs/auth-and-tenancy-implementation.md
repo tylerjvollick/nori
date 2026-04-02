@@ -85,7 +85,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Create `RequireSpaceAccess(spaceID)` middleware — admins pass
     automatically, users must have a SpaceMember record
 
-- [ ] **Add MustChangePassword guard**
+- [x] **Add MustChangePassword guard**
   - Middleware that checks `user.MustChangePassword`
   - If true, reject all requests except the password change endpoint
   - Return a specific error code so the frontend knows to redirect

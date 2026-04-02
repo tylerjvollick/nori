@@ -35,6 +35,31 @@ func RequireAdmin() fiber.Handler {
 	}
 }
 
+// RequirePasswordChanged is a middleware that checks if the user has changed their password
+// It expects authDTO to be set in c.Locals("authDTO") by the auth middleware
+// If MustChangePassword is true, the user is blocked from all requests
+// Returns 403 Forbidden with a specific error code so the frontend knows to redirect to password change
+func RequirePasswordChanged() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		authDTO, ok := c.Locals("authDTO").(*dtos.AuthDTO)
+		if !ok || authDTO == nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Authentication required",
+			})
+		}
+
+		// Check if user must change password
+		if authDTO.User.MustChangePassword {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Password change required",
+				"code":  "MUST_CHANGE_PASSWORD",
+			})
+		}
+
+		return c.Next()
+	}
+}
+
 // RequireSpaceAccess is a middleware that checks if the authenticated user has access to a specific space
 // It expects authDTO to be set in c.Locals("authDTO") by the auth middleware
 // Admins automatically have access to all spaces
