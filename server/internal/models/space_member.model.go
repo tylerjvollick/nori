@@ -20,6 +20,11 @@ type SpaceMember struct {
 	Space Space `gorm:"foreignKey:SpaceID" json:"space,omitempty"`
 }
 
+// TableName specifies the table name for SpaceMember
+func (SpaceMember) TableName() string {
+	return "space_member"
+}
+
 // BeforeCreate hook to ensure ID is set
 func (sm *SpaceMember) BeforeCreate(tx *gorm.DB) (err error) {
 	if sm.ID == uuid.Nil {

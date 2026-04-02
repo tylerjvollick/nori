@@ -35,7 +35,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 3. Repositories
 
-- [ ] **Create SpaceMember repository**
+- [x] **Create SpaceMember repository**
   - `Create`, `Delete`, `GetByUserAndSpace`, `GetByUser` (list Spaces for a
     user), `GetBySpace` (list members of a Space)
 
