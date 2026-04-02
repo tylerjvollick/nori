@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/tylerjvollick/nori/internal/auth"
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/services"
 )
@@ -17,10 +16,10 @@ func NewUserHandler(userService *services.UserService) *UserHandler {
 	return &UserHandler{userService: userService}
 }
 
-func (h *UserHandler) RegisterUserRoutes(app *fiber.App) {
+func (h *UserHandler) RegisterUserRoutes(app *fiber.App, authMiddleware fiber.Handler) {
 	group := app.Group("/user")
 
-	group.Get("/me", auth.AuthMiddleware(), h.Me)
+	group.Get("/me", authMiddleware, h.Me)
 }
 
 func (h *UserHandler) Me(c *fiber.Ctx) error {

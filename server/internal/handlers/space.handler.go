@@ -5,7 +5,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/tylerjvollick/nori/internal/auth"
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/services"
 )
@@ -18,8 +17,8 @@ func NewSpaceHandler(spaceService *services.SpaceService) *SpaceHandler {
 	return &SpaceHandler{spaceService: spaceService}
 }
 
-func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App) {
-	group := app.Group("/api/spaces", auth.AuthMiddleware())
+func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, authMiddleware fiber.Handler) {
+	group := app.Group("/api/spaces", authMiddleware)
 
 	group.Post("", h.CreateSpace)
 	group.Get("", h.GetSpaces)

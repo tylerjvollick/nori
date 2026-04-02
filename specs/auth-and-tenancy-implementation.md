@@ -99,7 +99,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `DELETE /api/admin/users/:id` — deactivate/delete user
   - All protected by `RequireAdmin()` middleware
 
-- [ ] **Create Space membership endpoints**
+- [x] **Create Space membership endpoints**
   - `POST /api/admin/spaces/:id/members` — add user to Space
   - `DELETE /api/admin/spaces/:id/members/:userId` — remove user from Space
   - `GET /api/admin/spaces/:id/members` — list Space members

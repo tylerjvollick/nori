@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/tylerjvollick/nori/internal/auth"
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/services"
@@ -19,27 +18,27 @@ func NewSOPHandler(sopService *services.SOPService) *SOPHandler {
 	return &SOPHandler{sopService: sopService}
 }
 
-func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App) {
+func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App, authMiddleware fiber.Handler) {
 	group := app.Group("/sops")
 
 	// Step operation routes - work with template ID
-	group.Post("/:id/steps", auth.AuthMiddleware(), h.CreateStep)
-	group.Put("/:id/steps/:stepId", auth.AuthMiddleware(), h.UpdateStep)
-	group.Delete("/:id/steps/:stepId", auth.AuthMiddleware(), h.DeleteStep)
-	group.Patch("/:id/steps/:stepId/reorder", auth.AuthMiddleware(), h.ReorderSteps)
+	group.Post("/:id/steps", authMiddleware, h.CreateStep)
+	group.Put("/:id/steps/:stepId", authMiddleware, h.UpdateStep)
+	group.Delete("/:id/steps/:stepId", authMiddleware, h.DeleteStep)
+	group.Patch("/:id/steps/:stepId/reorder", authMiddleware, h.ReorderSteps)
 
 	// Version routes (must come before generic /:id route)
-	group.Get("/versions/:versionId", auth.AuthMiddleware(), h.GetSOPVersion)
+	group.Get("/versions/:versionId", authMiddleware, h.GetSOPVersion)
 
 	// Public routes
-	group.Get("/", auth.AuthMiddleware(), h.GetAllSOPs)
-	group.Post("/", auth.AuthMiddleware(), h.CreateSOP)
+	group.Get("/", authMiddleware, h.GetAllSOPs)
+	group.Post("/", authMiddleware, h.CreateSOP)
 
 	// Parameterized routes (must come after specific routes)
-	group.Get("/:id", auth.AuthMiddleware(), h.GetSOP)
-	group.Put("/:id", auth.AuthMiddleware(), h.UpdateSOP)
-	group.Delete("/:id", auth.AuthMiddleware(), h.DeleteSOP)
-	group.Get("/:id/versions", auth.AuthMiddleware(), h.GetSOPVersions)
+	group.Get("/:id", authMiddleware, h.GetSOP)
+	group.Put("/:id", authMiddleware, h.UpdateSOP)
+	group.Delete("/:id", authMiddleware, h.DeleteSOP)
+	group.Get("/:id/versions", authMiddleware, h.GetSOPVersions)
 }
 
 // CreateSOP creates a new SOP template with its first version

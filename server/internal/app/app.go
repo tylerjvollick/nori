@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/tylerjvollick/nori/internal/auth"
 	"github.com/tylerjvollick/nori/internal/config"
 	"github.com/tylerjvollick/nori/internal/database"
 	"github.com/tylerjvollick/nori/internal/handlers"
@@ -39,6 +40,7 @@ func New(cfg *config.Config) *App {
 	_ = bomItemRepo // TODO: wire into service when BOMItem CRUD endpoints are added
 	sopStepMediaRepo := repositories.NewSOPStepMediaRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
+	spaceMemberRepo := repositories.NewSpaceMemberRepository(database.DB)
 	sopCategoryRepo := repositories.NewSOPCategoryRepository(database.DB)
 	ticketTypeRepo := repositories.NewTicketTypeRepository(database.DB)
 	statusDefRepo := repositories.NewStatusDefinitionRepository(database.DB)
@@ -100,13 +102,14 @@ func New(cfg *config.Config) *App {
 	}))
 
 	// Register routes
+	authMiddleware := auth.NewAuthMiddleware(userRepo, apiKeyRepo, spaceMemberRepo, cfg.JWTSecret)
 	handlers.RegisterHealthRoutes(app, nil)
 	authHandler.RegisterAuthRoutes(app)
-	userHandler.RegisterUserRoutes(app)
-	sopHandler.RegisterSOPRoutes(app)
+	userHandler.RegisterUserRoutes(app, authMiddleware)
+	sopHandler.RegisterSOPRoutes(app, authMiddleware)
 	sopMediaHandler.RegisterMediaRoutes(app)
 	tusHandler.RegisterTusRoutes(app)
-	spaceHandler.RegisterSpaceRoutes(app)
+	spaceHandler.RegisterSpaceRoutes(app, authMiddleware)
 
 	return &App{
 		Fiber:       app,
