@@ -39,7 +39,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `Create`, `Delete`, `GetByUserAndSpace`, `GetByUser` (list Spaces for a
     user), `GetBySpace` (list members of a Space)
 
-- [ ] **Create APIKey repository**
+- [x] **Create APIKey repository**
   - `Create`, `GetByKeyHash`, `GetByAccount`, `Deactivate`, `Delete`,
     `UpdateLastUsed`
 
