@@ -62,7 +62,7 @@ Each item is a small, committable unit of work. Work top-down.
   - On auth, detect `nori_` prefix → look up by hash → validate active/expiry
   - Update `LastUsedAt` on successful auth
 
-- [ ] **Add password change flow**
+- [x] **Add password change flow**
   - `ChangePassword(userID, oldPassword, newPassword)` method
   - Verify old password, hash new, clear `MustChangePassword` flag
   - Return new JWT after password change

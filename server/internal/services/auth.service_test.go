@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/tylerjvollick/nori/internal/models"
+	"github.com/tylerjvollick/nori/internal/repositories"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -820,4 +821,393 @@ func TestHashAPIKey_Different(t *testing.T) {
 
 	// Assert - different inputs should produce different hashes
 	assert.NotEqual(t, hash1, hash2, "Different keys should produce different hashes")
+}
+
+// MockUserRepository is a mock implementation of UserRepository
+type MockUserRepository struct {
+	getUserByIDFunc             func(uuid.UUID) (*models.User, error)
+	getUserByEmailFunc          func(string) (*models.User, error)
+	createUserFunc              func(*models.User) error
+	updateUserFunc              func(uuid.UUID, *repositories.UpdateUserInput) (*models.User, error)
+	updateRecentSpacesFunc      func(uuid.UUID, models.RecentSpaces) error
+	updatePasswordFunc          func(uuid.UUID, string) error
+	clearMustChangePasswordFunc func(uuid.UUID) error
+}
+
+func (m *MockUserRepository) GetUserByID(id uuid.UUID) (*models.User, error) {
+	if m.getUserByIDFunc != nil {
+		return m.getUserByIDFunc(id)
+	}
+	return nil, errors.New("user not found")
+}
+
+func (m *MockUserRepository) GetUserByEmail(email string) (*models.User, error) {
+	if m.getUserByEmailFunc != nil {
+		return m.getUserByEmailFunc(email)
+	}
+	return nil, errors.New("user not found")
+}
+
+func (m *MockUserRepository) CreateUser(user *models.User) error {
+	if m.createUserFunc != nil {
+		return m.createUserFunc(user)
+	}
+	return errors.New("not implemented")
+}
+
+func (m *MockUserRepository) UpdateUser(id uuid.UUID, input *repositories.UpdateUserInput) (*models.User, error) {
+	if m.updateUserFunc != nil {
+		return m.updateUserFunc(id, input)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (m *MockUserRepository) UpdateRecentSpaces(userID uuid.UUID, recentSpaces models.RecentSpaces) error {
+	if m.updateRecentSpacesFunc != nil {
+		return m.updateRecentSpacesFunc(userID, recentSpaces)
+	}
+	return errors.New("not implemented")
+}
+
+func (m *MockUserRepository) UpdatePassword(userID uuid.UUID, hashedPassword string) error {
+	if m.updatePasswordFunc != nil {
+		return m.updatePasswordFunc(userID, hashedPassword)
+	}
+	return nil
+}
+
+func (m *MockUserRepository) ClearMustChangePassword(userID uuid.UUID) error {
+	if m.clearMustChangePasswordFunc != nil {
+		return m.clearMustChangePasswordFunc(userID)
+	}
+	return nil
+}
+
+func TestChangePassword_Success(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	newPassword := "newpassword456"
+
+	// Create a hashed old password
+	hashedOldPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+	hashedOldPasswordStr := string(hashedOldPassword)
+
+	firstName := "John"
+	lastName := "Doe"
+	user := &models.User{
+		ID:                 userID,
+		Email:              "john@example.com",
+		Password:           &hashedOldPasswordStr,
+		FirstName:          &firstName,
+		LastName:           &lastName,
+		MustChangePassword: true,
+		RecentSpaces:       models.RecentSpaces{},
+	}
+
+	passwordUpdated := false
+	mustChangePasswordCleared := false
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			if id == userID {
+				return user, nil
+			}
+			return nil, errors.New("user not found")
+		},
+		updatePasswordFunc: func(id uuid.UUID, hashedPassword string) error {
+			if id == userID {
+				passwordUpdated = true
+				user.Password = &hashedPassword
+				return nil
+			}
+			return errors.New("user not found")
+		},
+		clearMustChangePasswordFunc: func(id uuid.UUID) error {
+			if id == userID {
+				mustChangePasswordCleared = true
+				user.MustChangePassword = false
+				return nil
+			}
+			return errors.New("user not found")
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, oldPassword, newPassword)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, response)
+	assert.NotEmpty(t, response.AccessToken)
+	assert.Equal(t, userID, response.UserID)
+	assert.Equal(t, "john@example.com", response.UserEmail)
+	assert.False(t, response.MustChangePassword, "MustChangePassword should be false after password change")
+	assert.True(t, passwordUpdated, "Password should have been updated")
+	assert.True(t, mustChangePasswordCleared, "MustChangePassword flag should have been cleared")
+
+	// Verify the new password works
+	assert.True(t, authService.ValidatePassword(*user, newPassword), "New password should be valid")
+	assert.False(t, authService.ValidatePassword(*user, oldPassword), "Old password should no longer be valid")
+}
+
+func TestChangePassword_WrongOldPassword(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	wrongOldPassword := "wrongoldpassword"
+	newPassword := "newpassword456"
+
+	// Create a hashed old password
+	hashedOldPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+	hashedOldPasswordStr := string(hashedOldPassword)
+
+	firstName := "John"
+	lastName := "Doe"
+	user := &models.User{
+		ID:                 userID,
+		Email:              "john@example.com",
+		Password:           &hashedOldPasswordStr,
+		FirstName:          &firstName,
+		LastName:           &lastName,
+		MustChangePassword: true,
+		RecentSpaces:       models.RecentSpaces{},
+	}
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			if id == userID {
+				return user, nil
+			}
+			return nil, errors.New("user not found")
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, wrongOldPassword, newPassword)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "current password is incorrect")
+}
+
+func TestChangePassword_UserNotFound(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	newPassword := "newpassword456"
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			return nil, errors.New("user not found")
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, oldPassword, newPassword)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "user not found")
+}
+
+func TestChangePassword_UpdatePasswordError(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	newPassword := "newpassword456"
+
+	// Create a hashed old password
+	hashedOldPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+	hashedOldPasswordStr := string(hashedOldPassword)
+
+	firstName := "John"
+	lastName := "Doe"
+	user := &models.User{
+		ID:                 userID,
+		Email:              "john@example.com",
+		Password:           &hashedOldPasswordStr,
+		FirstName:          &firstName,
+		LastName:           &lastName,
+		MustChangePassword: true,
+		RecentSpaces:       models.RecentSpaces{},
+	}
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			if id == userID {
+				return user, nil
+			}
+			return nil, errors.New("user not found")
+		},
+		updatePasswordFunc: func(id uuid.UUID, hashedPassword string) error {
+			return errors.New("database error")
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, oldPassword, newPassword)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "failed to update password")
+}
+
+func TestChangePassword_ClearMustChangePasswordError(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	newPassword := "newpassword456"
+
+	// Create a hashed old password
+	hashedOldPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+	hashedOldPasswordStr := string(hashedOldPassword)
+
+	firstName := "John"
+	lastName := "Doe"
+	user := &models.User{
+		ID:                 userID,
+		Email:              "john@example.com",
+		Password:           &hashedOldPasswordStr,
+		FirstName:          &firstName,
+		LastName:           &lastName,
+		MustChangePassword: true,
+		RecentSpaces:       models.RecentSpaces{},
+	}
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			if id == userID {
+				return user, nil
+			}
+			return nil, errors.New("user not found")
+		},
+		updatePasswordFunc: func(id uuid.UUID, hashedPassword string) error {
+			user.Password = &hashedPassword
+			return nil
+		},
+		clearMustChangePasswordFunc: func(id uuid.UUID) error {
+			return errors.New("database error")
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, oldPassword, newPassword)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, response)
+	assert.Contains(t, err.Error(), "failed to clear password change flag")
+}
+
+func TestChangePassword_ReturnsNewJWT(t *testing.T) {
+	// Arrange
+	jwtSecret := "test-secret-key-12345"
+	userID := uuid.New()
+	oldPassword := "oldpassword123"
+	newPassword := "newpassword456"
+
+	// Create a hashed old password
+	hashedOldPassword, err := bcrypt.GenerateFromPassword([]byte(oldPassword), bcrypt.DefaultCost)
+	assert.NoError(t, err)
+	hashedOldPasswordStr := string(hashedOldPassword)
+
+	firstName := "John"
+	lastName := "Doe"
+	user := &models.User{
+		ID:                 userID,
+		Email:              "john@example.com",
+		Password:           &hashedOldPasswordStr,
+		FirstName:          &firstName,
+		LastName:           &lastName,
+		MustChangePassword: true,
+		RecentSpaces:       models.RecentSpaces{},
+	}
+
+	mockUserRepo := &MockUserRepository{
+		getUserByIDFunc: func(id uuid.UUID) (*models.User, error) {
+			if id == userID {
+				return user, nil
+			}
+			return nil, errors.New("user not found")
+		},
+		updatePasswordFunc: func(id uuid.UUID, hashedPassword string) error {
+			user.Password = &hashedPassword
+			return nil
+		},
+		clearMustChangePasswordFunc: func(id uuid.UUID) error {
+			user.MustChangePassword = false
+			return nil
+		},
+	}
+
+	authService := &AuthService{
+		userRepository: mockUserRepo,
+		jwtSecret:      []byte(jwtSecret),
+	}
+
+	// Act
+	response, err := authService.ChangePassword(userID, oldPassword, newPassword)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, response)
+	assert.NotEmpty(t, response.AccessToken)
+
+	// Verify the JWT is valid and has the expected claims
+	token, err := jwt.Parse(response.AccessToken, func(t *jwt.Token) (interface{}, error) {
+		return []byte(jwtSecret), nil
+	})
+	assert.NoError(t, err)
+	assert.True(t, token.Valid)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	assert.True(t, ok)
+	assert.Equal(t, userID.String(), claims["sub"])
+	assert.Equal(t, "john@example.com", claims["email"])
+
+	// Verify expiry is 30 days
+	exp, ok := claims["exp"].(float64)
+	assert.True(t, ok)
+	expiryTime := time.Unix(int64(exp), 0)
+	expectedExpiry := time.Now().Add(time.Hour * 24 * 30)
+	timeDiff := expiryTime.Sub(expectedExpiry).Abs()
+	assert.Less(t, timeDiff, 5*time.Second)
 }

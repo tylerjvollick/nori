@@ -17,6 +17,17 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// UserRepositoryInterface defines the methods needed from a user repository
+type UserRepositoryInterface interface {
+	GetUserByID(id uuid.UUID) (*models.User, error)
+	GetUserByEmail(email string) (*models.User, error)
+	CreateUser(user *models.User) error
+	UpdateUser(id uuid.UUID, input *repositories.UpdateUserInput) (*models.User, error)
+	UpdateRecentSpaces(userID uuid.UUID, recentSpaces models.RecentSpaces) error
+	UpdatePassword(userID uuid.UUID, hashedPassword string) error
+	ClearMustChangePassword(userID uuid.UUID) error
+}
+
 // APIKeyRepositoryInterface defines the methods needed from an API key repository
 type APIKeyRepositoryInterface interface {
 	Create(apiKey *models.APIKey) error
@@ -28,7 +39,7 @@ type APIKeyRepositoryInterface interface {
 }
 
 type AuthService struct {
-	userRepository        *repositories.UserRepository
+	userRepository        UserRepositoryInterface
 	accountRepository     *repositories.AccountRepository
 	userAccountRepository *repositories.UserAccountRepository
 	apiKeyRepository      APIKeyRepositoryInterface
@@ -36,7 +47,7 @@ type AuthService struct {
 	jwtSecret             []byte
 }
 
-func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, apiKeyRepository APIKeyRepositoryInterface, spaceService *SpaceService, jwtSecret string) *AuthService {
+func NewAuthService(userRepository UserRepositoryInterface, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, apiKeyRepository APIKeyRepositoryInterface, spaceService *SpaceService, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepository:        userRepository,
 		accountRepository:     accountRepository,
@@ -356,4 +367,41 @@ func (s *AuthService) ValidateAPIKey(rawKey string) (*models.APIKey, error) {
 	}
 
 	return apiKey, nil
+}
+
+// ChangePassword changes a user's password after verifying their current password
+// It hashes the new password, clears the MustChangePassword flag, and returns a new JWT
+func (s *AuthService) ChangePassword(userID uuid.UUID, oldPassword, newPassword string) (*LoginResponse, error) {
+	// Get the user
+	user, err := s.userRepository.GetUserByID(userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify the old password
+	if !s.ValidatePassword(*user, oldPassword) {
+		return nil, errors.New("current password is incorrect")
+	}
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, errors.New("failed to hash new password")
+	}
+
+	// Update the password
+	if err := s.userRepository.UpdatePassword(userID, string(hashedPassword)); err != nil {
+		return nil, errors.New("failed to update password")
+	}
+
+	// Clear the MustChangePassword flag
+	if err := s.userRepository.ClearMustChangePassword(userID); err != nil {
+		return nil, errors.New("failed to clear password change flag")
+	}
+
+	// Update the user object to reflect changes for JWT generation
+	user.MustChangePassword = false
+
+	// Generate and return a new JWT
+	return s.CreateLoginResponse(*user, nil)
 }
