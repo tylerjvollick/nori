@@ -73,7 +73,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 5. Middleware Refactor
 
-- [ ] **Consolidate auth middleware**
+- [x] **Consolidate auth middleware**
   - Fix `c.Locals` key inconsistency ("authDTO" vs "user") — use one key
   - Support both JWT cookies and Authorization header
   - Add API key detection (`nori_` prefix) branch
