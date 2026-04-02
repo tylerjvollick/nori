@@ -92,7 +92,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 6. Admin User Management API
 
-- [ ] **Create admin user management endpoints**
+- [x] **Create admin user management endpoints**
   - `POST /api/admin/users` — create user (email, name, temp password)
   - `GET /api/admin/users` — list all users in the Account
   - `PUT /api/admin/users/:id` — update user (name, role)

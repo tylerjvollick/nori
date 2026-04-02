@@ -27,3 +27,13 @@ func (r *UserAccountRepository) Create(userID uuid.UUID, accountID uuid.UUID) (*
 
 	return record, nil
 }
+
+// GetByAccountID returns all UserAccount records for the specified account
+func (r *UserAccountRepository) GetByAccountID(accountID uuid.UUID) ([]models.UserAccount, error) {
+	var userAccounts []models.UserAccount
+	err := r.db.Where("account_id = ?", accountID).Find(&userAccounts).Error
+	if err != nil {
+		return nil, err
+	}
+	return userAccounts, nil
+}
