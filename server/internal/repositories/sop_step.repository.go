@@ -40,7 +40,7 @@ func (r *SOPStepRepository) GetByID(id int) (*models.SOPStep, error) {
 
 func (r *SOPStepRepository) GetByVersionID(versionID int) ([]models.SOPStep, error) {
 	var steps []models.SOPStep
-	err := r.db.Where("sop_template_version_id = ?", versionID).
+	err := r.db.Where("sop_version_id = ?", versionID).
 		Order("\"order\" ASC").
 		Find(&steps).Error
 	return steps, err
@@ -48,7 +48,7 @@ func (r *SOPStepRepository) GetByVersionID(versionID int) ([]models.SOPStep, err
 
 func (r *SOPStepRepository) GetByVersionIDWithTx(tx *gorm.DB, versionID int) ([]models.SOPStep, error) {
 	var steps []models.SOPStep
-	err := tx.Where("sop_template_version_id = ?", versionID).
+	err := tx.Where("sop_version_id = ?", versionID).
 		Order("\"order\" ASC").
 		Find(&steps).Error
 	return steps, err
@@ -63,11 +63,11 @@ func (r *SOPStepRepository) Delete(id int) error {
 }
 
 func (r *SOPStepRepository) DeleteByVersionID(versionID int) error {
-	return r.db.Where("sop_template_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
+	return r.db.Where("sop_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
 }
 
 func (r *SOPStepRepository) DeleteByVersionIDWithTx(tx *gorm.DB, versionID int) error {
-	return tx.Where("sop_template_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
+	return tx.Where("sop_version_id = ?", versionID).Delete(&models.SOPStep{}).Error
 }
 
 func (r *SOPStepRepository) CreateBatchWithTx(tx *gorm.DB, steps []models.SOPStep) error {
@@ -88,7 +88,7 @@ func (r *SOPStepRepository) DeleteWithTx(tx *gorm.DB, id int) error {
 // GetByIDAndVersionID gets a step by ID and verifies it belongs to the specified version
 func (r *SOPStepRepository) GetByIDAndVersionID(stepID int, versionID int) (*models.SOPStep, error) {
 	var step models.SOPStep
-	err := r.db.Where("id = ? AND sop_template_version_id = ?", stepID, versionID).First(&step).Error
+	err := r.db.Where("id = ? AND sop_version_id = ?", stepID, versionID).First(&step).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("step not found in this version")
@@ -102,7 +102,7 @@ func (r *SOPStepRepository) GetByIDAndVersionID(stepID int, versionID int) (*mod
 func (r *SOPStepRepository) GetLastOrderByVersionID(versionID int) (string, error) {
 	var lastOrder string
 	err := r.db.Model(&models.SOPStep{}).
-		Where("sop_template_version_id = ?", versionID).
+		Where("sop_version_id = ?", versionID).
 		Select("COALESCE(MAX(\"order\"), '')").
 		Scan(&lastOrder).Error
 	return lastOrder, err
@@ -115,7 +115,7 @@ func (r *SOPStepRepository) GetOrderBeforeAndAfter(versionID int, beforeStepID, 
 
 	if beforeStepID != nil {
 		var step models.SOPStep
-		if err := r.db.Where("id = ? AND sop_template_version_id = ?", *beforeStepID, versionID).First(&step).Error; err != nil {
+		if err := r.db.Where("id = ? AND sop_version_id = ?", *beforeStepID, versionID).First(&step).Error; err != nil {
 			if err != gorm.ErrRecordNotFound {
 				return "", "", err
 			}
@@ -126,7 +126,7 @@ func (r *SOPStepRepository) GetOrderBeforeAndAfter(versionID int, beforeStepID, 
 
 	if afterStepID != nil {
 		var step models.SOPStep
-		if err := r.db.Where("id = ? AND sop_template_version_id = ?", *afterStepID, versionID).First(&step).Error; err != nil {
+		if err := r.db.Where("id = ? AND sop_version_id = ?", *afterStepID, versionID).First(&step).Error; err != nil {
 			if err != gorm.ErrRecordNotFound {
 				return "", "", err
 			}

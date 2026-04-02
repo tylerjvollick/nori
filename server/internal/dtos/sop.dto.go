@@ -9,14 +9,14 @@ type CreateSOPStepDTO struct {
 	ImageURL             *string `json:"imageUrl,omitempty"`
 	VideoURL             *string `json:"videoUrl,omitempty"`
 	RequiresApproval     bool    `json:"requiresApproval"`
+	StationID            *string `json:"stationId,omitempty"`
+	LinkedSOPTemplateID  *int    `json:"linkedSopTemplateId,omitempty"`
 }
 
 // CreateSOPDTO represents the request to create a new SOP template with its first version
 type CreateSOPDTO struct {
 	Name          string             `json:"name" binding:"required"`
 	Description   *string            `json:"description,omitempty"`
-	Materials     []string           `json:"materials,omitempty"`
-	Equipment     []string           `json:"equipment,omitempty"`
 	ChangeSummary *string            `json:"changeSummary,omitempty"`
 	Steps         []CreateSOPStepDTO `json:"steps" binding:"required,min=1"`
 }
@@ -25,8 +25,6 @@ type CreateSOPDTO struct {
 type UpdateSOPDTO struct {
 	Name          *string            `json:"name,omitempty"`
 	Description   *string            `json:"description,omitempty"`
-	Materials     []string           `json:"materials,omitempty"`
-	Equipment     []string           `json:"equipment,omitempty"`
 	ChangeSummary string             `json:"changeSummary" binding:"required"`
 	Steps         []CreateSOPStepDTO `json:"steps" binding:"required,min=1"`
 }
@@ -41,16 +39,15 @@ type SOPStepResponseDTO struct {
 	ImageURL             *string `json:"imageUrl,omitempty"`
 	VideoURL             *string `json:"videoUrl,omitempty"`
 	RequiresApproval     bool    `json:"requiresApproval"`
+	StationID            *string `json:"stationId,omitempty"`
+	LinkedSOPTemplateID  *int    `json:"linkedSopTemplateId,omitempty"`
 }
 
 // SOPVersionResponseDTO represents a version in the response
 type SOPVersionResponseDTO struct {
 	ID            int                  `json:"id"`
 	VersionNumber int                  `json:"versionNumber"`
-	Status        string               `json:"status"`
 	Description   *string              `json:"description,omitempty"`
-	Materials     []string             `json:"materials,omitempty"`
-	Equipment     []string             `json:"equipment,omitempty"`
 	ChangeSummary *string              `json:"changeSummary,omitempty"`
 	CreatedAt     string               `json:"createdAt"`
 	UpdatedAt     string               `json:"updatedAt"`
@@ -61,6 +58,7 @@ type SOPVersionResponseDTO struct {
 // SOPTemplateResponseDTO represents an SOP template in the response
 type SOPTemplateResponseDTO struct {
 	ID             int                    `json:"id"`
+	SpaceID        *string                `json:"spaceId,omitempty"`
 	Name           string                 `json:"name"`
 	CreatedAt      string                 `json:"createdAt"`
 	UpdatedAt      string                 `json:"updatedAt"`
@@ -115,6 +113,8 @@ type CreateStepDTO struct {
 	ImageURL             *string `json:"imageUrl,omitempty"`
 	VideoURL             *string `json:"videoUrl,omitempty"`
 	RequiresApproval     bool    `json:"requiresApproval"`
+	StationID            *string `json:"stationId,omitempty"`
+	LinkedSOPTemplateID  *int    `json:"linkedSopTemplateId,omitempty"`
 }
 
 // UpdateStepDTO represents the request to update a single step
@@ -125,6 +125,8 @@ type UpdateStepDTO struct {
 	ImageURL             *string `json:"imageUrl,omitempty"`
 	VideoURL             *string `json:"videoUrl,omitempty"`
 	RequiresApproval     *bool   `json:"requiresApproval,omitempty"`
+	StationID            *string `json:"stationId,omitempty"`
+	LinkedSOPTemplateID  *int    `json:"linkedSopTemplateId,omitempty"`
 }
 
 // ReorderStepDTO represents the request to reorder a single step

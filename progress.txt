@@ -1,0 +1,519 @@
+## 2026-04-01: Task 1.2 — Rename SOPTemplateVersion → SOPVersion
+
+Completed the rename of SOPTemplateVersion to SOPVersion across the codebase:
+
+- Renamed model: SOPTemplateVersion → SOPVersion (new file sop_version.model.go)
+- Renamed repository: SOPTemplateVersionRepository → SOPVersionRepository
+- Renamed table: sop_template_version → sop_version (via migration 000010)
+- Renamed FK column: sop_step.sop_template_version_id → sop_step.sop_version_id
+- Removed Status field (draft/published) from SOPVersion — replaced by auto-versioning
+- Removed Materials and Equipment pq.StringArray fields — replaced by BOMItem (Phase 2)
+- Updated all references in: app.go, sop.service.go, sop.handler.go,
+  sop_step_media.service.go, tus.service.go, sop_step.repository.go, DTOs
+- Created migration 000010 (up + down) for table/column rename and column drops
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 1.3 — Add StationID and LinkedSOPTemplateID to SOPStep
+
+Added StationID and LinkedSOPTemplateID fields to SOPStep model and propagated
+through all layers:
+
+- Model: added `StationID *uuid.UUID` and `LinkedSOPTemplateID *int` to SOPStep,
+  plus `LinkedSOPTemplate` relation
+- Migration 000011 (up + down): adds columns, FK constraint for
+  linked_sop_template_id → sop_template, indexes on both columns. Station FK
+  deferred to Phase 2 per spec.
+- DTOs: updated CreateSOPStepDTO, SOPStepResponseDTO, CreateStepDTO, UpdateStepDTO
+- Handler: updated versionToResponse and stepToResponse to map UUID→string for
+  StationID
+- Service: updated CreateSOP, UpdateSOP, CreateStep, CreateStepForTemplate,
+  UpdateStep, UpdateStepForTemplate, and step-copy during versioning
+- Added parseOptionalUUID helper for string→*uuid.UUID conversion
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 1.4 — Create SOPSubStep model
+
+Created the SOPSubStep model for granular documentation within SOP steps.
+Sub-steps are one level deep, not individually timed, and serve as checklist
+items for detailed procedure documentation.
+
+- Model: `SOPSubStep` in `server/internal/models/sop_sub_step.model.go`
+  with fields: ID (int, auto-increment), SOPStepID, DisplayOrder, Title,
+  Instructions (nullable), CreatedAt, UpdatedAt. Uses `int` PK to match
+  parent SOPStep.ID type per spec.
+- Added `SubSteps []SOPSubStep` relation to SOPStep model
+- Migration 000012 (up + down): creates `sop_sub_step` table with FK
+  constraint to `sop_step` (ON DELETE CASCADE), indexes on sop_step_id
+  and composite (sop_step_id, display_order)
+- Repository: `SOPSubStepRepository` with Create, CreateBatch, GetByID,
+  GetByStepID, Update, Delete, DeleteByStepID, Reorder, GetMaxDisplayOrder,
+  plus WithTx variants for transactional use
+- Wired repository into `app.go` (unused pending service/handler work)
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 1.5 — Update SOPStepMedia to support sub-step media
+
+Updated SOPStepMedia to allow media to be associated with either an SOPStep
+or an SOPSubStep, per the data model spec.
+
+- Model: changed `SOPStepID` from `int` (not null) to `*int` (nullable),
+  added `SOPSubStepID *int` (nullable), added `SOPSubStep` relation.
+  Exactly one of SOPStepID or SOPSubStepID must be set (enforced by DB
+  check constraint).
+- Added `Media []SOPStepMedia` relation to SOPSubStep model
+- Migration 000013 (up + down): makes sop_step_id nullable, adds
+  sop_sub_step_id column with FK to sop_sub_step (ON DELETE CASCADE),
+  index on sop_sub_step_id, check constraint chk_sop_step_media_owner
+- Repository: added GetBySubStepID, DeleteBySubStepID,
+  GetLastOrderBySubStepID methods. Updated GetOrderBeforeAndAfter to
+  accept a *SOPStepMedia and scope queries to the correct parent
+  (step or sub-step).
+- Service: updated UploadMedia to use pointer for SOPStepID
+- TUS Service: updated processCompletedUpload to use pointer for SOPStepID
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.1 — Create Station model
+
+Created the Station model, the first new foundation entity in Phase 2. Stations
+represent physical locations or tools in the shop where work happens (e.g.,
+"Table Saw", "Assembly Bench", "Finish Room").
+
+- Model: `Station` in `server/internal/models/station.model.go` with fields:
+  ID (uuid, auto-generated), SpaceID (uuid, required), Name (string, required),
+  Description (text, nullable), DisplayOrder (int, default 0), WIPLimit (int,
+  default 1), BufferSize (int, default 0), IsActive (bool, default true),
+  CreatedAt, UpdatedAt. Uses UUID primary key per spec convention for new entities.
+- Migration 000014 (up + down): creates `station` table with FK to space
+  (ON DELETE CASCADE), indexes on space_id and (space_id, display_order).
+  Also adds the deferred FK constraint `fk_sop_step_station` on
+  `sop_step.station_id → station.id` (ON DELETE SET NULL) from task 1.3.
+- Repository: `StationRepository` with Create, GetByID, GetBySpaceID (ordered
+  by display_order), Update, Delete, Reorder, GetMaxDisplayOrder.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.2 — Create Customer model
+
+Created the Customer model, a simple customer record for linking to tickets.
+Not a full CRM — just name, contact info, and notes scoped to a space.
+
+- Model: `Customer` in `server/internal/models/customer.model.go` with fields:
+  ID (uuid, auto-generated), SpaceID (uuid, required), Name (string, required),
+  Email (nullable), Phone (nullable), Address (nullable), Notes (nullable),
+  CreatedAt, UpdatedAt. Uses UUID primary key per spec convention.
+- Migration 000015 (up + down): creates `customer` table with FK to space
+  (ON DELETE CASCADE), indexes on space_id and (space_id, name).
+- Repository: `CustomerRepository` with Create, GetByID, GetBySpaceID (ordered
+  by name), Update, Delete.
+- go vet ./... passes, go test ./... passes
+
+## 2026-04-02: Task 2.3 — Create Material model
+
+Created the Material model for tracking inventory items (lumber, hardware,
+finishes, consumables) within a space. Materials support stock tracking with
+reorder thresholds and cost per unit.
+
+- Model: `Material` in `server/internal/models/material.model.go` with fields:
+  ID (uuid, auto-generated), SpaceID (uuid, required), Name (string, required),
+  Category (enum: lumber/hardware/finish/consumable/other, default 'other'),
+  Unit (string, required), CurrentStock (decimal, default 0),
+  ReorderThreshold (decimal, default 0), ReorderQuantity (decimal, default 0),
+  Location (nullable), UnitCost (decimal, nullable), IsActive (bool, default true),
+  CreatedAt, UpdatedAt. Uses UUID primary key per spec convention.
+- Added `github.com/shopspring/decimal` v1.4.0 dependency for precise decimal
+  arithmetic on quantities and costs (avoids float rounding issues).
+- Migration 000016 (up + down): creates `material` table with FK to space
+  (ON DELETE CASCADE), check constraint on category enum values, indexes on
+  space_id, (space_id, name), and (space_id, category).
+- Repository: `MaterialRepository` with Create, GetByID, GetBySpaceID (ordered
+  by name), GetBySpaceIDAndCategory, GetActiveBySpaceID,
+  GetBelowReorderThreshold (for replenishment alerts), Update, Delete.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.4 — Create Tag model and join tables
+
+Created the Tag model for reusable labels and the join tables for associating
+tags with SOPTemplates and Tickets.
+
+- Model: `Tag` in `server/internal/models/tag.model.go` with fields:
+  ID (uuid, auto-generated), SpaceID (uuid, required), Name (string, required,
+  unique within space), Color (nullable, hex code), CreatedAt. Uses UUID
+  primary key per spec convention.
+- Also defined `SOPTemplateTag` and `TicketTag` join table structs in the
+  same file for GORM many2many associations.
+- Added `Tags []Tag` many2many relation to SOPTemplate model.
+- Migration 000017 (up + down): creates `tag` table with FK to space
+  (ON DELETE CASCADE), unique index on (space_id, name), index on space_id.
+  Creates `sop_template_tag` join table with FKs to sop_template and tag
+  (both ON DELETE CASCADE), composite PK, indexes on each column.
+  Creates `ticket_tag` join table with FK to tag only (ON DELETE CASCADE) —
+  ticket FK constraint deferred to Phase 3 when Ticket model is created.
+  Composite PK on (ticket_id, tag_id), indexes on each column.
+- Repository: `TagRepository` with Create, GetByID, GetBySpaceID (ordered
+  by name), GetByName, Update, Delete, plus join table operations:
+  AddTagToSOPTemplate, RemoveTagFromSOPTemplate, GetTagsBySOPTemplateID,
+  GetSOPTemplateIDsByTagID, AddTagToTicket, RemoveTagFromTicket,
+  GetTagsByTicketID.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.5 — Create SOPCategory model
+
+Created the SOPCategory model for hierarchical folder organization of SOPs.
+Categories support self-referencing parent/child relationships for nested
+folder structures (e.g., "Techniques" → "Joinery" → "Mortise & Tenon").
+
+- Model: `SOPCategory` in `server/internal/models/sop_category.model.go`
+  with fields: ID (uuid, auto-generated), SpaceID (uuid, required),
+  ParentCategoryID (uuid, nullable — null = root category), Name (string,
+  required), Description (text, nullable), DisplayOrder (int, default 0),
+  CreatedAt, UpdatedAt. Includes self-referencing relations: ParentCategory
+  and Children. Also includes SOPTemplates relation for categories' SOPs.
+- Added `SOPCategoryID *uuid.UUID` field and `SOPCategory` relation to
+  SOPTemplate model for folder assignment.
+- Migration 000018 (up + down): creates `sop_category` table with FK to
+  space (ON DELETE CASCADE), self-referencing FK on parent_category_id
+  (ON DELETE CASCADE), indexes on space_id, parent_category_id, and
+  composite (space_id, parent_category_id, display_order). Adds
+  sop_category_id column to sop_template with FK to sop_category
+  (ON DELETE SET NULL) and index.
+- Repository: `SOPCategoryRepository` with Create, GetByID, GetBySpaceID
+  (flat list ordered by display_order), GetByParentID (children of a
+  specific parent or root), Update, Delete, MoveCategory (update parent
+  and display order), GetMaxDisplayOrder. Includes BuildTree utility
+  function to assemble flat category list into nested tree structure.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.6 — Create BOMItem model
+
+Created the BOMItem model for bill of materials line items tied to SOP versions.
+BOMItems replace the old Materials/Equipment pq.StringArray fields that were
+removed from SOPVersion in task 1.2, providing structured material tracking
+with quantities, units, costs, and optional links to Material inventory items
+and specific SOP steps.
+
+- Model: `BOMItem` in `server/internal/models/bom_item.model.go` with fields:
+  ID (int, auto-increment), SOPVersionID (int, required FK → SOPVersion),
+  MaterialID (uuid, nullable FK → Material — for ad-hoc items),
+  Name (string, required), Quantity (decimal, required), Unit (varchar(50),
+  required), SOPStepID (int, nullable FK → SOPStep — which step uses this),
+  UnitCost (decimal, nullable — cost per unit for estimation), Notes (text,
+  nullable), CreatedAt, UpdatedAt. Uses int PK to match SOP entity convention.
+- Added `BOMItems []BOMItem` relation to SOPVersion model.
+- Migration 000019 (up + down): creates `bom_item` table with FKs to
+  sop_version (ON DELETE CASCADE), material (ON DELETE SET NULL), and
+  sop_step (ON DELETE SET NULL). Indexes on sop_version_id (primary access
+  pattern), material_id (material usage lookups), and sop_step_id
+  (step-scoped queries).
+- Repository: `BOMItemRepository` with Create, GetByID, GetByVersionID,
+  GetByVersionIDWithMaterial (eager-loads Material), GetByStepID,
+  GetByMaterialID (reverse lookup — "which SOPs use this material?"),
+  Update, Delete, DeleteByVersionID (bulk delete for version cleanup).
+- Wired repository into app.go (unused pending service/handler work).
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 2.7 — Create SOPComment model
+
+Created the SOPComment model for comments and suggested edits on SOPs. Comments
+can target the overall SOP, a specific step, or a specific sub-step. Supports
+a "suggestion" flag for proposed changes (like GitHub suggested edits) and a
+"resolved" flag for tracking whether feedback has been addressed.
+
+- Model: `SOPComment` in `server/internal/models/sop_comment.model.go` with
+  fields: ID (uuid, auto-generated), SOPTemplateID (int, required FK →
+  SOPTemplate), SOPStepID (int, nullable FK → SOPStep — null = comment on
+  overall SOP), SOPSubStepID (int, nullable FK → SOPSubStep), UserID (uuid,
+  required FK → User), Body (text, required), IsSuggestion (bool, default
+  false), IsResolved (bool, default false), CreatedAt, UpdatedAt. Uses UUID
+  primary key per spec convention for new SOP-related entities.
+- Migration 000020 (up + down): creates `sop_comment` table with FKs to
+  sop_template (ON DELETE CASCADE), sop_step (ON DELETE CASCADE), sop_sub_step
+  (ON DELETE CASCADE), and user (ON DELETE CASCADE). Indexes on
+  sop_template_id (primary access pattern), sop_step_id, sop_sub_step_id,
+  and user_id.
+- Repository: `SOPCommentRepository` with Create, GetByID, GetBySOPID
+  (all comments on an SOP, chronological), GetByStepID (step-scoped),
+  GetBySubStepID (sub-step-scoped), GetByUserID (user's comment history,
+  newest first), Update, Resolve (mark as resolved), Delete.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 3.1 — Create TicketType model
+
+Created the TicketType model, the first entity in Phase 3 (Ticket System).
+TicketType defines configurable work item types within a Space, analogous to
+Jira issue types. Each Space defines its own types (e.g., "Build", "Prep",
+"Maintenance" for shop spaces; "Lead", "Quote" for sales spaces) with their
+own status workflows (StatusDefinition, coming in 3.2).
+
+- Model: `TicketType` in `server/internal/models/ticket_type.model.go` with
+  fields: ID (uuid, auto-generated), SpaceID (uuid, required), Name (string,
+  required), Description (text, nullable), Icon (string, nullable — for UI
+  display), Color (string, nullable — hex code for board display),
+  DefaultSOPTemplateID (int, nullable FK → SOPTemplate), IsActive (bool,
+  default true), DisplayOrder (int, default 0), CreatedAt, UpdatedAt.
+  Includes relations to Space and DefaultSOPTemplate.
+- Migration 000021 (up + down): creates `ticket_type` table with FK to space
+  (ON DELETE CASCADE), FK to sop_template (ON DELETE SET NULL) for default SOP.
+  Indexes on space_id and composite (space_id, display_order).
+- Repository: `TicketTypeRepository` with Create, GetByID, GetBySpaceID
+  (ordered by display_order), Update, Delete, Reorder, GetMaxDisplayOrder.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## 2026-04-02: Task 3.2 — Create StatusDefinition model
+
+Created the StatusDefinition model for ordered statuses within a ticket type's
+workflow. Each status belongs to a category (todo, in_progress, done) for board
+grouping and metric computation. Supports IsDefault (initial status for new
+tickets) and IsTerminal (marks ticket as resolved/closed) flags.
+
+- Model: `StatusDefinition` in `server/internal/models/status_definition.model.go`
+  with fields: ID (uuid, auto-generated), TicketTypeID (uuid, required FK →
+  TicketType), Name (string, required), DisplayOrder (int, default 0),
+  Category (enum: todo/in_progress/done, default 'todo'), Color (string,
+  nullable — hex code), IsDefault (bool, default false), IsTerminal (bool,
+  default false), CreatedAt, UpdatedAt. Includes StatusCategory custom type
+  with constants. Relation to TicketType.
+- Added `StatusDefinitions []StatusDefinition` relation to TicketType model.
+- Migration 000022 (up + down): creates `status_category` enum type, creates
+  `status_definition` table with FK to ticket_type (ON DELETE CASCADE).
+  Indexes on ticket_type_id, composite (ticket_type_id, display_order).
+  Partial unique index `idx_status_definition_one_default_per_type` ensures
+  exactly one IsDefault per TicketType at the database level.
+- Repository: `StatusDefinitionRepository` with Create, GetByID,
+  GetByTicketTypeID (ordered by display_order), GetDefaultByTicketTypeID,
+  Update, Delete, Reorder, GetMaxDisplayOrder, HasTerminal (checks at least
+  one terminal status exists), SetDefault (transactional: clears old default
+  and sets new one to maintain the one-default invariant).
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## Task 3.3: Create Ticket model (2026-04-02)
+- Model: `Ticket` struct in `server/internal/models/ticket.model.go` with fields:
+  ID (uuid), SpaceID, TicketTypeID, ParentTicketID (nullable — one level nesting),
+  StatusID (FK → StatusDefinition), SOPTemplateID (nullable int FK → SOPTemplate),
+  SOPVersionID (nullable int FK → SOPVersion), CustomerID (nullable),
+  AssignedToID (nullable FK → User), Title, Description (nullable), TicketNumber
+  (unique, auto-generated), Priority (int, default 0), DueDate (nullable),
+  StartedAt (nullable), CompletedAt (nullable), CreatedByID (FK → User),
+  CreatedAt, UpdatedAt. Relations: Space, TicketType, ParentTicket, Status,
+  SOPTemplate, SOPVersion, Customer, AssignedTo, CreatedBy, Children, Tags
+  (many2many via ticket_tag).
+- Migration 000023 (up + down): creates `ticket` table with all FK constraints.
+  Indexes on space_id, ticket_type_id, status_id, parent_ticket_id, customer_id,
+  assigned_to_id, created_by_id. Composite indexes on (space_id, priority) and
+  (space_id, due_date) WHERE due_date IS NOT NULL. Unique index on ticket_number.
+  Trigger `check_ticket_nesting_depth` enforces one-level parent/child constraint
+  (parent cannot itself have a parent). Adds deferred FK constraint on ticket_tag
+  from migration 000017. Creates `ticket_number_sequence` table for auto-generating
+  ticket numbers per ticket type.
+- Repository: `TicketRepository` with Create (auto-generates ticket number using
+  atomic upsert on ticket_number_sequence, format "{PREFIX}-{NNN}"), GetByID,
+  GetByIDWithRelations (preloads TicketType, Status, Customer, AssignedTo,
+  CreatedBy, Tags), GetBySpaceID (with TicketFilter: TicketTypeID, StatusID,
+  ParentTicketID, CustomerID, AssignedToID, IsTopLevel), GetChildrenByParentID,
+  Update, Delete, GetByTicketNumber. buildPrefix helper converts ticket type name
+  to uppercase prefix (e.g. "Build" → "BUILD", "Sales Lead" → "SALES-LEAD").
+- go vet ./... passes, go test ./... passes
+
+## Task 3.4: Create TicketStep model (2026-04-02)
+
+Created the TicketStep model for live execution steps within tickets. When a
+ticket is created with a linked SOP, the SOP's steps are copied as TicketSteps.
+Steps can also be added ad-hoc during first-time capture mode.
+
+- Model: `TicketStep` struct in `server/internal/models/ticket_step.model.go`
+  with fields: ID (uuid), TicketID (uuid, required FK → Ticket), SOPStepID
+  (int, nullable FK → SOPStep — null for ad-hoc steps), StationID (uuid,
+  nullable FK → Station), DisplayOrder (int, default 0), Title (string,
+  required), Instructions (text, nullable), Status (enum: pending/in_progress/
+  paused/completed/skipped, default 'pending'), AssignedToID (uuid, nullable
+  FK → User), StartedAt (nullable), PausedAt (nullable), CompletedAt (nullable),
+  ActualTimeSeconds (int, default 0 — accumulated active time excluding pauses),
+  DeviationNotes (text, nullable), CreatedAt, UpdatedAt. Relations: Ticket,
+  SOPStep, AssignedTo, SubSteps.
+- Also created `TicketSubStep` model stub in `ticket_sub_step.model.go` (needed
+  for TicketStep.SubSteps relation). Full migration/repo deferred to task 3.5.
+- Added `TicketStepStatus` custom type with constants for the five status values.
+- Added `Steps []TicketStep` relation to Ticket model.
+- Migration 000024 (up + down): creates `ticket_step` table with FKs to ticket
+  (ON DELETE CASCADE), sop_step (ON DELETE SET NULL), station (ON DELETE SET NULL),
+  user (ON DELETE SET NULL). Check constraint on status enum values. Indexes on
+  ticket_id, station_id (partial WHERE NOT NULL), assigned_to_id (partial WHERE
+  NOT NULL), composite (ticket_id, status), composite (ticket_id, display_order).
+- Repository: `TicketStepRepository` with Create, CreateBatch, CreateBatchWithTx,
+  GetByID, GetByTicketID (ordered), GetByTicketIDWithSubSteps (preloads SubSteps),
+  Update, Delete, DeleteByTicketID, Reorder, GetMaxDisplayOrder.
+   **CopyFromSOPVersion**: transactional service that fetches SOP steps with their
+  sub-steps and copies them into TicketSteps + TicketSubSteps for a given ticket.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## Task 3.5: Create TicketSubStep model (2026-04-02)
+
+Created the TicketSubStep migration and repository. The model was already created
+as a stub in task 3.4 (needed for the TicketStep.SubSteps relation and
+CopyFromSOPVersion). This task completes the TicketSubStep entity with its
+database table and full data access layer.
+
+- Model: already existed in `server/internal/models/ticket_sub_step.model.go`
+  (created during task 3.4). Fields: ID (uuid), TicketStepID (uuid, required
+  FK → TicketStep), SOPSubStepID (int, nullable FK → SOPSubStep — null for
+  ad-hoc sub-steps), DisplayOrder (int, default 0), Title (string, required),
+  Instructions (text, nullable), IsCompleted (bool, default false — checklist
+  toggle), CreatedAt, UpdatedAt. Relation to TicketStep.
+- Migration 000025 (up + down): creates `ticket_sub_step` table with FK to
+  ticket_step (ON DELETE CASCADE), FK to sop_sub_step (ON DELETE SET NULL).
+  Indexes on ticket_step_id and composite (ticket_step_id, display_order).
+- Repository: `TicketSubStepRepository` with Create, CreateBatch, GetByID,
+  GetByTicketStepID (ordered by display_order), Update, Delete,
+  DeleteByTicketStepID, ToggleComplete (flips is_completed flag and returns
+  updated record), Reorder, GetMaxDisplayOrder.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## Task 3.6: Create TicketLink model (2026-04-02)
+
+Created the TicketLink model for cross-ticket relationships, including across
+spaces. TicketLink is for peer relationships (blocks, relates_to, created_from);
+parent/child relationships use Ticket.ParentTicketID instead.
+
+- Model: `TicketLink` struct in `server/internal/models/ticket_link.model.go`
+  with fields: ID (uuid, auto-generated), SourceTicketID (uuid, required FK →
+  Ticket), TargetTicketID (uuid, required FK → Ticket), LinkType (enum:
+  created_from/blocks/blocked_by/relates_to), CreatedByID (uuid, required FK →
+  User), CreatedAt. Defined `LinkType` custom type with constants. Relations:
+  SourceTicket, TargetTicket, CreatedBy.
+- Migration 000026 (up + down): creates `link_type` enum type, creates
+  `ticket_link` table with FKs to ticket (both source and target, ON DELETE
+  CASCADE) and user (created_by_id). Unique constraint on (source_ticket_id,
+  target_ticket_id, link_type) to prevent duplicate links. Check constraint
+  prevents self-links. Indexes on source_ticket_id, target_ticket_id, and
+  link_type. Down migration drops table and enum type.
+- Repository: `TicketLinkRepository` with Create, GetByID, GetByTicketID
+  (both directions — returns links where ticket is source OR target),
+  GetBySourceTicketID, GetByTargetTicketID, Delete, DeleteByTicketID
+  (removes all links for a ticket in both directions).
+- go vet ./... passes, go test ./... passes
+
+## Task 4.1: Create ActivityEntry model (2026-04-02)
+
+Created the ActivityEntry model for chronological activity logging on tickets.
+ActivityEntry records the full story of a ticket's life: step transitions,
+interruptions, comments, status changes, cost logging, and more. This is the
+"activity tab" on a ticket.
+
+- Model: `ActivityEntry` struct in `server/internal/models/activity_entry.model.go`
+  with fields: ID (uuid, auto-generated), TicketID (uuid, required FK → Ticket),
+  UserID (uuid, required FK → User), EntryType (enum: status_change/step_started/
+  step_completed/step_paused/step_resumed/step_skipped/comment/interruption/
+  assignment_change/link_added/sop_edited/cost_logged/ticket_created),
+  Description (text, required — human-readable summary), LinkedTicketID (uuid,
+  nullable FK → Ticket — for interruptions/references), TicketStepID (uuid,
+  nullable FK → TicketStep — which step this relates to), DurationSeconds (int,
+  nullable — for interruptions with tracked duration), OldValue (text, nullable —
+  for status/field changes: previous value), NewValue (text, nullable — for
+  status/field changes: new value), Metadata (JSONB, nullable — structured data
+  for specific entry types), CreatedAt. Defined `ActivityEntryType` custom type
+  with constants for all 13 entry types. Defined custom `JSONB` type with
+  Scanner/Valuer/JSON interfaces (avoids external gorm.io/datatypes dependency).
+  Relations: Ticket, User, LinkedTicket, TicketStep.
+- Migration 000027 (up + down): creates `activity_entry_type` enum type, creates
+  `activity_entry` table with FKs to ticket (ON DELETE CASCADE), user, ticket
+  (linked, ON DELETE SET NULL), ticket_step (ON DELETE SET NULL). Indexes on
+  ticket_id, composite (ticket_id, created_at ASC) for chronological queries,
+  ticket_step_id (partial WHERE NOT NULL), user_id, and entry_type.
+- Repository: `ActivityEntryRepository` with Create, GetByID, GetByTicketID
+  (chronological), GetByTicketStepID, GetByUserID, GetByTicketIDAndType
+  (filtered by entry type), Delete, DeleteByTicketID.
+- go vet ./... passes, go test ./... passes
+
+## Task 4.2: Create TimeEvent model (2026-04-02)
+
+Created the TimeEvent model for append-only, source-agnostic time tracking.
+Every time-relevant action (starting a step, checking in at a station, pausing
+work) creates a TimeEvent. Records are immutable — corrections are new events
+with backdated timestamps. Supports multiple input sources: system (auto from
+step transitions), web, CLI, tap (station tablet), sensor (camera/presence),
+API, and manual (backdated corrections).
+
+- Model: `TimeEvent` struct in `server/internal/models/time_event.model.go`
+  with fields: ID (uuid, auto-generated), SpaceID (uuid, required FK → Space),
+  UserID (uuid, required FK → User), TicketID (uuid, nullable FK → Ticket),
+  TicketStepID (uuid, nullable FK → TicketStep), StationID (uuid, nullable FK →
+  Station), EventType (enum: check_in/check_out/pause/resume), Source (enum:
+  manual/web/cli/tap/sensor/api/system), Timestamp (timestamptz, required — when
+  it happened, can be backdated), Notes (text, nullable), CreatedAt. Defined
+  `TimeEventType` and `TimeEventSource` custom types with constants. Relations:
+  Space, User, Ticket, TicketStep, Station.
+- Migration 000028 (up + down): creates `time_event_type` and `time_event_source`
+  enum types, creates `time_event` table with FKs to space, user, ticket
+  (ON DELETE SET NULL), ticket_step (ON DELETE SET NULL), station (ON DELETE SET
+  NULL). Indexes on space_id, user_id, ticket_id (partial), ticket_step_id
+  (partial), station_id (partial), composite (space_id, timestamp DESC) for
+  space-scoped chronological queries, composite (user_id, timestamp DESC) for
+  user timeline queries.
+- Repository: `TimeEventRepository` with Create (append-only — no Update or
+  Delete by design), GetBySpaceID (with TimeEventFilters: UserID, TicketID,
+  TicketStepID, StationID, EventType, Source, From, To), GetByTicketID,
+  GetByUserID, GetByStationID. All queries order by timestamp DESC.
+- go vet ./... passes, go test ./... passes
+
+## Task 4.3: Create CostEntry model (2026-04-02)
+
+Created the CostEntry model for per-ticket cost tracking. Supports labor,
+material, consumable, marketing, and other cost types. Labor costs can be
+auto-computed from TimeEvents × labor rate, or entered manually. Material
+costs link to inventory items. Unlike TimeEvent (append-only), CostEntry
+supports deletion for corrections.
+
+- Model: `CostEntry` struct in `server/internal/models/cost_entry.model.go`
+  with fields: ID (uuid, auto-generated), TicketID (uuid, required FK → Ticket),
+  CostType (enum: labor/material/consumable/marketing/other), Description
+  (text, required), Amount (decimal(12,4), required — total cost for this entry),
+  Quantity (decimal(12,4), nullable), Unit (varchar(50), nullable — hours,
+  board_feet, each), UnitCost (decimal(12,4), nullable), MaterialID (uuid,
+  nullable FK → Material — links to inventory), TimeEventID (uuid, nullable FK →
+  TimeEvent — links to time data for labor costs), CreatedByID (uuid, required
+  FK → User), CreatedAt. Defined `CostType` custom type with constants.
+  Relations: Ticket, Material, TimeEvent, CreatedBy.
+- Migration 000029 (up + down): creates `cost_type` enum type, creates
+  `cost_entry` table with FKs to ticket (ON DELETE CASCADE), material
+  (ON DELETE SET NULL), time_event (ON DELETE SET NULL), user (created_by_id).
+  Indexes on ticket_id (primary access pattern), composite (ticket_id, cost_type)
+  for type-filtered queries, material_id (partial WHERE NOT NULL), time_event_id
+  (partial WHERE NOT NULL), created_by_id.
+- Repository: `CostEntryRepository` with Create, GetByID, GetByTicketID
+  (chronological), GetByTicketIDAndType (filtered by cost type), Delete,
+  DeleteByTicketID.
+- go vet ./... passes, go test ./... passes, gofmt clean
+
+## Task 5.1: SOP versioning service (2026-04-02)
+
+Created the SOPVersioningService for auto-versioning on save and version
+comparison. This is the first service-layer task in Phase 5.
+
+- Service: `SOPVersioningService` in
+  `server/internal/services/sop_versioning.service.go` with:
+  - `CreateNewVersion(templateID, userID, changeSummary, description)`:
+    Creates a new SOPVersion by deep-copying all content from the current
+    version — steps, sub-steps, media references, and BOM items — within a
+    single transaction. Updates CurrentVersionID to point to the new version.
+    Builds ID mapping tables (old→new) so child references (media→step,
+    BOM→step) are correctly remapped.
+  - `CompareVersions(fromVersionID, toVersionID)`: Produces a structured
+    diff between two versions of the same template. Matches steps by order
+    position, detects added/removed/modified steps with field-level change
+    detail. Compares BOM items by name+unit key. Reports description changes.
+  - `deepCopyVersion(tx, fromVersionID, toVersionID)`: Internal method that
+    handles the transactional deep copy of steps, sub-steps (preserving
+    display order), step-level and sub-step-level media (preserving file
+    references and order), and BOM items (remapping SOPStepID references).
+- Types: VersionDiff, StepSummary, StepDiff, FieldChange, StringChange,
+  BOMSummary — structured diff output types for API consumption.
+- Repository additions:
+  - `BOMItemRepository`: added `GetByVersionIDWithTx` and `CreateBatchWithTx`
+    for transactional reads and batch creates during version copying.
+  - `SOPStepMediaRepository`: added `GetByStepIDWithTx`,
+    `GetBySubStepIDWithTx`, and `CreateBatchWithTx` for transactional media
+    operations during version copying.
+- Tests: `sop_versioning.service_test.go` with unit tests for:
+  - `compareSteps` — no changes, title change, instructions change,
+    nil-to-set, multiple simultaneous changes, station ID change,
+    linked SOP template ID change
+  - `ptrToString`, `ptrToInt`, `ptrUUIDToString` helpers
+- go vet ./... passes, go test ./... passes, gofmt clean

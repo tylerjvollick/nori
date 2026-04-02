@@ -22,10 +22,10 @@ func (h *SOPStepMediaHandler) RegisterMediaRoutes(app *fiber.App) {
 	app.Get("/sops/:id/steps/:stepId/media", h.GetStepMedia)
 	app.Delete("/media/:mediaId", h.DeleteMedia)
 	app.Patch("/media/:mediaId/reorder", h.ReorderMedia)
-	
+
 	// Serve media files
 	app.Get("/media/:uuid", h.ServeMedia)
-	
+
 	// Backwards compatibility: keep /photos routes
 	app.Post("/sops/:id/steps/:stepId/photos", h.UploadMedia)
 	app.Get("/sops/:id/steps/:stepId/photos", h.GetStepMedia)
@@ -136,7 +136,7 @@ func (h *SOPStepMediaHandler) DeleteMedia(c *fiber.Ctx) error {
 	if mediaIDStr == "" {
 		mediaIDStr = c.Params("photoId")
 	}
-	
+
 	mediaID, err := strconv.Atoi(mediaIDStr)
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -160,7 +160,7 @@ func (h *SOPStepMediaHandler) ReorderMedia(c *fiber.Ctx) error {
 	if mediaIDStr == "" {
 		mediaIDStr = c.Params("photoId")
 	}
-	
+
 	mediaID, err := strconv.Atoi(mediaIDStr)
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{

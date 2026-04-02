@@ -51,6 +51,14 @@ func (r *SOPStepMediaRepository) GetByStepID(stepID int) ([]models.SOPStepMedia,
 	return mediaItems, err
 }
 
+func (r *SOPStepMediaRepository) GetBySubStepID(subStepID int) ([]models.SOPStepMedia, error) {
+	var mediaItems []models.SOPStepMedia
+	err := r.db.Where("sop_sub_step_id = ?", subStepID).
+		Order("\"order\" ASC").
+		Find(&mediaItems).Error
+	return mediaItems, err
+}
+
 func (r *SOPStepMediaRepository) Update(media *models.SOPStepMedia) error {
 	return r.db.Save(media).Error
 }
@@ -71,6 +79,33 @@ func (r *SOPStepMediaRepository) DeleteByStepID(stepID int) error {
 	return r.db.Where("sop_step_id = ?", stepID).Delete(&models.SOPStepMedia{}).Error
 }
 
+func (r *SOPStepMediaRepository) DeleteBySubStepID(subStepID int) error {
+	return r.db.Where("sop_sub_step_id = ?", subStepID).Delete(&models.SOPStepMedia{}).Error
+}
+
+func (r *SOPStepMediaRepository) GetByStepIDWithTx(tx *gorm.DB, stepID int) ([]models.SOPStepMedia, error) {
+	var mediaItems []models.SOPStepMedia
+	err := tx.Where("sop_step_id = ?", stepID).
+		Order("\"order\" ASC").
+		Find(&mediaItems).Error
+	return mediaItems, err
+}
+
+func (r *SOPStepMediaRepository) GetBySubStepIDWithTx(tx *gorm.DB, subStepID int) ([]models.SOPStepMedia, error) {
+	var mediaItems []models.SOPStepMedia
+	err := tx.Where("sop_sub_step_id = ?", subStepID).
+		Order("\"order\" ASC").
+		Find(&mediaItems).Error
+	return mediaItems, err
+}
+
+func (r *SOPStepMediaRepository) CreateBatchWithTx(tx *gorm.DB, items []models.SOPStepMedia) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return tx.Create(&items).Error
+}
+
 // GetLastOrderByStepID gets the last (highest) order value for a step
 func (r *SOPStepMediaRepository) GetLastOrderByStepID(stepID int) (string, error) {
 	var lastOrder string
@@ -81,29 +116,48 @@ func (r *SOPStepMediaRepository) GetLastOrderByStepID(stepID int) (string, error
 	return lastOrder, err
 }
 
-// GetOrderBeforeAndAfter gets the order values of media before and after a given position
-func (r *SOPStepMediaRepository) GetOrderBeforeAndAfter(stepID int, beforeMediaID, afterMediaID *int) (string, string, error) {
+// GetLastOrderBySubStepID gets the last (highest) order value for a sub-step
+func (r *SOPStepMediaRepository) GetLastOrderBySubStepID(subStepID int) (string, error) {
+	var lastOrder string
+	err := r.db.Model(&models.SOPStepMedia{}).
+		Where("sop_sub_step_id = ?", subStepID).
+		Select("COALESCE(MAX(\"order\"), '')").
+		Scan(&lastOrder).Error
+	return lastOrder, err
+}
+
+// GetOrderBeforeAndAfter gets the order values of media before and after a given position.
+// It scopes the lookup to the same parent (step or sub-step) as the given media.
+func (r *SOPStepMediaRepository) GetOrderBeforeAndAfter(media *models.SOPStepMedia, beforeMediaID, afterMediaID *int) (string, string, error) {
 	var beforeOrder, afterOrder string
 
+	// Build parent scope: match on whichever parent the media belongs to
+	parentScope := func(db *gorm.DB) *gorm.DB {
+		if media.SOPSubStepID != nil {
+			return db.Where("sop_sub_step_id = ?", *media.SOPSubStepID)
+		}
+		return db.Where("sop_step_id = ?", *media.SOPStepID)
+	}
+
 	if beforeMediaID != nil {
-		var media models.SOPStepMedia
-		if err := r.db.Where("id = ? AND sop_step_id = ?", *beforeMediaID, stepID).First(&media).Error; err != nil {
+		var m models.SOPStepMedia
+		if err := parentScope(r.db).Where("id = ?", *beforeMediaID).First(&m).Error; err != nil {
 			if err != gorm.ErrRecordNotFound {
 				return "", "", err
 			}
 		} else {
-			beforeOrder = media.Order
+			beforeOrder = m.Order
 		}
 	}
 
 	if afterMediaID != nil {
-		var media models.SOPStepMedia
-		if err := r.db.Where("id = ? AND sop_step_id = ?", *afterMediaID, stepID).First(&media).Error; err != nil {
+		var m models.SOPStepMedia
+		if err := parentScope(r.db).Where("id = ?", *afterMediaID).First(&m).Error; err != nil {
 			if err != gorm.ErrRecordNotFound {
 				return "", "", err
 			}
 		} else {
-			afterOrder = media.Order
+			afterOrder = m.Order
 		}
 	}
 

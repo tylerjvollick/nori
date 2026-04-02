@@ -18,11 +18,11 @@ import (
 )
 
 type SOPStepMediaService struct {
-	db              *gorm.DB
-	mediaRepo       *repositories.SOPStepMediaRepository
-	stepRepo        *repositories.SOPStepRepository
-	uploadDir       string
-	maxUploadSize   int64
+	db               *gorm.DB
+	mediaRepo        *repositories.SOPStepMediaRepository
+	stepRepo         *repositories.SOPStepRepository
+	uploadDir        string
+	maxUploadSize    int64
 	allowedMimeTypes map[string]bool
 }
 
@@ -99,8 +99,8 @@ func (s *SOPStepMediaService) UploadMedia(stepID int, file *multipart.FileHeader
 	// Build directory path: sops/{sop_template_id}/steps/{step_id}/
 	// We need to get the SOP template ID from the step's version
 	// For now, let's use version ID as a proxy (we can refactor later to get template ID)
-	dirPath := filepath.Join(s.uploadDir, "sops", strconv.Itoa(step.SOPTemplateVersionID), "steps", strconv.Itoa(stepID))
-	
+	dirPath := filepath.Join(s.uploadDir, "sops", strconv.Itoa(step.SOPVersionID), "steps", strconv.Itoa(stepID))
+
 	// Create directory if not exists
 	if err := os.MkdirAll(dirPath, 0755); err != nil {
 		log.Println("Failed to create directory:", err)
@@ -112,7 +112,7 @@ func (s *SOPStepMediaService) UploadMedia(stepID int, file *multipart.FileHeader
 	fullPath := filepath.Join(dirPath, fileName)
 
 	// Relative path for database
-	relativePath := filepath.Join("sops", strconv.Itoa(step.SOPTemplateVersionID), "steps", strconv.Itoa(stepID), fileName)
+	relativePath := filepath.Join("sops", strconv.Itoa(step.SOPVersionID), "steps", strconv.Itoa(stepID), fileName)
 
 	// Open uploaded file
 	src, err := file.Open()
@@ -149,7 +149,7 @@ func (s *SOPStepMediaService) UploadMedia(stepID int, file *multipart.FileHeader
 
 	// Create database record
 	media := &models.SOPStepMedia{
-		SOPStepID: stepID,
+		SOPStepID: &stepID,
 		UUID:      fileUUID,
 		FilePath:  relativePath,
 		FileName:  file.Filename,
@@ -219,7 +219,7 @@ func (s *SOPStepMediaService) ReorderMedia(mediaID int, beforeMediaID, afterMedi
 		}
 
 		// Get order values for before and after media
-		beforeOrder, afterOrder, err := s.mediaRepo.GetOrderBeforeAndAfter(media.SOPStepID, beforeMediaID, afterMediaID)
+		beforeOrder, afterOrder, err := s.mediaRepo.GetOrderBeforeAndAfter(media, beforeMediaID, afterMediaID)
 		if err != nil {
 			return fmt.Errorf("failed to get order bounds: %w", err)
 		}

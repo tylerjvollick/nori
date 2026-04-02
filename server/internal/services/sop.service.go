@@ -15,14 +15,27 @@ import (
 type SOPService struct {
 	db           *gorm.DB
 	templateRepo *repositories.SOPTemplateRepository
-	versionRepo  *repositories.SOPTemplateVersionRepository
+	versionRepo  *repositories.SOPVersionRepository
 	stepRepo     *repositories.SOPStepRepository
+}
+
+// parseOptionalUUID converts an optional string to *uuid.UUID.
+// Returns nil if the input is nil or empty.
+func parseOptionalUUID(s *string) (*uuid.UUID, error) {
+	if s == nil || *s == "" {
+		return nil, nil
+	}
+	parsed, err := uuid.Parse(*s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid UUID: %w", err)
+	}
+	return &parsed, nil
 }
 
 func NewSOPService(
 	db *gorm.DB,
 	templateRepo *repositories.SOPTemplateRepository,
-	versionRepo *repositories.SOPTemplateVersionRepository,
+	versionRepo *repositories.SOPVersionRepository,
 	stepRepo *repositories.SOPStepRepository,
 ) *SOPService {
 	return &SOPService{
@@ -51,13 +64,10 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 		}
 
 		// 2. Create the first version
-		version := &models.SOPTemplateVersion{
+		version := &models.SOPVersion{
 			SOPTemplateID: template.ID,
 			VersionNumber: 1,
-			Status:        models.VersionStatusPublished,
 			Description:   dto.Description,
-			Materials:     dto.Materials,
-			Equipment:     dto.Equipment,
 			CreatedBy:     userID,
 			ChangeSummary: dto.ChangeSummary,
 			IsActive:      true,
@@ -80,7 +90,7 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 			}
 
 			step := models.SOPStep{
-				SOPTemplateVersionID: version.ID,
+				SOPVersionID:         version.ID,
 				Order:                order,
 				Title:                stepDTO.Title,
 				Instructions:         stepDTO.Instructions,
@@ -88,7 +98,13 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 				ImageURL:             stepDTO.ImageURL,
 				VideoURL:             stepDTO.VideoURL,
 				RequiresApproval:     stepDTO.RequiresApproval,
+				LinkedSOPTemplateID:  stepDTO.LinkedSOPTemplateID,
 			}
+			stationID, err := parseOptionalUUID(stepDTO.StationID)
+			if err != nil {
+				return fmt.Errorf("invalid station ID on step %d: %w", i, err)
+			}
+			step.StationID = stationID
 			steps = append(steps, step)
 		}
 
@@ -118,7 +134,7 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 	return template, nil
 }
 
-// UpdateSOP creates a new version of an existing SOP
+// UpdateSOP creates a new version of an existing SOP (auto-versioning)
 func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uuid.UUID) (*models.SOPTemplate, error) {
 	var template *models.SOPTemplate
 
@@ -137,13 +153,10 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 		}
 
 		// 3. Create the new version
-		newVersion := &models.SOPTemplateVersion{
+		newVersion := &models.SOPVersion{
 			SOPTemplateID: templateID,
 			VersionNumber: latestVersionNumber + 1,
-			Status:        models.VersionStatusPublished,
 			Description:   dto.Description,
-			Materials:     dto.Materials,
-			Equipment:     dto.Equipment,
 			CreatedBy:     userID,
 			ChangeSummary: &dto.ChangeSummary,
 			IsActive:      true,
@@ -166,7 +179,7 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 			}
 
 			step := models.SOPStep{
-				SOPTemplateVersionID: newVersion.ID,
+				SOPVersionID:         newVersion.ID,
 				Order:                order,
 				Title:                stepDTO.Title,
 				Instructions:         stepDTO.Instructions,
@@ -174,7 +187,13 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 				ImageURL:             stepDTO.ImageURL,
 				VideoURL:             stepDTO.VideoURL,
 				RequiresApproval:     stepDTO.RequiresApproval,
+				LinkedSOPTemplateID:  stepDTO.LinkedSOPTemplateID,
 			}
+			stationID, err := parseOptionalUUID(stepDTO.StationID)
+			if err != nil {
+				return fmt.Errorf("invalid station ID on step %d: %w", i, err)
+			}
+			step.StationID = stationID
 			steps = append(steps, step)
 		}
 
@@ -209,24 +228,20 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 	return template, nil
 }
 
-// GetSOP gets an SOP template by ID with its latest version (draft if exists, otherwise current published version)
+// GetSOP gets an SOP template by ID with its current version
 func (s *SOPService) GetSOP(templateID int) (*models.SOPTemplate, error) {
 	template, err := s.templateRepo.GetByID(templateID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Check if a draft exists for this template
-	draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-	if err == nil && draft != nil {
-		// Load steps for the draft
-		steps, err := s.stepRepo.GetByVersionID(draft.ID)
+	// Load steps for the current version if it exists
+	if template.CurrentVersion != nil {
+		steps, err := s.stepRepo.GetByVersionID(template.CurrentVersion.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load draft steps: %w", err)
+			return nil, fmt.Errorf("failed to load current version steps: %w", err)
 		}
-		draft.Steps = steps
-		// Replace the current version with the draft
-		template.CurrentVersion = draft
+		template.CurrentVersion.Steps = steps
 	}
 
 	return template, nil
@@ -238,12 +253,12 @@ func (s *SOPService) GetAllSOPs() ([]models.SOPTemplate, error) {
 }
 
 // GetSOPVersions gets all versions of an SOP template
-func (s *SOPService) GetSOPVersions(templateID int) ([]models.SOPTemplateVersion, error) {
+func (s *SOPService) GetSOPVersions(templateID int) ([]models.SOPVersion, error) {
 	return s.versionRepo.GetByTemplateID(templateID)
 }
 
 // GetSOPVersion gets a specific version of an SOP template
-func (s *SOPService) GetSOPVersion(versionID int) (*models.SOPTemplateVersion, error) {
+func (s *SOPService) GetSOPVersion(versionID int) (*models.SOPVersion, error) {
 	return s.versionRepo.GetByID(versionID)
 }
 
@@ -252,345 +267,34 @@ func (s *SOPService) DeleteSOP(templateID int) error {
 	return s.templateRepo.Delete(templateID)
 }
 
-// SaveDraft creates a new draft version for an existing SOP template
-func (s *SOPService) SaveDraft(templateID int, dto *dtos.SaveDraftSOPDTO, userID uuid.UUID) (*models.SOPTemplateVersion, error) {
-	var draft *models.SOPTemplateVersion
+// Individual step operations
 
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the template exists
-		_, err := s.templateRepo.GetByID(templateID)
-		if err != nil {
-			return fmt.Errorf("failed to get SOP template: %w", err)
-		}
-
-		// 2. Check if a draft already exists for this template (defensive check)
-		existingDraft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-		if err != nil {
-			return fmt.Errorf("failed to check for existing draft: %w", err)
-		}
-		if existingDraft != nil {
-			return fmt.Errorf("a draft already exists for this SOP (ID: %d)", existingDraft.ID)
-		}
-
-		// 3. Get the latest published version number to determine next version number
-		latestVersionNumber, err := s.versionRepo.GetLatestPublishedVersionNumber(templateID)
-		if err != nil {
-			return fmt.Errorf("failed to get latest version number: %w", err)
-		}
-
-		// 4. Create the draft version with next version number
-		draft = &models.SOPTemplateVersion{
-			SOPTemplateID: templateID,
-			VersionNumber: latestVersionNumber + 1,
-			Status:        models.VersionStatusDraft,
-			Description:   dto.Description,
-			Materials:     dto.Materials,
-			Equipment:     dto.Equipment,
-			CreatedBy:     userID,
-			ChangeSummary: dto.ChangeSummary,
-			IsActive:      true,
-		}
-
-		if err := s.versionRepo.Create(draft); err != nil {
-			log.Println("Failed to create draft version:", err)
-			return fmt.Errorf("failed to create draft version: %w", err)
-		}
-
-		// 5. Create the steps for the draft
-		var steps []models.SOPStep
-		for i, stepDTO := range dto.Steps {
-			// Generate order value for each step
-			order := stepDTO.Order
-			if order == "" {
-				// If no order provided, generate based on position
-				orderMap := utils.RebalanceOrders(len(dto.Steps))
-				order = orderMap[i]
-			}
-
-			step := models.SOPStep{
-				SOPTemplateVersionID: draft.ID,
-				Order:                order,
-				Title:                stepDTO.Title,
-				Instructions:         stepDTO.Instructions,
-				EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
-				ImageURL:             stepDTO.ImageURL,
-				VideoURL:             stepDTO.VideoURL,
-				RequiresApproval:     stepDTO.RequiresApproval,
-			}
-			steps = append(steps, step)
-		}
-
-		if err := s.stepRepo.CreateBatch(steps); err != nil {
-			log.Println("Failed to create draft steps:", err)
-			return fmt.Errorf("failed to create draft steps: %w", err)
-		}
-
-		draft.Steps = steps
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return draft, nil
-}
-
-// UpdateDraft updates an existing draft version
-func (s *SOPService) UpdateDraft(draftID int, dto *dtos.SaveDraftSOPDTO, userID uuid.UUID) (*models.SOPTemplateVersion, error) {
-	var draft *models.SOPTemplateVersion
-
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the existing draft
-		existingDraft, err := s.versionRepo.GetByID(draftID)
-		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
-		}
-
-		// 2. Verify it's a draft
-		if existingDraft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
-		}
-
-		// 3. Verify the user owns this draft
-		if existingDraft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to update this draft")
-		}
-
-		// 4. Update the draft version metadata
-		existingDraft.Description = dto.Description
-		existingDraft.Materials = dto.Materials
-		existingDraft.Equipment = dto.Equipment
-		existingDraft.ChangeSummary = dto.ChangeSummary
-
-		if err := s.versionRepo.UpdateWithTx(tx, existingDraft); err != nil {
-			log.Println("Failed to update draft:", err)
-			return fmt.Errorf("failed to update draft: %w", err)
-		}
-
-		// 5. Get existing steps
-		existingSteps, err := s.stepRepo.GetByVersionID(existingDraft.ID)
-		if err != nil {
-			return fmt.Errorf("failed to get existing steps: %w", err)
-		}
-
-		// 6. Create maps for efficient lookup by order
-		existingStepMap := make(map[string]*models.SOPStep)
-		for i := range existingSteps {
-			existingStepMap[existingSteps[i].Order] = &existingSteps[i]
-		}
-
-		dtoStepMap := make(map[string]bool)
-		var updatedSteps []models.SOPStep
-
-		// 7. Update or insert steps from DTO
-		for i, stepDTO := range dto.Steps {
-			order := stepDTO.Order
-			if order == "" {
-				// If no order provided, generate based on position
-				orderMap := utils.RebalanceOrders(len(dto.Steps))
-				order = orderMap[i]
-			}
-			dtoStepMap[order] = true
-
-			if existingStep, exists := existingStepMap[order]; exists {
-				// Update existing step
-				existingStep.Title = stepDTO.Title
-				existingStep.Instructions = stepDTO.Instructions
-				existingStep.EstimatedTimeMinutes = stepDTO.EstimatedTimeMinutes
-				existingStep.ImageURL = stepDTO.ImageURL
-				existingStep.VideoURL = stepDTO.VideoURL
-				existingStep.RequiresApproval = stepDTO.RequiresApproval
-
-				if err := s.stepRepo.UpdateWithTx(tx, existingStep); err != nil {
-					log.Println("Failed to update step:", err)
-					return fmt.Errorf("failed to update step: %w", err)
-				}
-				updatedSteps = append(updatedSteps, *existingStep)
-			} else {
-				// Insert new step
-				newStep := models.SOPStep{
-					SOPTemplateVersionID: existingDraft.ID,
-					Order:                order,
-					Title:                stepDTO.Title,
-					Instructions:         stepDTO.Instructions,
-					EstimatedTimeMinutes: stepDTO.EstimatedTimeMinutes,
-					ImageURL:             stepDTO.ImageURL,
-					VideoURL:             stepDTO.VideoURL,
-					RequiresApproval:     stepDTO.RequiresApproval,
-				}
-
-				if err := tx.Create(&newStep).Error; err != nil {
-					log.Println("Failed to create new step:", err)
-					return fmt.Errorf("failed to create new step: %w", err)
-				}
-				updatedSteps = append(updatedSteps, newStep)
-			}
-		}
-
-		// 8. Delete steps that are no longer in the DTO
-		for stepOrder, existingStep := range existingStepMap {
-			if !dtoStepMap[stepOrder] {
-				if err := s.stepRepo.DeleteWithTx(tx, existingStep.ID); err != nil {
-					log.Println("Failed to delete step:", err)
-					return fmt.Errorf("failed to delete step: %w", err)
-				}
-			}
-		}
-
-		existingDraft.Steps = updatedSteps
-		draft = existingDraft
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return draft, nil
-}
-
-// PublishDraft publishes a draft version, making it the current version
-func (s *SOPService) PublishDraft(draftID int, changeSummary string) (*models.SOPTemplate, error) {
-	var template *models.SOPTemplate
-
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the draft
-		draft, err := s.versionRepo.GetByID(draftID)
-		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
-		}
-
-		// 2. Verify it's a draft
-		if draft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
-		}
-
-		// 3. Update the draft to published (using transaction)
-		draft.Status = models.VersionStatusPublished
-		summary := changeSummary
-		draft.ChangeSummary = &summary
-
-		if err := s.versionRepo.UpdateWithTx(tx, draft); err != nil {
-			log.Println("Failed to publish draft:", err)
-			return fmt.Errorf("failed to publish draft: %w", err)
-		}
-
-		// 4. Update the template's current_version_id (using transaction)
-		if err := s.templateRepo.UpdateCurrentVersionWithTx(tx, draft.SOPTemplateID, draft.ID); err != nil {
-			log.Println("Failed to update template current version:", err)
-			return fmt.Errorf("failed to update template current version: %w", err)
-		}
-
-		// 5. Reload the template with the updated current version (using transaction)
-		existingTemplate, err := s.templateRepo.GetByIDWithTx(tx, draft.SOPTemplateID)
-		if err != nil {
-			return fmt.Errorf("failed to get template: %w", err)
-		}
-
-		template = existingTemplate
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return template, nil
-}
-
-// GetUserDrafts gets all draft versions created by a user
-func (s *SOPService) GetUserDrafts(userID uuid.UUID) ([]models.SOPTemplateVersion, error) {
-	return s.versionRepo.GetDraftsByUserID(userID.String())
-}
-
-// GetSOPDrafts gets all draft versions for a specific SOP template
-func (s *SOPService) GetSOPDrafts(templateID int) ([]models.SOPTemplateVersion, error) {
-	return s.versionRepo.GetDraftsByTemplateID(templateID)
-}
-
-// GetDraftByTemplateID returns the active draft for a template, if one exists
-func (s *SOPService) GetDraftByTemplateID(templateID int) (*models.SOPTemplateVersion, error) {
-	return s.versionRepo.GetDraftByTemplateID(templateID)
-}
-
-// DeleteDraft deletes a draft version
-func (s *SOPService) DeleteDraft(draftID int, userID uuid.UUID) error {
-	// Verify the draft exists and belongs to the user
-	draft, err := s.versionRepo.GetByID(draftID)
-	if err != nil {
-		return fmt.Errorf("failed to get draft: %w", err)
-	}
-
-	if draft.Status != models.VersionStatusDraft {
-		return fmt.Errorf("version is not a draft")
-	}
-
-	if draft.CreatedBy.String() != userID.String() {
-		return fmt.Errorf("unauthorized to delete this draft")
-	}
-
-	return s.versionRepo.Delete(draftID)
-}
-
-// GetDraft retrieves a specific draft by ID
-func (s *SOPService) GetDraft(draftID int, userID uuid.UUID) (*models.SOPTemplateVersion, error) {
-	// Get the draft
-	draft, err := s.versionRepo.GetByID(draftID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get draft: %w", err)
-	}
-
-	if draft.Status != models.VersionStatusDraft {
-		return nil, fmt.Errorf("version is not a draft")
-	}
-
-	if draft.CreatedBy.String() != userID.String() {
-		return nil, fmt.Errorf("unauthorized to view this draft")
-	}
-
-	// Load the steps
-	steps, err := s.stepRepo.GetByVersionID(draft.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load steps: %w", err)
-	}
-	draft.Steps = steps
-
-	return draft, nil
-}
-
-// Individual step operations for drafts
-
-// CreateStep creates a single step in a draft version
-func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+// CreateStep creates a single step in a version
+func (s *SOPService) CreateStep(versionID int, dto *dtos.CreateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the draft exists and belongs to the user
-		draft, err := s.versionRepo.GetByID(draftID)
+		// 1. Verify the version exists and belongs to the user
+		version, err := s.versionRepo.GetByID(versionID)
 		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
+			return fmt.Errorf("failed to get version: %w", err)
 		}
 
-		if draft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
-		}
-
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
+		if version.CreatedBy.String() != userID.String() {
+			return fmt.Errorf("unauthorized to modify this version")
 		}
 
 		// 2. Determine order for the new step
 		var order string
 		if dto.AfterStepID != nil {
 			// Get the step after which we're inserting
-			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, draftID)
+			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, versionID)
 			if err != nil {
 				return fmt.Errorf("failed to get after step: %w", err)
 			}
 
 			// Get the last order to find what comes next
-			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(draftID)
+			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(versionID)
 			if err != nil {
 				return fmt.Errorf("failed to get last order: %w", err)
 			}
@@ -601,7 +305,7 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 				order = utils.GenerateOrderBetween(afterStep.Order, "")
 			} else {
 				// Find the next step
-				allSteps, err := s.stepRepo.GetByVersionID(draftID)
+				allSteps, err := s.stepRepo.GetByVersionID(versionID)
 				if err != nil {
 					return fmt.Errorf("failed to get all steps: %w", err)
 				}
@@ -622,7 +326,7 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 			}
 		} else {
 			// Inserting at the beginning
-			allSteps, err := s.stepRepo.GetByVersionID(draftID)
+			allSteps, err := s.stepRepo.GetByVersionID(versionID)
 			if err != nil {
 				return fmt.Errorf("failed to get all steps: %w", err)
 			}
@@ -635,8 +339,12 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 		}
 
 		// 3. Create the step
+		stationID, err := parseOptionalUUID(dto.StationID)
+		if err != nil {
+			return fmt.Errorf("invalid station ID: %w", err)
+		}
 		step = &models.SOPStep{
-			SOPTemplateVersionID: draftID,
+			SOPVersionID:         versionID,
 			Order:                order,
 			Title:                dto.Title,
 			Instructions:         dto.Instructions,
@@ -644,6 +352,8 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 			ImageURL:             dto.ImageURL,
 			VideoURL:             dto.VideoURL,
 			RequiresApproval:     dto.RequiresApproval,
+			StationID:            stationID,
+			LinkedSOPTemplateID:  dto.LinkedSOPTemplateID,
 		}
 
 		if err := tx.Create(step).Error; err != nil {
@@ -661,116 +371,92 @@ func (s *SOPService) CreateStep(draftID int, dto *dtos.CreateStepDTO, userID uui
 	return step, nil
 }
 
-// CreateStepForTemplate creates a step for a template's draft (creates draft if needed)
+// CreateStepForTemplate creates a step for a template's current version (creates new version if needed)
 func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the template (we need it to check current version)
+		// 1. Get the template
 		template, err := s.templateRepo.GetByID(templateID)
 		if err != nil {
 			return fmt.Errorf("failed to get template: %w", err)
 		}
 
-		// 2. Get or create draft for this template
-		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-		if err != nil || draft == nil {
-			// No draft exists, create one based on current version
-
-			// Get latest published version to copy from
-			latestVersionNumber, err := s.versionRepo.GetLatestPublishedVersionNumber(templateID)
-			if err != nil {
-				return fmt.Errorf("failed to get latest version number: %w", err)
-			}
-
-			// Create draft from current version
-			draft = &models.SOPTemplateVersion{
-				SOPTemplateID: templateID,
-				VersionNumber: latestVersionNumber + 1,
-				Status:        models.VersionStatusDraft,
-				CreatedBy:     userID,
-				IsActive:      true,
-			}
-
-			// Copy fields from current version if it exists
-			if template.CurrentVersion != nil {
-				draft.Description = template.CurrentVersion.Description
-				draft.Materials = template.CurrentVersion.Materials
-				draft.Equipment = template.CurrentVersion.Equipment
-			}
-
-			if err := tx.Create(draft).Error; err != nil {
-				return fmt.Errorf("failed to create draft: %w", err)
-			}
-
-			// Copy steps from current version if they exist
-			if template.CurrentVersion != nil {
-				currentSteps, err := s.stepRepo.GetByVersionID(template.CurrentVersion.ID)
-				if err == nil && len(currentSteps) > 0 {
-					newSteps := make([]models.SOPStep, len(currentSteps))
-					for i, oldStep := range currentSteps {
-						newSteps[i] = models.SOPStep{
-							SOPTemplateVersionID: draft.ID,
-							Order:                oldStep.Order,
-							Title:                oldStep.Title,
-							Instructions:         oldStep.Instructions,
-							EstimatedTimeMinutes: oldStep.EstimatedTimeMinutes,
-							ImageURL:             oldStep.ImageURL,
-							VideoURL:             oldStep.VideoURL,
-							RequiresApproval:     oldStep.RequiresApproval,
-						}
-					}
-					if err := s.stepRepo.CreateBatchWithTx(tx, newSteps); err != nil {
-						return fmt.Errorf("failed to copy steps: %w", err)
-					}
-					// Store the newly created steps in the draft so we can reference them later
-					// within this transaction without needing to query the database
-					draft.Steps = newSteps
-				}
-			}
-		} else {
-			// Draft already exists, load its steps from the transaction context
-			existingSteps, err := s.stepRepo.GetByVersionIDWithTx(tx, draft.ID)
-			if err != nil {
-				return fmt.Errorf("failed to get existing draft steps: %w", err)
-			}
-			draft.Steps = existingSteps
+		// 2. Get or create a new version for this template
+		latestVersionNumber, err := s.versionRepo.GetLatestVersionNumber(templateID)
+		if err != nil {
+			return fmt.Errorf("failed to get latest version number: %w", err)
 		}
 
-		// Verify the user owns this draft
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
+		// Create a new version based on the current version
+		newVersion := &models.SOPVersion{
+			SOPTemplateID: templateID,
+			VersionNumber: latestVersionNumber + 1,
+			CreatedBy:     userID,
+			IsActive:      true,
+		}
+
+		// Copy fields from current version if it exists
+		if template.CurrentVersion != nil {
+			newVersion.Description = template.CurrentVersion.Description
+		}
+
+		if err := tx.Create(newVersion).Error; err != nil {
+			return fmt.Errorf("failed to create version: %w", err)
+		}
+
+		// Copy steps from current version if they exist
+		var existingSteps []models.SOPStep
+		if template.CurrentVersion != nil {
+			currentSteps, err := s.stepRepo.GetByVersionID(template.CurrentVersion.ID)
+			if err == nil && len(currentSteps) > 0 {
+				newSteps := make([]models.SOPStep, len(currentSteps))
+				for i, oldStep := range currentSteps {
+					newSteps[i] = models.SOPStep{
+						SOPVersionID:         newVersion.ID,
+						Order:                oldStep.Order,
+						Title:                oldStep.Title,
+						Instructions:         oldStep.Instructions,
+						EstimatedTimeMinutes: oldStep.EstimatedTimeMinutes,
+						ImageURL:             oldStep.ImageURL,
+						VideoURL:             oldStep.VideoURL,
+						RequiresApproval:     oldStep.RequiresApproval,
+						StationID:            oldStep.StationID,
+						LinkedSOPTemplateID:  oldStep.LinkedSOPTemplateID,
+					}
+				}
+				if err := s.stepRepo.CreateBatchWithTx(tx, newSteps); err != nil {
+					return fmt.Errorf("failed to copy steps: %w", err)
+				}
+				existingSteps = newSteps
+			}
 		}
 
 		// 3. Determine order for the new step
 		var order string
 		if dto.AfterStepID != nil {
-			// The afterStepID might refer to a step in the published version,
-			// so we need to find the corresponding step in the draft by looking up
-			// its order value first
+			// The afterStepID might refer to a step in a previous version,
+			// so we need to find the corresponding step in the new version by order value
 
-			// Try to get the step from the draft first
-			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, draft.ID)
+			// Try to get the step from the new version first
+			afterStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, newVersion.ID)
 			if err != nil {
-				// If not found in draft, look it up in the current version to get its order
+				// If not found in new version, look it up in the current version to get its order
 				if template.CurrentVersion != nil {
 					publishedStep, err := s.stepRepo.GetByIDAndVersionID(*dto.AfterStepID, template.CurrentVersion.ID)
 					if err != nil {
 						return fmt.Errorf("failed to get after step: step not found in this version")
 					}
 
-					// Now find the step with the same order in the draft
-					// Use the in-memory steps we stored earlier to avoid querying uncommitted data
-					draftSteps := draft.Steps
-
-					for i := range draftSteps {
-						if draftSteps[i].Order == publishedStep.Order {
-							afterStep = &draftSteps[i]
+					// Now find the step with the same order in the new version
+					for i := range existingSteps {
+						if existingSteps[i].Order == publishedStep.Order {
+							afterStep = &existingSteps[i]
 							break
 						}
 					}
 					if afterStep == nil {
-						return fmt.Errorf("failed to find corresponding step in draft with order='%s'", publishedStep.Order)
+						return fmt.Errorf("failed to find corresponding step in version with order='%s'", publishedStep.Order)
 					}
 				} else {
 					return fmt.Errorf("failed to get after step: %w", err)
@@ -778,7 +464,7 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 			}
 
 			// Get the last order to find what comes next
-			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(draft.ID)
+			lastOrder, err := s.stepRepo.GetLastOrderByVersionID(newVersion.ID)
 			if err != nil {
 				return fmt.Errorf("failed to get last order: %w", err)
 			}
@@ -789,11 +475,9 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 				order = utils.GenerateOrderBetween(afterStep.Order, "")
 			} else {
 				// Find the next step using in-memory steps
-				allSteps := draft.Steps
-
 				var nextOrder string
 				foundAfter := false
-				for _, s := range allSteps {
+				for _, s := range existingSteps {
 					if foundAfter {
 						nextOrder = s.Order
 						break
@@ -806,19 +490,21 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 				order = utils.GenerateOrderBetween(afterStep.Order, nextOrder)
 			}
 		} else {
-			// Inserting at the beginning using in-memory steps
-			allSteps := draft.Steps
-
-			if len(allSteps) > 0 {
-				order = utils.GenerateOrderBetween("", allSteps[0].Order)
+			// Inserting at the beginning
+			if len(existingSteps) > 0 {
+				order = utils.GenerateOrderBetween("", existingSteps[0].Order)
 			} else {
 				order = utils.GenerateOrderBetween("", "")
 			}
 		}
 
 		// 4. Create the new step
+		stationID, err := parseOptionalUUID(dto.StationID)
+		if err != nil {
+			return fmt.Errorf("invalid station ID: %w", err)
+		}
 		step = &models.SOPStep{
-			SOPTemplateVersionID: draft.ID,
+			SOPVersionID:         newVersion.ID,
 			Order:                order,
 			Title:                dto.Title,
 			Instructions:         dto.Instructions,
@@ -826,11 +512,19 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 			ImageURL:             dto.ImageURL,
 			VideoURL:             dto.VideoURL,
 			RequiresApproval:     dto.RequiresApproval,
+			StationID:            stationID,
+			LinkedSOPTemplateID:  dto.LinkedSOPTemplateID,
 		}
 
 		if err := tx.Create(step).Error; err != nil {
 			log.Println("Failed to create step:", err)
 			return fmt.Errorf("failed to create step: %w", err)
+		}
+
+		// 5. Update the template's current_version_id
+		if err := s.templateRepo.UpdateCurrentVersionWithTx(tx, templateID, newVersion.ID); err != nil {
+			log.Println("Failed to update template current version:", err)
+			return fmt.Errorf("failed to update template current version: %w", err)
 		}
 
 		return nil
@@ -843,27 +537,23 @@ func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepD
 	return step, nil
 }
 
-// UpdateStep updates a single step in a draft version
-func (s *SOPService) UpdateStep(draftID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+// UpdateStep updates a single step in a version
+func (s *SOPService) UpdateStep(versionID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the draft exists and belongs to the user
-		draft, err := s.versionRepo.GetByID(draftID)
+		// 1. Verify the version exists and belongs to the user
+		version, err := s.versionRepo.GetByID(versionID)
 		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
+			return fmt.Errorf("failed to get version: %w", err)
 		}
 
-		if draft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
+		if version.CreatedBy.String() != userID.String() {
+			return fmt.Errorf("unauthorized to modify this version")
 		}
 
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
-		}
-
-		// 2. Get the step and verify it belongs to this draft
-		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draftID)
+		// 2. Get the step and verify it belongs to this version
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get step: %w", err)
 		}
@@ -887,6 +577,16 @@ func (s *SOPService) UpdateStep(draftID int, stepID int, dto *dtos.UpdateStepDTO
 		if dto.RequiresApproval != nil {
 			step.RequiresApproval = *dto.RequiresApproval
 		}
+		if dto.StationID != nil {
+			stationID, err := parseOptionalUUID(dto.StationID)
+			if err != nil {
+				return fmt.Errorf("invalid station ID: %w", err)
+			}
+			step.StationID = stationID
+		}
+		if dto.LinkedSOPTemplateID != nil {
+			step.LinkedSOPTemplateID = dto.LinkedSOPTemplateID
+		}
 
 		if err := s.stepRepo.UpdateWithTx(tx, step); err != nil {
 			log.Println("Failed to update step:", err)
@@ -903,25 +603,21 @@ func (s *SOPService) UpdateStep(draftID int, stepID int, dto *dtos.UpdateStepDTO
 	return step, nil
 }
 
-// DeleteStep deletes a single step from a draft version
-func (s *SOPService) DeleteStep(draftID int, stepID int, userID uuid.UUID) error {
+// DeleteStep deletes a single step from a version
+func (s *SOPService) DeleteStep(versionID int, stepID int, userID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the draft exists and belongs to the user
-		draft, err := s.versionRepo.GetByID(draftID)
+		// 1. Verify the version exists and belongs to the user
+		version, err := s.versionRepo.GetByID(versionID)
 		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
+			return fmt.Errorf("failed to get version: %w", err)
 		}
 
-		if draft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
+		if version.CreatedBy.String() != userID.String() {
+			return fmt.Errorf("unauthorized to modify this version")
 		}
 
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
-		}
-
-		// 2. Verify the step belongs to this draft
-		_, err = s.stepRepo.GetByIDAndVersionID(stepID, draftID)
+		// 2. Verify the step belongs to this version
+		_, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get step: %w", err)
 		}
@@ -936,24 +632,25 @@ func (s *SOPService) DeleteStep(draftID int, stepID int, userID uuid.UUID) error
 	})
 }
 
-// UpdateStepForTemplate updates a step in the template's draft (creates draft if needed)
+// UpdateStepForTemplate updates a step in the template's current version
 func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the draft for this template (must exist to have steps)
-		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-		if err != nil || draft == nil {
-			return fmt.Errorf("no draft found for this template")
+		// 1. Get the template to find its current version
+		template, err := s.templateRepo.GetByID(templateID)
+		if err != nil {
+			return fmt.Errorf("failed to get template: %w", err)
 		}
 
-		// Verify the user owns this draft
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
+		if template.CurrentVersionID == nil {
+			return fmt.Errorf("no current version found for this template")
 		}
 
-		// 2. Get the step and verify it belongs to this draft
-		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draft.ID)
+		versionID := *template.CurrentVersionID
+
+		// 2. Get the step and verify it belongs to the current version
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get step: %w", err)
 		}
@@ -977,6 +674,16 @@ func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos
 		if dto.RequiresApproval != nil {
 			step.RequiresApproval = *dto.RequiresApproval
 		}
+		if dto.StationID != nil {
+			stationID, err := parseOptionalUUID(dto.StationID)
+			if err != nil {
+				return fmt.Errorf("invalid station ID: %w", err)
+			}
+			step.StationID = stationID
+		}
+		if dto.LinkedSOPTemplateID != nil {
+			step.LinkedSOPTemplateID = dto.LinkedSOPTemplateID
+		}
 
 		if err := s.stepRepo.UpdateWithTx(tx, step); err != nil {
 			log.Println("Failed to update step:", err)
@@ -993,22 +700,23 @@ func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos
 	return step, nil
 }
 
-// DeleteStepForTemplate deletes a step from the template's draft
+// DeleteStepForTemplate deletes a step from the template's current version
 func (s *SOPService) DeleteStepForTemplate(templateID int, stepID int, userID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the draft for this template
-		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-		if err != nil || draft == nil {
-			return fmt.Errorf("no draft found for this template")
+		// 1. Get the template to find its current version
+		template, err := s.templateRepo.GetByID(templateID)
+		if err != nil {
+			return fmt.Errorf("failed to get template: %w", err)
 		}
 
-		// Verify the user owns this draft
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
+		if template.CurrentVersionID == nil {
+			return fmt.Errorf("no current version found for this template")
 		}
 
-		// 2. Verify the step belongs to this draft
-		_, err = s.stepRepo.GetByIDAndVersionID(stepID, draft.ID)
+		versionID := *template.CurrentVersionID
+
+		// 2. Verify the step belongs to the current version
+		_, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get step: %w", err)
 		}
@@ -1024,32 +732,28 @@ func (s *SOPService) DeleteStepForTemplate(templateID int, stepID int, userID uu
 }
 
 // ReorderStep updates the order of a single step by moving it between two other steps
-func (s *SOPService) ReorderStep(draftID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+func (s *SOPService) ReorderStep(versionID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Verify the draft exists and belongs to the user
-		draft, err := s.versionRepo.GetByID(draftID)
+		// 1. Verify the version exists and belongs to the user
+		version, err := s.versionRepo.GetByID(versionID)
 		if err != nil {
-			return fmt.Errorf("failed to get draft: %w", err)
+			return fmt.Errorf("failed to get version: %w", err)
 		}
 
-		if draft.Status != models.VersionStatusDraft {
-			return fmt.Errorf("version is not a draft")
-		}
-
-		if draft.CreatedBy.String() != userID.String() {
-			return fmt.Errorf("unauthorized to modify this draft")
+		if version.CreatedBy.String() != userID.String() {
+			return fmt.Errorf("unauthorized to modify this version")
 		}
 
 		// 2. Get the step to reorder
-		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draftID)
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			return fmt.Errorf("failed to get step: %w", err)
 		}
 
 		// 3. Get order values for before and after steps
-		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(draftID, dto.BeforeStepID, dto.AfterStepID)
+		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(versionID, dto.BeforeStepID, dto.AfterStepID)
 		if err != nil {
 			return fmt.Errorf("failed to get order bounds: %w", err)
 		}
@@ -1074,7 +778,7 @@ func (s *SOPService) ReorderStep(draftID int, stepID int, dto *dtos.ReorderStepD
 	return step, nil
 }
 
-// ReorderStepForTemplate updates the order of a step in the template's draft
+// ReorderStepForTemplate updates the order of a step in the template's current version
 func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
@@ -1082,22 +786,21 @@ func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dto
 		templateID, stepID, dto.BeforeStepID, dto.AfterStepID)
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the draft for this template
-		draft, err := s.versionRepo.GetDraftByTemplateID(templateID)
-		if err != nil || draft == nil {
-			log.Printf("ReorderStep - no draft found for template %d: %v", templateID, err)
-			return fmt.Errorf("no draft found for this template")
+		// 1. Get the template to find its current version
+		template, err := s.templateRepo.GetByID(templateID)
+		if err != nil {
+			return fmt.Errorf("failed to get template: %w", err)
 		}
-		log.Printf("ReorderStep - found draft ID: %d", draft.ID)
 
-		// Verify the user owns this draft
-		if draft.CreatedBy.String() != userID.String() {
-			log.Printf("ReorderStep - unauthorized: user %s doesn't own draft (owner: %s)", userID.String(), draft.CreatedBy.String())
-			return fmt.Errorf("unauthorized to modify this draft")
+		if template.CurrentVersionID == nil {
+			return fmt.Errorf("no current version found for this template")
 		}
+
+		versionID := *template.CurrentVersionID
+		log.Printf("ReorderStep - using version ID: %d", versionID)
 
 		// 2. Get the step to reorder
-		step, err = s.stepRepo.GetByIDAndVersionID(stepID, draft.ID)
+		step, err = s.stepRepo.GetByIDAndVersionID(stepID, versionID)
 		if err != nil {
 			log.Printf("ReorderStep - failed to get step %d: %v", stepID, err)
 			return fmt.Errorf("failed to get step: %w", err)
@@ -1105,7 +808,7 @@ func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dto
 		log.Printf("ReorderStep - current step order: %s", step.Order)
 
 		// 3. Get order values for before and after steps
-		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(draft.ID, dto.BeforeStepID, dto.AfterStepID)
+		beforeOrder, afterOrder, err := s.stepRepo.GetOrderBeforeAndAfter(versionID, dto.BeforeStepID, dto.AfterStepID)
 		if err != nil {
 			log.Printf("ReorderStep - failed to get order bounds: %v", err)
 			return fmt.Errorf("failed to get order bounds: %w", err)
@@ -1121,7 +824,7 @@ func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dto
 			log.Printf("ReorderStep - edge case detected, performing full rebalancing")
 
 			// Get all steps in their current order
-			allSteps, err := s.stepRepo.GetByVersionIDWithTx(tx, draft.ID)
+			allSteps, err := s.stepRepo.GetByVersionIDWithTx(tx, versionID)
 			if err != nil {
 				log.Printf("ReorderStep - failed to get all steps for rebalancing: %v", err)
 				return fmt.Errorf("failed to get steps for rebalancing: %w", err)

@@ -4,7 +4,8 @@ import "github.com/google/uuid"
 
 // CreateSpaceDTO represents the request to create a new space
 type CreateSpaceDTO struct {
-	Name string `json:"name" binding:"required"`
+	Name     string  `json:"name" binding:"required"`
+	Template *string `json:"template,omitempty"` // Optional: "woodworking_shop", "sales"
 }
 
 // UpdateSpaceDTO represents the request to update a space

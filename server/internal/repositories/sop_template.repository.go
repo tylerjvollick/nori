@@ -56,6 +56,15 @@ func (r *SOPTemplateRepository) GetByCreatedBy(userID uuid.UUID) ([]models.SOPTe
 	return templates, err
 }
 
+func (r *SOPTemplateRepository) GetBySpaceID(spaceID uuid.UUID) ([]models.SOPTemplate, error) {
+	var templates []models.SOPTemplate
+	err := r.db.Where("space_id = ?", spaceID).
+		Preload("CurrentVersion.Steps").
+		Preload("CurrentVersion").
+		Find(&templates).Error
+	return templates, err
+}
+
 func (r *SOPTemplateRepository) Update(template *models.SOPTemplate) error {
 	return r.db.Save(template).Error
 }

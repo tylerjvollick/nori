@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,17 +14,20 @@ import (
 )
 
 type SpaceService struct {
-	spaceRepository *repositories.SpaceRepository
-	userRepository  *repositories.UserRepository
+	spaceRepository      *repositories.SpaceRepository
+	userRepository       *repositories.UserRepository
+	spaceTemplateService *SpaceTemplateService
 }
 
 func NewSpaceService(
 	spaceRepository *repositories.SpaceRepository,
 	userRepository *repositories.UserRepository,
+	spaceTemplateService *SpaceTemplateService,
 ) *SpaceService {
 	return &SpaceService{
-		spaceRepository: spaceRepository,
-		userRepository:  userRepository,
+		spaceRepository:      spaceRepository,
+		userRepository:       userRepository,
+		spaceTemplateService: spaceTemplateService,
 	}
 }
 
@@ -40,6 +44,15 @@ func (s *SpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO
 
 	if err := s.spaceRepository.Create(space); err != nil {
 		return nil, err
+	}
+
+	// Apply space template if provided
+	if dto.Template != nil && *dto.Template != "" {
+		if s.spaceTemplateService != nil {
+			if err := s.spaceTemplateService.ApplyTemplate(space.ID, SpaceTemplate(*dto.Template)); err != nil {
+				log.Printf("Warning: failed to apply template %q to space %s: %v", *dto.Template, space.ID, err)
+			}
+		}
 	}
 
 	return space, nil

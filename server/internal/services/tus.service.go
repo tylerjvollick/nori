@@ -167,7 +167,7 @@ func (s *TusService) processCompletedUpload(event handler.HookEvent) {
 	}
 
 	// Build permanent storage path
-	dirPath := filepath.Join(s.uploadDir, "sops", strconv.Itoa(step.SOPTemplateVersionID), "steps", strconv.Itoa(stepID))
+	dirPath := filepath.Join(s.uploadDir, "sops", strconv.Itoa(step.SOPVersionID), "steps", strconv.Itoa(stepID))
 	if err := os.MkdirAll(dirPath, 0755); err != nil {
 		log.Printf("Failed to create directory %s: %v", dirPath, err)
 		return
@@ -175,7 +175,7 @@ func (s *TusService) processCompletedUpload(event handler.HookEvent) {
 
 	permanentFileName := fileUUID + ext
 	permanentPath := filepath.Join(dirPath, permanentFileName)
-	relativePath := filepath.Join("sops", strconv.Itoa(step.SOPTemplateVersionID), "steps", strconv.Itoa(stepID), permanentFileName)
+	relativePath := filepath.Join("sops", strconv.Itoa(step.SOPVersionID), "steps", strconv.Itoa(stepID), permanentFileName)
 
 	// Get the temporary tus file
 	tusFilePath := filepath.Join(s.tusUploadDir, info.ID)
@@ -207,7 +207,7 @@ func (s *TusService) processCompletedUpload(event handler.HookEvent) {
 
 	// Create database record
 	media := &models.SOPStepMedia{
-		SOPStepID: stepID,
+		SOPStepID: &stepID,
 		UUID:      fileUUID,
 		FilePath:  relativePath,
 		FileName:  fileName,
@@ -270,13 +270,13 @@ func generateOrderBetween(before, after string) string {
 		}
 		return before + "m"
 	}
-	
+
 	// Find midpoint
 	minLen := len(before)
 	if len(after) < minLen {
 		minLen = len(after)
 	}
-	
+
 	for i := 0; i < minLen; i++ {
 		if before[i] != after[i] {
 			mid := (int(before[i]) + int(after[i])) / 2
@@ -286,6 +286,6 @@ func generateOrderBetween(before, after string) string {
 			return before[:i+1] + "m"
 		}
 	}
-	
+
 	return before + "m"
 }

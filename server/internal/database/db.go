@@ -7,7 +7,6 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-
 )
 
 var DB *gorm.DB
@@ -30,4 +29,3 @@ func Connect() {
 	DB = db
 	log.Println("Database connected")
 }
-

@@ -28,10 +28,17 @@ func New() *App {
 	accountRepo := repositories.NewAccountRepository(database.DB)
 	userAccountRepo := repositories.NewUserAccountRepository(database.DB)
 	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
-	sopVersionRepo := repositories.NewSOPTemplateVersionRepository(database.DB)
+	sopVersionRepo := repositories.NewSOPVersionRepository(database.DB)
 	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
+	sopSubStepRepo := repositories.NewSOPSubStepRepository(database.DB)
+	_ = sopSubStepRepo // TODO: wire into service when SOPSubStep CRUD endpoints are added
+	bomItemRepo := repositories.NewBOMItemRepository(database.DB)
+	_ = bomItemRepo // TODO: wire into service when BOMItem CRUD endpoints are added
 	sopStepMediaRepo := repositories.NewSOPStepMediaRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
+	sopCategoryRepo := repositories.NewSOPCategoryRepository(database.DB)
+	ticketTypeRepo := repositories.NewTicketTypeRepository(database.DB)
+	statusDefRepo := repositories.NewStatusDefinitionRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -54,7 +61,7 @@ func New() *App {
 	userService := services.NewUserService(userRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
 	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
-	spaceService := services.NewSpaceService(spaceRepo, userRepo)
+	spaceService := services.NewSpaceService(spaceRepo, userRepo, services.NewSpaceTemplateService(ticketTypeRepo, statusDefRepo, sopCategoryRepo))
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
 
 	// Initialize tus service for chunked uploads

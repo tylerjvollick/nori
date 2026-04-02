@@ -10,4 +10,3 @@ func RegisterHealthRoutes(app *fiber.App, conn *pgx.Conn) {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 }
-
