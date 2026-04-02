@@ -1,0 +1,5 @@
+# Ralph - autonomous agent scripts
+.ralph/
+
+# Implementation checklists (local working files)
+specs/*-implementation.md
