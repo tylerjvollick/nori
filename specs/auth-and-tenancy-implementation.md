@@ -23,7 +23,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Keep `Name`, `Plan`, `CreatedByUserID`
   - Add migration
 
-- [ ] **Create SpaceMember model**
+- [x] **Create SpaceMember model**
   - `ID`, `UserID`, `SpaceID`, `CreatedAt`
   - Unique constraint on `(UserID, SpaceID)`
   - Add GORM migration
