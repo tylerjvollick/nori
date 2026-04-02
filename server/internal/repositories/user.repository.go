@@ -74,3 +74,17 @@ func (r *UserRepository) UpdateRecentSpaces(userID uuid.UUID, recentSpaces model
 		Where("id = ?", userID).
 		Update("recent_spaces", recentSpaces).Error
 }
+
+// UpdatePassword updates the user's password
+func (r *UserRepository) UpdatePassword(userID uuid.UUID, hashedPassword string) error {
+	return r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("password", hashedPassword).Error
+}
+
+// ClearMustChangePassword clears the MustChangePassword flag for a user
+func (r *UserRepository) ClearMustChangePassword(userID uuid.UUID) error {
+	return r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("must_change_password", false).Error
+}

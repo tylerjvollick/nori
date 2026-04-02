@@ -43,7 +43,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `Create`, `GetByKeyHash`, `GetByAccount`, `Deactivate`, `Delete`,
     `UpdateLastUsed`
 
-- [ ] **Update User repository**
+- [x] **Update User repository**
   - Add `GetByEmail` if not already present
   - Add `UpdatePassword`, `ClearMustChangePassword`
 
