@@ -67,7 +67,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Verify old password, hash new, clear `MustChangePassword` flag
   - Return new JWT after password change
 
-- [ ] **Remove self-registration**
+- [x] **Remove self-registration**
   - Remove or disable the public registration endpoint
   - Only admins can create users (via admin API)
 
