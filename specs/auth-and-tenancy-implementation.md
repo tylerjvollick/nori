@@ -49,7 +49,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 4. Auth Service Refactor
 
-- [ ] **Refactor JWT handling**
+- [x] **Refactor JWT handling**
   - Use secret from config (not hardcoded)
   - Extend token expiry to 30 days
   - Set token as HTTP-only cookie (web) in addition to response body

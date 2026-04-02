@@ -3,6 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/tylerjvollick/nori/internal/services"
@@ -43,7 +44,19 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
-	// ✅ Return a valid response when login succeeds
+	// Set HTTP-only cookie with 30-day expiry
+	cookie := &fiber.Cookie{
+		Name:     "nori_token",
+		Value:    loginResponse.AccessToken,
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: "Lax",
+		Expires:  time.Now().Add(30 * 24 * time.Hour), // 30 days
+	}
+	c.Cookie(cookie)
+
+	// Also return in JSON body for compatibility
 	return c.Status(http.StatusOK).JSON(loginResponse)
 }
 

@@ -6,6 +6,7 @@ import (
 )
 
 type AuthDTO struct {
-	User      models.User
-	AccountID uuid.UUID
+	User          models.User
+	AccountID     uuid.UUID
+	ActiveSpaceID *uuid.UUID
 }

@@ -19,23 +19,27 @@ type AuthService struct {
 	accountRepository     *repositories.AccountRepository
 	userAccountRepository *repositories.UserAccountRepository
 	spaceService          *SpaceService
+	jwtSecret             []byte
 }
 
-func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, spaceService *SpaceService) *AuthService {
+func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, spaceService *SpaceService, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepository:        userRepository,
 		accountRepository:     accountRepository,
 		userAccountRepository: userAccountRepository,
 		spaceService:          spaceService,
+		jwtSecret:             []byte(jwtSecret),
 	}
 }
 
 type LoginResponse struct {
-	AccessToken string    `json:"accessToken"`
-	UserID      uuid.UUID `json:"userId"`
-	UserEmail   string    `json:"userEmail"`
-	FirstName   string    `json:"firstName"`
-	LastName    string    `json:"lastName"`
+	AccessToken        string     `json:"accessToken"`
+	UserID             uuid.UUID  `json:"userId"`
+	UserEmail          string     `json:"userEmail"`
+	FirstName          string     `json:"firstName"`
+	LastName           string     `json:"lastName"`
+	MustChangePassword bool       `json:"mustChangePassword"`
+	ActiveSpaceID      *uuid.UUID `json:"activeSpaceId,omitempty"`
 }
 
 func (s *AuthService) ValidatePassword(user models.User, password string) bool {
@@ -66,12 +70,11 @@ func (s *AuthService) Validate(authHeader string) (*dtos.AuthDTO, error) {
 }
 
 func (s *AuthService) ValidateToken(bearerToken string) (*dtos.AuthDTO, error) {
-	var jwtSecret = []byte("your-secret-key")
 	token, err := jwt.Parse(bearerToken, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return jwtSecret, nil
+		return s.jwtSecret, nil
 	})
 	if err != nil {
 		log.Println("JWT parse error:", err)
@@ -103,9 +106,18 @@ func (s *AuthService) ValidateToken(bearerToken string) (*dtos.AuthDTO, error) {
 		accountID = *user.DefaultAccountID
 	}
 
+	// Extract ActiveSpaceID from token if present
+	var activeSpaceID *uuid.UUID
+	if spaceIDStr, ok := claims["activeSpaceID"].(string); ok && spaceIDStr != "" {
+		if spaceID, err := uuid.Parse(spaceIDStr); err == nil {
+			activeSpaceID = &spaceID
+		}
+	}
+
 	return &dtos.AuthDTO{
-		User:      *user,
-		AccountID: accountID,
+		User:          *user,
+		AccountID:     accountID,
+		ActiveSpaceID: activeSpaceID,
 	}, nil
 }
 
@@ -135,37 +147,47 @@ func (s *AuthService) Login(email, password string) (*LoginResponse, error) {
 		}
 	}
 
-	return s.CreateLoginResponse(*user)
+	return s.CreateLoginResponse(*user, nil)
 }
 
-func (s *AuthService) CreateLoginResponse(user models.User) (*LoginResponse, error) {
-	// TODO: store secret in env vars
-	var jwtSecret = []byte("your-secret-key")
+func (s *AuthService) CreateLoginResponse(user models.User, activeSpaceID *uuid.UUID) (*LoginResponse, error) {
+	// Determine ActiveSpaceID: use provided value, or first from RecentSpaces
+	var spaceID *uuid.UUID
+	if activeSpaceID != nil {
+		spaceID = activeSpaceID
+	} else if len(user.RecentSpaces) > 0 {
+		spaceID = &user.RecentSpaces[0]
+	}
 
 	claims := jwt.MapClaims{
-		"sub":   user.ID,
+		"sub":   user.ID.String(),
 		"email": user.Email,
-		"exp":   time.Now().Add(time.Hour * 24).Unix(),
-		"iat":   time.Now().Unix(), // issued at
+		"exp":   time.Now().Add(time.Hour * 24 * 30).Unix(), // 30 days
+		"iat":   time.Now().Unix(),
+	}
+
+	// Add ActiveSpaceID to claims if present
+	if spaceID != nil {
+		claims["activeSpaceID"] = spaceID.String()
 	}
 
 	// create the token with claims
-	// TODO learn about the different signing methods
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	// sign token and return as string
-	accessToken, err := token.SignedString(jwtSecret)
+	accessToken, err := token.SignedString(s.jwtSecret)
 	if err != nil {
 		log.Printf("failed to sign access token: %v", err)
 		return nil, err
 	}
 	return &LoginResponse{
-		AccessToken: accessToken,
-		UserID:      user.ID,
-		UserEmail:   user.Email,
-
-		FirstName: *user.FirstName,
-		LastName:  *user.LastName,
+		AccessToken:        accessToken,
+		UserID:             user.ID,
+		UserEmail:          user.Email,
+		FirstName:          *user.FirstName,
+		LastName:           *user.LastName,
+		MustChangePassword: user.MustChangePassword,
+		ActiveSpaceID:      spaceID,
 	}, nil
 }
 

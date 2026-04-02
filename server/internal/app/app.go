@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/tylerjvollick/nori/internal/config"
 	"github.com/tylerjvollick/nori/internal/database"
 	"github.com/tylerjvollick/nori/internal/handlers"
 	"github.com/tylerjvollick/nori/internal/repositories"
@@ -16,10 +17,11 @@ import (
 type App struct {
 	Fiber       *fiber.App
 	AuthHandler *handlers.AuthHandler
+	Config      *config.Config
 	// Add other handlers here
 }
 
-func New() *App {
+func New(cfg *config.Config) *App {
 	// Connect to database
 	database.Connect()
 
@@ -62,7 +64,7 @@ func New() *App {
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
 	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, services.NewSpaceTemplateService(ticketTypeRepo, statusDefRepo, sopCategoryRepo))
-	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService)
+	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService, cfg.JWTSecret)
 
 	// Initialize tus service for chunked uploads
 	tusService, err := services.NewTusService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
@@ -108,5 +110,6 @@ func New() *App {
 	return &App{
 		Fiber:       app,
 		AuthHandler: authHandler,
+		Config:      cfg,
 	}
 }

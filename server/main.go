@@ -11,11 +11,18 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/tylerjvollick/nori/internal/app"
+	"github.com/tylerjvollick/nori/internal/config"
 	"github.com/tylerjvollick/nori/internal/database"
 )
 
 func main() {
 	godotenv.Load(".env")
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 
 	log.Println("Connecting to database")
 	database.Connect()
@@ -37,6 +44,6 @@ func main() {
 	}
 	defer conn.Close(context.Background())
 
-	a := app.New()
+	a := app.New(cfg)
 	log.Fatal(a.Fiber.Listen(":8080"))
 }
