@@ -13,7 +13,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 2. Model Changes
 
-- [ ] **Update User model**
+- [x] **Update User model**
   - Add `MustChangePassword bool` field (default `true` for new users)
   - Rename `GlobalRole` to `Role` with values `admin` / `user` (drop `viewer`)
   - Add GORM migration for the new/renamed fields

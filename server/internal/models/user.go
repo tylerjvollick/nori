@@ -32,25 +32,16 @@ func (rs RecentSpaces) Value() (driver.Value, error) {
 	return json.Marshal(rs)
 }
 
-// Define your enum type in Go
-type GlobalRole string
-
-const (
-	GlobalRoleAdmin  GlobalRole = "ADMIN"
-	GlobalRoleUser   GlobalRole = "USER"
-	GlobalRoleViewer GlobalRole = "VIEWER"
-	// Add other roles as needed
-)
-
 type User struct {
-	ID               uuid.UUID   `gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
-	GlobalRole       *GlobalRole `gorm:"type:enum('ADMIN','USER','VIEWER');default:NULL"` // nullable enum
-	Email            string      `gorm:"not null;uniqueIndex"`
-	Password         *string     `gorm:"type:text"` // optional
-	FirstName        *string
-	LastName         *string
-	DefaultAccountID *uuid.UUID   `gorm:"type:uuid"` // foreign key to Account
-	RecentSpaces     RecentSpaces `gorm:"type:jsonb;default:'[]'"`
+	ID                 uuid.UUID `gorm:"type:uuid;default:uuid_generate_v4();primaryKey"`
+	Role               *Role     `gorm:"type:enum('admin','user');default:NULL"` // nullable enum
+	Email              string    `gorm:"not null;uniqueIndex"`
+	Password           *string   `gorm:"type:text"` // optional
+	MustChangePassword bool      `gorm:"not null;default:true"`
+	FirstName          *string
+	LastName           *string
+	DefaultAccountID   *uuid.UUID   `gorm:"type:uuid"` // foreign key to Account
+	RecentSpaces       RecentSpaces `gorm:"type:jsonb;default:'[]'"`
 
 	// Optional: GORM relation
 	DefaultAccount *Account `gorm:"foreignKey:DefaultAccountID"`
