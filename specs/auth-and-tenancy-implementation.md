@@ -28,7 +28,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Unique constraint on `(UserID, SpaceID)`
   - Add GORM migration
 
-- [ ] **Create APIKey model**
+- [x] **Create APIKey model**
   - `ID`, `AccountID`, `Name`, `KeyHash`, `LastUsedAt`, `ExpiresAt`,
     `IsActive`, `CreatedAt`, `CreatedByID`
   - Add GORM migration
