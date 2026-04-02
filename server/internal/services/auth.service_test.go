@@ -1,6 +1,8 @@
 package services
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -414,4 +416,408 @@ func TestValidatePassword_NoPassword(t *testing.T) {
 
 	// Assert
 	assert.False(t, isValid)
+}
+
+// MockAPIKeyRepository is a mock implementation of the APIKeyRepository
+type MockAPIKeyRepository struct {
+	createFunc         func(*models.APIKey) error
+	getByKeyHashFunc   func(string) (*models.APIKey, error)
+	updateLastUsedFunc func(uuid.UUID) error
+}
+
+func (m *MockAPIKeyRepository) Create(apiKey *models.APIKey) error {
+	if m.createFunc != nil {
+		return m.createFunc(apiKey)
+	}
+	return nil
+}
+
+func (m *MockAPIKeyRepository) GetByKeyHash(keyHash string) (*models.APIKey, error) {
+	if m.getByKeyHashFunc != nil {
+		return m.getByKeyHashFunc(keyHash)
+	}
+	return nil, assert.AnError
+}
+
+func (m *MockAPIKeyRepository) GetByAccount(accountID uuid.UUID) ([]models.APIKey, error) {
+	return nil, nil
+}
+
+func (m *MockAPIKeyRepository) Deactivate(id uuid.UUID) error {
+	return nil
+}
+
+func (m *MockAPIKeyRepository) Delete(id uuid.UUID) error {
+	return nil
+}
+
+func (m *MockAPIKeyRepository) UpdateLastUsed(id uuid.UUID) error {
+	if m.updateLastUsedFunc != nil {
+		return m.updateLastUsedFunc(id)
+	}
+	return nil
+}
+
+// TestGenerateAPIKey tests the generation of API keys
+func TestGenerateAPIKey(t *testing.T) {
+	// Arrange
+	var createdKey *models.APIKey
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			createdKey = apiKey
+			return nil
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	keyName := "Test API Key"
+
+	// Act
+	rawKey, apiKey, err := authService.GenerateAPIKey(accountID, keyName, createdByID, nil)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, apiKey)
+	assert.NotEmpty(t, rawKey)
+	assert.True(t, strings.HasPrefix(rawKey, "nori_"), "API key should have 'nori_' prefix")
+	assert.Equal(t, accountID, apiKey.AccountID)
+	assert.Equal(t, keyName, apiKey.Name)
+	assert.Equal(t, createdByID, apiKey.CreatedByID)
+	assert.True(t, apiKey.IsActive)
+	assert.NotEmpty(t, apiKey.KeyHash, "Key hash should be stored")
+	assert.NotEqual(t, rawKey, apiKey.KeyHash, "Hash should not equal raw key")
+
+	// Verify the key is 69 characters (5 for "nori_" + 64 for hex)
+	assert.Equal(t, 69, len(rawKey))
+
+	// Verify Create was called with the right data
+	assert.NotNil(t, createdKey)
+	assert.Equal(t, accountID, createdKey.AccountID)
+}
+
+func TestGenerateAPIKey_WithExpiry(t *testing.T) {
+	// Arrange
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			return nil
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	keyName := "Test API Key"
+	expiresAt := time.Now().Add(time.Hour * 24 * 30) // 30 days
+
+	// Act
+	rawKey, apiKey, err := authService.GenerateAPIKey(accountID, keyName, createdByID, &expiresAt)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, apiKey)
+	assert.NotNil(t, apiKey.ExpiresAt)
+	assert.Equal(t, expiresAt.Unix(), apiKey.ExpiresAt.Unix())
+	assert.True(t, strings.HasPrefix(rawKey, "nori_"))
+}
+
+func TestGenerateAPIKey_RepositoryError(t *testing.T) {
+	// Arrange
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			return errors.New("database error")
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	keyName := "Test API Key"
+
+	// Act
+	rawKey, apiKey, err := authService.GenerateAPIKey(accountID, keyName, createdByID, nil)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Empty(t, rawKey)
+	assert.Nil(t, apiKey)
+}
+
+func TestValidateAPIKey_Success(t *testing.T) {
+	// Arrange
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	var storedKey *models.APIKey
+
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			storedKey = apiKey
+			return nil
+		},
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			if storedKey != nil && storedKey.KeyHash == keyHash {
+				return storedKey, nil
+			}
+			return nil, errors.New("not found")
+		},
+		updateLastUsedFunc: func(id uuid.UUID) error {
+			return nil
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// First generate a key to get a valid rawKey and hash
+	rawKey, generatedKey, err := authService.GenerateAPIKey(accountID, "Test Key", createdByID, nil)
+	assert.NoError(t, err)
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, validatedKey)
+	assert.Equal(t, generatedKey.ID, validatedKey.ID)
+	assert.Equal(t, accountID, validatedKey.AccountID)
+}
+
+func TestValidateAPIKey_InvalidPrefix(t *testing.T) {
+	// Arrange
+	mockRepo := &MockAPIKeyRepository{}
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// Act - use a key without "nori_" prefix
+	validatedKey, err := authService.ValidateAPIKey("invalid_key_format")
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, validatedKey)
+	assert.Contains(t, err.Error(), "invalid API key format")
+}
+
+func TestValidateAPIKey_NotFound(t *testing.T) {
+	// Arrange
+	mockRepo := &MockAPIKeyRepository{
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			return nil, errors.New("not found")
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	rawKey := "nori_" + strings.Repeat("a", 64) // Valid format but doesn't exist
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, validatedKey)
+	assert.Contains(t, err.Error(), "invalid API key")
+}
+
+func TestValidateAPIKey_Inactive(t *testing.T) {
+	// Arrange
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	var storedKey *models.APIKey
+
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			storedKey = apiKey
+			return nil
+		},
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			if storedKey != nil && storedKey.KeyHash == keyHash {
+				// Return the inactive key
+				storedKey.IsActive = false
+				return storedKey, nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// Generate a key
+	rawKey, _, err := authService.GenerateAPIKey(accountID, "Test Key", createdByID, nil)
+	assert.NoError(t, err)
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, validatedKey)
+	assert.Contains(t, err.Error(), "API key is inactive")
+}
+
+func TestValidateAPIKey_Expired(t *testing.T) {
+	// Arrange
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	expiredTime := time.Now().Add(-time.Hour) // Expired 1 hour ago
+	var storedKey *models.APIKey
+
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			storedKey = apiKey
+			return nil
+		},
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			if storedKey != nil && storedKey.KeyHash == keyHash {
+				return storedKey, nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// Generate a key with expiry in the past
+	rawKey, _, err := authService.GenerateAPIKey(accountID, "Test Key", createdByID, &expiredTime)
+	assert.NoError(t, err)
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, validatedKey)
+	assert.Contains(t, err.Error(), "API key has expired")
+}
+
+func TestValidateAPIKey_UpdateLastUsed(t *testing.T) {
+	// Arrange
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	var storedKey *models.APIKey
+	updateLastUsedCalled := false
+
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			storedKey = apiKey
+			return nil
+		},
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			if storedKey != nil && storedKey.KeyHash == keyHash {
+				return storedKey, nil
+			}
+			return nil, errors.New("not found")
+		},
+		updateLastUsedFunc: func(id uuid.UUID) error {
+			updateLastUsedCalled = true
+			return nil
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// Generate a key
+	rawKey, _, err := authService.GenerateAPIKey(accountID, "Test Key", createdByID, nil)
+	assert.NoError(t, err)
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, validatedKey)
+	assert.True(t, updateLastUsedCalled, "UpdateLastUsed should have been called")
+}
+
+func TestValidateAPIKey_UpdateLastUsedError(t *testing.T) {
+	// Arrange
+	accountID := uuid.New()
+	createdByID := uuid.New()
+	var storedKey *models.APIKey
+
+	mockRepo := &MockAPIKeyRepository{
+		createFunc: func(apiKey *models.APIKey) error {
+			storedKey = apiKey
+			return nil
+		},
+		getByKeyHashFunc: func(keyHash string) (*models.APIKey, error) {
+			if storedKey != nil && storedKey.KeyHash == keyHash {
+				return storedKey, nil
+			}
+			return nil, errors.New("not found")
+		},
+		updateLastUsedFunc: func(id uuid.UUID) error {
+			return errors.New("failed to update")
+		},
+	}
+
+	authService := &AuthService{
+		apiKeyRepository: mockRepo,
+		jwtSecret:        []byte("test-secret"),
+	}
+
+	// Generate a key
+	rawKey, _, err := authService.GenerateAPIKey(accountID, "Test Key", createdByID, nil)
+	assert.NoError(t, err)
+
+	// Act
+	validatedKey, err := authService.ValidateAPIKey(rawKey)
+
+	// Assert - should still succeed even if UpdateLastUsed fails
+	assert.NoError(t, err)
+	assert.NotNil(t, validatedKey)
+}
+
+func TestHashAPIKey_Deterministic(t *testing.T) {
+	// Arrange
+	rawKey := "nori_test1234567890abcdef"
+
+	// Act
+	hash1 := hashAPIKey(rawKey)
+	hash2 := hashAPIKey(rawKey)
+
+	// Assert - same input should produce same hash
+	assert.Equal(t, hash1, hash2, "Hash function should be deterministic")
+	assert.NotEmpty(t, hash1)
+}
+
+func TestHashAPIKey_Different(t *testing.T) {
+	// Arrange
+	rawKey1 := "nori_test1234567890abcdef"
+	rawKey2 := "nori_different_key_value"
+
+	// Act
+	hash1 := hashAPIKey(rawKey1)
+	hash2 := hashAPIKey(rawKey2)
+
+	// Assert - different inputs should produce different hashes
+	assert.NotEqual(t, hash1, hash2, "Different keys should produce different hashes")
 }

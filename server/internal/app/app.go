@@ -29,6 +29,7 @@ func New(cfg *config.Config) *App {
 	userRepo := repositories.NewUserRepository(database.DB)
 	accountRepo := repositories.NewAccountRepository(database.DB)
 	userAccountRepo := repositories.NewUserAccountRepository(database.DB)
+	apiKeyRepo := repositories.NewAPIKeyRepository(database.DB)
 	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
 	sopVersionRepo := repositories.NewSOPVersionRepository(database.DB)
 	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
@@ -64,7 +65,7 @@ func New(cfg *config.Config) *App {
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
 	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, services.NewSpaceTemplateService(ticketTypeRepo, statusDefRepo, sopCategoryRepo))
-	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, spaceService, cfg.JWTSecret)
+	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 
 	// Initialize tus service for chunked uploads
 	tusService, err := services.NewTusService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)

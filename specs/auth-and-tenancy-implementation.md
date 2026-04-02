@@ -56,9 +56,9 @@ Each item is a small, committable unit of work. Work top-down.
   - Add `ActiveSpaceID` claim to JWT (optional, from `X-Space-ID` or
     RecentSpaces)
 
-- [ ] **Add API key authentication path**
+- [x] **Add API key authentication path**
   - Generate keys with `nori_` prefix + random bytes
-  - Hash with bcrypt before storing
+  - Hash with SHA256 before storing (deterministic hash for lookup)
   - On auth, detect `nori_` prefix → look up by hash → validate active/expiry
   - Update `LastUsedAt` on successful auth
 

@@ -24,6 +24,7 @@ func AuthMiddleware() fiber.Handler {
 		userRepo := repositories.NewUserRepository(database.DB)
 		accountRepo := repositories.NewAccountRepository(database.DB)
 		userAccountRepo := repositories.NewUserAccountRepository(database.DB)
+		apiKeyRepo := repositories.NewAPIKeyRepository(database.DB)
 
 		// Get JWT secret from environment
 		jwtSecret := os.Getenv("NORI_JWT_SECRET")
@@ -32,7 +33,7 @@ func AuthMiddleware() fiber.Handler {
 		}
 
 		// Services
-		authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, nil, jwtSecret)
+		authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, nil, jwtSecret)
 
 		authDTO, err := authService.Authenticate(authHeader)
 		if err != nil {

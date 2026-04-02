@@ -1,6 +1,9 @@
 package services
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log"
 	"strings"
@@ -14,19 +17,31 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// APIKeyRepositoryInterface defines the methods needed from an API key repository
+type APIKeyRepositoryInterface interface {
+	Create(apiKey *models.APIKey) error
+	GetByKeyHash(keyHash string) (*models.APIKey, error)
+	GetByAccount(accountID uuid.UUID) ([]models.APIKey, error)
+	Deactivate(id uuid.UUID) error
+	Delete(id uuid.UUID) error
+	UpdateLastUsed(id uuid.UUID) error
+}
+
 type AuthService struct {
 	userRepository        *repositories.UserRepository
 	accountRepository     *repositories.AccountRepository
 	userAccountRepository *repositories.UserAccountRepository
+	apiKeyRepository      APIKeyRepositoryInterface
 	spaceService          *SpaceService
 	jwtSecret             []byte
 }
 
-func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, spaceService *SpaceService, jwtSecret string) *AuthService {
+func NewAuthService(userRepository *repositories.UserRepository, accountRepository *repositories.AccountRepository, userAccountRepository *repositories.UserAccountRepository, apiKeyRepository APIKeyRepositoryInterface, spaceService *SpaceService, jwtSecret string) *AuthService {
 	return &AuthService{
 		userRepository:        userRepository,
 		accountRepository:     accountRepository,
 		userAccountRepository: userAccountRepository,
+		apiKeyRepository:      apiKeyRepository,
 		spaceService:          spaceService,
 		jwtSecret:             []byte(jwtSecret),
 	}
@@ -265,4 +280,80 @@ func (s *AuthService) CreateAccount(name string, createdByUserId uuid.UUID, plan
 
 func ptrString(s string) *string {
 	return &s
+}
+
+// hashAPIKey creates a SHA256 hash of the API key for storage and lookup
+func hashAPIKey(rawKey string) string {
+	hash := sha256.Sum256([]byte(rawKey))
+	return hex.EncodeToString(hash[:])
+}
+
+// GenerateAPIKey creates a new API key with the "nori_" prefix and returns the raw key
+// The raw key is returned only once; the hash is stored in the database
+func (s *AuthService) GenerateAPIKey(accountID uuid.UUID, name string, createdByID uuid.UUID, expiresAt *time.Time) (rawKey string, apiKey *models.APIKey, err error) {
+	// Generate random bytes for the key
+	randomBytes := make([]byte, 32) // 32 bytes = 64 hex characters
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", nil, errors.New("failed to generate random key")
+	}
+
+	// Create raw key with "nori_" prefix
+	rawKey = "nori_" + hex.EncodeToString(randomBytes)
+
+	// Hash the raw key with SHA256 for storage
+	keyHash := hashAPIKey(rawKey)
+
+	// Create APIKey model
+	apiKey = &models.APIKey{
+		ID:          uuid.New(),
+		AccountID:   accountID,
+		Name:        name,
+		KeyHash:     keyHash,
+		ExpiresAt:   expiresAt,
+		IsActive:    true,
+		CreatedByID: createdByID,
+	}
+
+	// Save to database
+	if err := s.apiKeyRepository.Create(apiKey); err != nil {
+		return "", nil, err
+	}
+
+	return rawKey, apiKey, nil
+}
+
+// ValidateAPIKey checks if an API key is valid, active, and not expired
+// Returns the APIKey model and updates LastUsedAt
+func (s *AuthService) ValidateAPIKey(rawKey string) (*models.APIKey, error) {
+	// Check for "nori_" prefix
+	if !strings.HasPrefix(rawKey, "nori_") {
+		return nil, errors.New("invalid API key format")
+	}
+
+	// Hash the provided key for lookup
+	keyHash := hashAPIKey(rawKey)
+
+	// Look up the API key by hash
+	apiKey, err := s.apiKeyRepository.GetByKeyHash(keyHash)
+	if err != nil {
+		return nil, errors.New("invalid API key")
+	}
+
+	// Check if the key is active
+	if !apiKey.IsActive {
+		return nil, errors.New("API key is inactive")
+	}
+
+	// Check if the key has expired
+	if apiKey.ExpiresAt != nil && apiKey.ExpiresAt.Before(time.Now()) {
+		return nil, errors.New("API key has expired")
+	}
+
+	// Update LastUsedAt timestamp
+	if err := s.apiKeyRepository.UpdateLastUsed(apiKey.ID); err != nil {
+		log.Printf("Failed to update API key last used timestamp: %v", err)
+		// Don't fail authentication if we can't update the timestamp
+	}
+
+	return apiKey, nil
 }
