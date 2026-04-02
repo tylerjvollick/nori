@@ -232,9 +232,9 @@ func (s *AuthService) CreateUser(firstName, lastName, email, password string, cr
 	return user, nil
 }
 
-func (s *AuthService) CreateAccount(billingEmail string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
+func (s *AuthService) CreateAccount(name string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
 	// save account
-	account, err := s.accountRepository.Create(billingEmail, createdByUserId, plan)
+	account, err := s.accountRepository.Create(name, createdByUserId, plan)
 	if err != nil {
 		return nil, err
 	}

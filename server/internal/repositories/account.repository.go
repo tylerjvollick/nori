@@ -19,13 +19,12 @@ func (r *AccountRepository) CreateAccount(account *models.Account) error {
 	return r.db.Create(account).Error
 }
 
-func (r *AccountRepository) Create(billingEmail string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
+func (r *AccountRepository) Create(name string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
 	// create account object
-
 	account := &models.Account{
 		ID:              uuid.New(),
 		CreatedByUserID: createdByUserId,
-		BillingEmail:    utils.PtrString(billingEmail),
+		Name:            utils.PtrString(name),
 		Plan:            plan,
 	}
 

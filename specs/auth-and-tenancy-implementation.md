@@ -18,7 +18,7 @@ Each item is a small, committable unit of work. Work top-down.
   - Rename `GlobalRole` to `Role` with values `admin` / `user` (drop `viewer`)
   - Add GORM migration for the new/renamed fields
 
-- [ ] **Simplify Account model**
+- [x] **Simplify Account model**
   - Drop billing/contact fields for v1 (or mark as nullable/unused)
   - Keep `Name`, `Plan`, `CreatedByUserID`
   - Add migration
