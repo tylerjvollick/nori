@@ -111,7 +111,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 7. First Boot / Seed
 
-- [ ] **Implement first-boot seed logic**
+- [x] **Implement first-boot seed logic**
   - On startup, check if any Account exists in the database
   - If none: create Account, create admin User with env credentials,
     set `MustChangePassword = true`

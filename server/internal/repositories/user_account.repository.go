@@ -28,6 +28,21 @@ func (r *UserAccountRepository) Create(userID uuid.UUID, accountID uuid.UUID) (*
 	return record, nil
 }
 
+// CreateWithRole creates a UserAccount record with a specific role
+func (r *UserAccountRepository) CreateWithRole(userID uuid.UUID, accountID uuid.UUID, role models.Role) (*models.UserAccount, error) {
+	record := &models.UserAccount{
+		UserID:    userID,
+		AccountID: accountID,
+		Role:      role,
+	}
+
+	if err := r.db.Create(record).Error; err != nil {
+		return nil, err
+	}
+
+	return record, nil
+}
+
 // GetByAccountID returns all UserAccount records for the specified account
 func (r *UserAccountRepository) GetByAccountID(accountID uuid.UUID) ([]models.UserAccount, error) {
 	var userAccounts []models.UserAccount

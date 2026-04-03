@@ -19,6 +19,13 @@ func (r *AccountRepository) CreateAccount(account *models.Account) error {
 	return r.db.Create(account).Error
 }
 
+// Count returns the number of accounts in the database
+func (r *AccountRepository) Count() (int64, error) {
+	var count int64
+	err := r.db.Model(&models.Account{}).Count(&count).Error
+	return count, err
+}
+
 func (r *AccountRepository) Create(name string, createdByUserId uuid.UUID, plan models.Plan) (*models.Account, error) {
 	// create account object
 	account := &models.Account{

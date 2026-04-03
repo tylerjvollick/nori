@@ -62,6 +62,12 @@ func New(cfg *config.Config) *App {
 	allowedMimeTypesStr := os.Getenv("ALLOWED_MIME_TYPES")
 	allowedMimeTypes := services.ParseAllowedMimeTypes(allowedMimeTypesStr)
 
+	// First-boot seed
+	seedService := services.NewSeedService(accountRepo, userRepo, accountRepo, userAccountRepo, cfg)
+	if err := seedService.SeedIfNeeded(); err != nil {
+		log.Fatal("Failed to seed database: " + err.Error())
+	}
+
 	// Services
 	userService := services.NewUserService(userRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
