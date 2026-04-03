@@ -134,7 +134,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `GET /api/auth/me` — return current user, role, active Space, list of
     accessible Spaces
 
-- [ ] **Add logout endpoint**
+- [x] **Add logout endpoint**
   - `POST /api/auth/logout` — clear the HTTP-only cookie
 
 ## 9. Space Scoping

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -656,6 +657,109 @@ func TestChangePassword_InternalError(t *testing.T) {
 	body := parseJSON(t, resp)
 	assert.Equal(t, "failed to change password", body["error"],
 		"should not leak internal error details")
+}
+
+// ---------------------------------------------------------------------------
+// Logout helpers
+// ---------------------------------------------------------------------------
+
+// setupLogoutApp creates a Fiber app with the logout route wired to a fake
+// auth middleware that injects the given authDTO.
+func setupLogoutApp(authDTO *dtos.AuthDTO) *fiber.App {
+	app := fiber.New()
+	handler := NewAuthHandler(nil, nil, nil)
+	handler.RegisterProtectedAuthRoutes(app, fakeAuthMiddleware(authDTO))
+	return app
+}
+
+// doLogout sends a POST /auth/logout request and returns the response.
+func doLogout(t *testing.T, app *fiber.App) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	return resp
+}
+
+// ---------------------------------------------------------------------------
+// Logout route registration
+// ---------------------------------------------------------------------------
+
+func TestLogoutRoute_ShouldBeRegistered(t *testing.T) {
+	app := fiber.New()
+	handler := NewAuthHandler(nil, nil, nil)
+	noopMiddleware := func(c *fiber.Ctx) error { return c.Next() }
+	handler.RegisterProtectedAuthRoutes(app, noopMiddleware)
+
+	routes := app.GetRoutes()
+	var found bool
+	for _, route := range routes {
+		if route.Path == "/auth/logout" && route.Method == "POST" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "POST /auth/logout route should be registered")
+}
+
+// ---------------------------------------------------------------------------
+// Logout behaviour tests
+// ---------------------------------------------------------------------------
+
+func TestLogout_Success(t *testing.T) {
+	user := newTestUser("alice@example.com", "password", false)
+	authDTO := &dtos.AuthDTO{User: *user}
+	app := setupLogoutApp(authDTO)
+
+	resp := doLogout(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Equal(t, "logged out", body["message"])
+}
+
+func TestLogout_ClearsCookie(t *testing.T) {
+	user := newTestUser("alice@example.com", "password", false)
+	authDTO := &dtos.AuthDTO{User: *user}
+	app := setupLogoutApp(authDTO)
+
+	resp := doLogout(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// The nori_token cookie should be set with an empty value and past expiry
+	cookies := resp.Cookies()
+	var noriCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == "nori_token" {
+			noriCookie = c
+			break
+		}
+	}
+	require.NotNil(t, noriCookie, "nori_token cookie should be present in response")
+	assert.Empty(t, noriCookie.Value, "cookie value should be empty")
+	assert.True(t, noriCookie.HttpOnly, "cookie should remain HTTP-only")
+	assert.Equal(t, "/", noriCookie.Path)
+	assert.True(t, noriCookie.Expires.Before(time.Now()),
+		"cookie expiry should be in the past to clear it from the browser")
+}
+
+func TestLogout_NoAuthDTO(t *testing.T) {
+	// When no authDTO is injected (nil), the middleware still passes through
+	// because our fake middleware doesn't block. The handler itself doesn't
+	// need to inspect the user — it just clears the cookie.
+	app := setupLogoutApp(nil)
+
+	resp := doLogout(t, app)
+
+	// Even without auth context, the handler clears the cookie and returns OK.
+	// In production, the real auth middleware would reject unauthenticated
+	// requests before they reach this handler.
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Equal(t, "logged out", body["message"])
 }
 
 // ---------------------------------------------------------------------------

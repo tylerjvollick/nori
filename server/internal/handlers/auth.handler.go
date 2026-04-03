@@ -38,6 +38,7 @@ func (h *AuthHandler) RegisterAuthRoutes(app *fiber.App) {
 func (h *AuthHandler) RegisterProtectedAuthRoutes(app *fiber.App, authMiddleware fiber.Handler) {
 	auth := app.Group("/auth", authMiddleware)
 	auth.Post("/change-password", h.ChangePassword)
+	auth.Post("/logout", h.Logout)
 	auth.Get("/me", h.Me)
 }
 
@@ -171,6 +172,28 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		Role:             user.Role,
 		ActiveSpaceID:    authDTO.ActiveSpaceID,
 		AccessibleSpaces: spacesDTOs,
+	})
+}
+
+// Logout handles POST /auth/logout.
+// Clears the HTTP-only nori_token cookie, effectively ending the browser session.
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	clearAuthCookie(c)
+	return c.Status(http.StatusOK).JSON(fiber.Map{
+		"message": "logged out",
+	})
+}
+
+// clearAuthCookie expires the nori_token cookie immediately, clearing the session.
+func clearAuthCookie(c *fiber.Ctx) {
+	c.Cookie(&fiber.Cookie{
+		Name:     "nori_token",
+		Value:    "",
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		SameSite: "Lax",
+		Expires:  time.Now().Add(-1 * time.Hour), // expired
 	})
 }
 
