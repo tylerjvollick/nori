@@ -233,7 +233,7 @@ func TestAuthMiddleware_JWT_Cookie(t *testing.T) {
 
 	// Make request with cookie
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req.Header.Set("Cookie", "auth_token="+token)
+	req.Header.Set("Cookie", "nori_token="+token)
 
 	resp, err := app.Test(req)
 	assert.NoError(t, err)

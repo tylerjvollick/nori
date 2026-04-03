@@ -161,7 +161,7 @@ func (s *AuthService) Login(email, password string) (*LoginResponse, error) {
 	user, err := s.userRepository.GetUserByEmail(email)
 	if err != nil {
 		// TODO: handle error in same line as failed password.
-		return nil, errors.New("inNvalid email or password")
+		return nil, errors.New("invalid email or password")
 	}
 
 	// if user is found validate password

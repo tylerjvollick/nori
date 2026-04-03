@@ -99,7 +99,7 @@ func extractToken(c *fiber.Ctx) string {
 	}
 
 	// Fall back to cookie
-	return c.Cookies("auth_token")
+	return c.Cookies("nori_token")
 }
 
 // authenticateWithJWT validates a JWT token and returns the authDTO

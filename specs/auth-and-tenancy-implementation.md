@@ -120,7 +120,7 @@ Each item is a small, committable unit of work. Work top-down.
 
 ## 8. Login and Session Endpoints
 
-- [ ] **Refactor login endpoint**
+- [x] **Refactor login endpoint**
   - `POST /api/auth/login` — validate credentials, return JWT as HTTP-only
     cookie + JSON body
   - If `MustChangePassword`, return a flag in the response so the client
