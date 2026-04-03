@@ -104,7 +104,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `DELETE /api/admin/spaces/:id/members/:userId` — remove user from Space
   - `GET /api/admin/spaces/:id/members` — list Space members
 
-- [ ] **Create API key management endpoints**
+- [x] **Create API key management endpoints**
   - `POST /api/admin/api-keys` — create key (return raw key once)
   - `GET /api/admin/api-keys` — list keys (name, last used, active status)
   - `DELETE /api/admin/api-keys/:id` — deactivate/delete key
