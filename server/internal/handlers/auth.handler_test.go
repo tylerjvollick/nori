@@ -85,7 +85,7 @@ func newTestUser(email, password string, mustChange bool) *models.User {
 func setupLoginApp(mock *mockUserRepo) *fiber.App {
 	app := fiber.New()
 	authService := services.NewAuthService(mock, nil, nil, nil, nil, testJWTSecret)
-	handler := NewAuthHandler(authService)
+	handler := NewAuthHandler(authService, nil, nil)
 	handler.RegisterAuthRoutes(app)
 	return app
 }
@@ -124,7 +124,7 @@ func TestRegisterEndpoint_ShouldBeDisabled(t *testing.T) {
 	app := fiber.New()
 
 	authService := services.NewAuthService(nil, nil, nil, nil, nil, testJWTSecret)
-	authHandler := NewAuthHandler(authService)
+	authHandler := NewAuthHandler(authService, nil, nil)
 	authHandler.RegisterAuthRoutes(app)
 
 	requestBody := map[string]string{
@@ -148,7 +148,7 @@ func TestRegisterEndpoint_ShouldBeDisabled(t *testing.T) {
 func TestLoginEndpoint_ShouldStillExist(t *testing.T) {
 	app := fiber.New()
 
-	authHandler := NewAuthHandler(nil)
+	authHandler := NewAuthHandler(nil, nil, nil)
 	authHandler.RegisterAuthRoutes(app)
 
 	routes := app.GetRoutes()
@@ -356,7 +356,7 @@ func fakeAuthMiddleware(authDTO *dtos.AuthDTO) fiber.Handler {
 func setupChangePasswordApp(mock *mockUserRepo, authDTO *dtos.AuthDTO) *fiber.App {
 	app := fiber.New()
 	authService := services.NewAuthService(mock, nil, nil, nil, nil, testJWTSecret)
-	handler := NewAuthHandler(authService)
+	handler := NewAuthHandler(authService, nil, nil)
 	handler.RegisterProtectedAuthRoutes(app, fakeAuthMiddleware(authDTO))
 	return app
 }
@@ -381,7 +381,7 @@ func doChangePassword(t *testing.T, app *fiber.App, body interface{}) *http.Resp
 
 func TestChangePasswordRoute_ShouldBeRegistered(t *testing.T) {
 	app := fiber.New()
-	handler := NewAuthHandler(nil)
+	handler := NewAuthHandler(nil, nil, nil)
 	noopMiddleware := func(c *fiber.Ctx) error { return c.Next() }
 	handler.RegisterProtectedAuthRoutes(app, noopMiddleware)
 
@@ -656,4 +656,423 @@ func TestChangePassword_InternalError(t *testing.T) {
 	body := parseJSON(t, resp)
 	assert.Equal(t, "failed to change password", body["error"],
 		"should not leak internal error details")
+}
+
+// ---------------------------------------------------------------------------
+// Me endpoint mock repos
+// ---------------------------------------------------------------------------
+
+// mockMeSpaceMemberRepo implements SpaceMemberRepositoryInterface for /auth/me tests.
+type mockMeSpaceMemberRepo struct {
+	getByUserFunc func(userID uuid.UUID) ([]models.Space, error)
+}
+
+func (m *mockMeSpaceMemberRepo) Create(*models.SpaceMember) error {
+	return errors.New("not implemented")
+}
+func (m *mockMeSpaceMemberRepo) Delete(uuid.UUID, uuid.UUID) error {
+	return errors.New("not implemented")
+}
+func (m *mockMeSpaceMemberRepo) GetByUserAndSpace(uuid.UUID, uuid.UUID) (*models.SpaceMember, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMeSpaceMemberRepo) GetByUser(userID uuid.UUID) ([]models.Space, error) {
+	if m.getByUserFunc != nil {
+		return m.getByUserFunc(userID)
+	}
+	return nil, nil
+}
+func (m *mockMeSpaceMemberRepo) GetBySpace(uuid.UUID) ([]models.SpaceMember, error) {
+	return nil, errors.New("not implemented")
+}
+
+// mockMeSpaceRepo implements SpaceRepositoryInterface for /auth/me tests.
+type mockMeSpaceRepo struct {
+	findByAccountIDFunc func(accountID uuid.UUID) ([]models.Space, error)
+}
+
+func (m *mockMeSpaceRepo) FindByID(uuid.UUID) (*models.Space, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMeSpaceRepo) FindByAccountID(accountID uuid.UUID) ([]models.Space, error) {
+	if m.findByAccountIDFunc != nil {
+		return m.findByAccountIDFunc(accountID)
+	}
+	return nil, nil
+}
+
+// ---------------------------------------------------------------------------
+// Me endpoint helpers
+// ---------------------------------------------------------------------------
+
+// setupMeApp creates a Fiber app with the /auth/me route wired to mock repos
+// and a fake auth middleware that injects the given authDTO.
+func setupMeApp(
+	authDTO *dtos.AuthDTO,
+	spaceMemberRepo SpaceMemberRepositoryInterface,
+	spaceRepo SpaceRepositoryInterface,
+) *fiber.App {
+	app := fiber.New()
+	handler := NewAuthHandler(nil, spaceMemberRepo, spaceRepo)
+	handler.RegisterProtectedAuthRoutes(app, fakeAuthMiddleware(authDTO))
+	return app
+}
+
+// doMe sends a GET /auth/me request and returns the response.
+func doMe(t *testing.T, app *fiber.App) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	resp, err := app.Test(req)
+	require.NoError(t, err)
+	return resp
+}
+
+// ---------------------------------------------------------------------------
+// Me route registration
+// ---------------------------------------------------------------------------
+
+func TestMeRoute_ShouldBeRegistered(t *testing.T) {
+	app := fiber.New()
+	handler := NewAuthHandler(nil, nil, nil)
+	noopMiddleware := func(c *fiber.Ctx) error { return c.Next() }
+	handler.RegisterProtectedAuthRoutes(app, noopMiddleware)
+
+	routes := app.GetRoutes()
+	var found bool
+	for _, route := range routes {
+		if route.Path == "/auth/me" && route.Method == "GET" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "GET /auth/me route should be registered")
+}
+
+// ---------------------------------------------------------------------------
+// Me behaviour tests
+// ---------------------------------------------------------------------------
+
+func TestMe_AdminSuccess(t *testing.T) {
+	adminRole := models.RoleAdmin
+	accountID := uuid.New()
+	activeSpaceID := uuid.New()
+	first := "Admin"
+	last := "User"
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:        uuid.New(),
+			Email:     "admin@example.com",
+			FirstName: &first,
+			LastName:  &last,
+			Role:      &adminRole,
+		},
+		AccountID:     accountID,
+		ActiveSpaceID: &activeSpaceID,
+	}
+
+	space1 := models.Space{
+		ID:        activeSpaceID,
+		Name:      "Production",
+		AccountID: accountID,
+		IsDefault: true,
+	}
+	space2 := models.Space{
+		ID:        uuid.New(),
+		Name:      "Sales",
+		AccountID: accountID,
+		IsDefault: false,
+	}
+
+	spaceRepo := &mockMeSpaceRepo{
+		findByAccountIDFunc: func(id uuid.UUID) ([]models.Space, error) {
+			assert.Equal(t, accountID, id)
+			return []models.Space{space1, space2}, nil
+		},
+	}
+
+	app := setupMeApp(authDTO, &mockMeSpaceMemberRepo{}, spaceRepo)
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+
+	assert.Equal(t, authDTO.User.ID.String(), body["id"])
+	assert.Equal(t, "admin@example.com", body["email"])
+	assert.Equal(t, "Admin", body["firstName"])
+	assert.Equal(t, "User", body["lastName"])
+	assert.Equal(t, "admin", body["role"])
+	assert.Equal(t, activeSpaceID.String(), body["activeSpaceId"])
+
+	spaces, ok := body["accessibleSpaces"].([]interface{})
+	require.True(t, ok, "accessibleSpaces should be an array")
+	assert.Len(t, spaces, 2)
+
+	// Verify first space
+	s1 := spaces[0].(map[string]interface{})
+	assert.Equal(t, space1.ID.String(), s1["id"])
+	assert.Equal(t, "Production", s1["name"])
+	assert.Equal(t, accountID.String(), s1["accountId"])
+	assert.Equal(t, true, s1["isDefault"])
+}
+
+func TestMe_RegularUserSuccess(t *testing.T) {
+	userRole := models.RoleUser
+	accountID := uuid.New()
+	activeSpaceID := uuid.New()
+	first := "Regular"
+	last := "User"
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:        uuid.New(),
+			Email:     "user@example.com",
+			FirstName: &first,
+			LastName:  &last,
+			Role:      &userRole,
+		},
+		AccountID:     accountID,
+		ActiveSpaceID: &activeSpaceID,
+	}
+
+	memberSpace := models.Space{
+		ID:        activeSpaceID,
+		Name:      "Workshop",
+		AccountID: accountID,
+		IsDefault: false,
+	}
+
+	spaceMemberRepo := &mockMeSpaceMemberRepo{
+		getByUserFunc: func(userID uuid.UUID) ([]models.Space, error) {
+			assert.Equal(t, authDTO.User.ID, userID)
+			return []models.Space{memberSpace}, nil
+		},
+	}
+
+	// spaceRepo should NOT be called for regular users
+	spaceRepo := &mockMeSpaceRepo{
+		findByAccountIDFunc: func(uuid.UUID) ([]models.Space, error) {
+			t.Error("FindByAccountID should not be called for regular users")
+			return nil, nil
+		},
+	}
+
+	app := setupMeApp(authDTO, spaceMemberRepo, spaceRepo)
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+
+	assert.Equal(t, authDTO.User.ID.String(), body["id"])
+	assert.Equal(t, "user@example.com", body["email"])
+	assert.Equal(t, "Regular", body["firstName"])
+	assert.Equal(t, "User", body["lastName"])
+	assert.Equal(t, "user", body["role"])
+	assert.Equal(t, activeSpaceID.String(), body["activeSpaceId"])
+
+	spaces, ok := body["accessibleSpaces"].([]interface{})
+	require.True(t, ok, "accessibleSpaces should be an array")
+	assert.Len(t, spaces, 1)
+	s1 := spaces[0].(map[string]interface{})
+	assert.Equal(t, memberSpace.ID.String(), s1["id"])
+	assert.Equal(t, "Workshop", s1["name"])
+}
+
+func TestMe_NoActiveSpace(t *testing.T) {
+	userRole := models.RoleUser
+	first := "New"
+	last := "User"
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:        uuid.New(),
+			Email:     "new@example.com",
+			FirstName: &first,
+			LastName:  &last,
+			Role:      &userRole,
+		},
+		AccountID:     uuid.New(),
+		ActiveSpaceID: nil, // no active space
+	}
+
+	app := setupMeApp(authDTO, &mockMeSpaceMemberRepo{}, &mockMeSpaceRepo{})
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+
+	assert.Equal(t, authDTO.User.ID.String(), body["id"])
+	// activeSpaceId should be absent (omitempty)
+	_, hasActiveSpace := body["activeSpaceId"]
+	assert.False(t, hasActiveSpace, "activeSpaceId should be omitted when nil")
+
+	spaces, ok := body["accessibleSpaces"].([]interface{})
+	require.True(t, ok, "accessibleSpaces should be an array")
+	assert.Len(t, spaces, 0, "should be empty when user has no space memberships")
+}
+
+func TestMe_NoAuthDTO(t *testing.T) {
+	app := setupMeApp(nil, &mockMeSpaceMemberRepo{}, &mockMeSpaceRepo{})
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Contains(t, body["error"], "authentication required")
+}
+
+func TestMe_NilRole(t *testing.T) {
+	// A user with no role set — should behave like a regular user
+	first := "No"
+	last := "Role"
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:        uuid.New(),
+			Email:     "norole@example.com",
+			FirstName: &first,
+			LastName:  &last,
+			Role:      nil,
+		},
+		AccountID:     uuid.New(),
+		ActiveSpaceID: nil,
+	}
+
+	calledGetByUser := false
+	spaceMemberRepo := &mockMeSpaceMemberRepo{
+		getByUserFunc: func(userID uuid.UUID) ([]models.Space, error) {
+			calledGetByUser = true
+			return nil, nil
+		},
+	}
+
+	app := setupMeApp(authDTO, spaceMemberRepo, &mockMeSpaceRepo{})
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, calledGetByUser, "should use GetByUser for nil role (not FindByAccountID)")
+
+	body := parseJSON(t, resp)
+	assert.Nil(t, body["role"], "role should be null when not set")
+}
+
+func TestMe_SpaceQueryError(t *testing.T) {
+	adminRole := models.RoleAdmin
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:    uuid.New(),
+			Email: "admin@example.com",
+			Role:  &adminRole,
+		},
+		AccountID: uuid.New(),
+	}
+
+	spaceRepo := &mockMeSpaceRepo{
+		findByAccountIDFunc: func(uuid.UUID) ([]models.Space, error) {
+			return nil, errors.New("database connection lost")
+		},
+	}
+
+	app := setupMeApp(authDTO, &mockMeSpaceMemberRepo{}, spaceRepo)
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Equal(t, "failed to fetch accessible spaces", body["error"],
+		"should not leak internal error details")
+}
+
+func TestMe_RegularUserSpaceQueryError(t *testing.T) {
+	userRole := models.RoleUser
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:    uuid.New(),
+			Email: "user@example.com",
+			Role:  &userRole,
+		},
+		AccountID: uuid.New(),
+	}
+
+	spaceMemberRepo := &mockMeSpaceMemberRepo{
+		getByUserFunc: func(uuid.UUID) ([]models.Space, error) {
+			return nil, errors.New("database connection lost")
+		},
+	}
+
+	app := setupMeApp(authDTO, spaceMemberRepo, &mockMeSpaceRepo{})
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Equal(t, "failed to fetch accessible spaces", body["error"],
+		"should not leak internal error details")
+}
+
+func TestMe_EmptyAccessibleSpaces(t *testing.T) {
+	adminRole := models.RoleAdmin
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:    uuid.New(),
+			Email: "admin@example.com",
+			Role:  &adminRole,
+		},
+		AccountID: uuid.New(),
+	}
+
+	spaceRepo := &mockMeSpaceRepo{
+		findByAccountIDFunc: func(uuid.UUID) ([]models.Space, error) {
+			return []models.Space{}, nil // no spaces exist
+		},
+	}
+
+	app := setupMeApp(authDTO, &mockMeSpaceMemberRepo{}, spaceRepo)
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	spaces, ok := body["accessibleSpaces"].([]interface{})
+	require.True(t, ok, "accessibleSpaces should be an array")
+	assert.Len(t, spaces, 0, "accessibleSpaces should be an empty array, not null")
+}
+
+func TestMe_OptionalFieldsOmitted(t *testing.T) {
+	userRole := models.RoleUser
+
+	authDTO := &dtos.AuthDTO{
+		User: models.User{
+			ID:        uuid.New(),
+			Email:     "minimal@example.com",
+			Role:      &userRole,
+			FirstName: nil, // not set
+			LastName:  nil, // not set
+		},
+		AccountID:     uuid.New(),
+		ActiveSpaceID: nil, // no active space
+	}
+
+	app := setupMeApp(authDTO, &mockMeSpaceMemberRepo{}, &mockMeSpaceRepo{})
+	resp := doMe(t, app)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := parseJSON(t, resp)
+	assert.Equal(t, authDTO.User.ID.String(), body["id"])
+	assert.Equal(t, "minimal@example.com", body["email"])
+
+	// firstName, lastName, activeSpaceId should be omitted
+	_, hasFirst := body["firstName"]
+	_, hasLast := body["lastName"]
+	_, hasActive := body["activeSpaceId"]
+	assert.False(t, hasFirst, "firstName should be omitted when nil")
+	assert.False(t, hasLast, "lastName should be omitted when nil")
+	assert.False(t, hasActive, "activeSpaceId should be omitted when nil")
 }

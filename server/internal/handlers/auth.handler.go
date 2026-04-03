@@ -7,15 +7,22 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/tylerjvollick/nori/internal/dtos"
+	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/services"
 )
 
 type AuthHandler struct {
-	authService *services.AuthService
+	authService     *services.AuthService
+	spaceMemberRepo SpaceMemberRepositoryInterface
+	spaceRepo       SpaceRepositoryInterface
 }
 
-func NewAuthHandler(authService *services.AuthService) *AuthHandler {
-	return &AuthHandler{authService: authService}
+func NewAuthHandler(authService *services.AuthService, spaceMemberRepo SpaceMemberRepositoryInterface, spaceRepo SpaceRepositoryInterface) *AuthHandler {
+	return &AuthHandler{
+		authService:     authService,
+		spaceMemberRepo: spaceMemberRepo,
+		spaceRepo:       spaceRepo,
+	}
 }
 
 // RegisterAuthRoutes registers public auth routes (no auth middleware required).
@@ -31,6 +38,7 @@ func (h *AuthHandler) RegisterAuthRoutes(app *fiber.App) {
 func (h *AuthHandler) RegisterProtectedAuthRoutes(app *fiber.App, authMiddleware fiber.Handler) {
 	auth := app.Group("/auth", authMiddleware)
 	auth.Post("/change-password", h.ChangePassword)
+	auth.Get("/me", h.Me)
 }
 
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
@@ -108,6 +116,62 @@ func (h *AuthHandler) ChangePassword(c *fiber.Ctx) error {
 	setAuthCookie(c, loginResponse.AccessToken)
 
 	return c.Status(http.StatusOK).JSON(loginResponse)
+}
+
+// Me handles GET /auth/me.
+// Returns the current user's info, role, active space, and list of accessible spaces.
+// Admin users see all spaces in the account; regular users see only their memberships.
+func (h *AuthHandler) Me(c *fiber.Ctx) error {
+	authDTO, ok := c.Locals("authDTO").(*dtos.AuthDTO)
+	if !ok || authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "authentication required",
+		})
+	}
+
+	user := authDTO.User
+
+	// Determine accessible spaces based on role
+	var spaces []models.Space
+	var err error
+
+	if user.Role != nil && *user.Role == models.RoleAdmin {
+		// Admins have implicit access to all spaces in the account
+		spaces, err = h.spaceRepo.FindByAccountID(authDTO.AccountID)
+	} else {
+		// Regular users only see spaces they're members of
+		spaces, err = h.spaceMemberRepo.GetByUser(user.ID)
+	}
+
+	if err != nil {
+		log.Println("Failed to fetch accessible spaces:", err)
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to fetch accessible spaces",
+		})
+	}
+
+	// Convert spaces to response DTOs
+	spacesDTOs := make([]dtos.SpaceResponseDTO, len(spaces))
+	for i, s := range spaces {
+		spacesDTOs[i] = dtos.SpaceResponseDTO{
+			ID:        s.ID,
+			Name:      s.Name,
+			AccountID: s.AccountID,
+			IsDefault: s.IsDefault,
+			CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		}
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.MeResponseDTO{
+		ID:               user.ID,
+		Email:            user.Email,
+		FirstName:        user.FirstName,
+		LastName:         user.LastName,
+		Role:             user.Role,
+		ActiveSpaceID:    authDTO.ActiveSpaceID,
+		AccessibleSpaces: spacesDTOs,
+	})
 }
 
 // setAuthCookie sets the nori_token HTTP-only cookie with 30-day expiry.

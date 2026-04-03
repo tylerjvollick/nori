@@ -82,7 +82,7 @@ func New(cfg *config.Config) *App {
 	}
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(authService)
+	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
 	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
 	sopMediaHandler := handlers.NewSOPStepMediaHandler(sopMediaService)

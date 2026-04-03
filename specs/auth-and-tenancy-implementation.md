@@ -130,7 +130,7 @@ Each item is a small, committable unit of work. Work top-down.
   - `POST /api/auth/change-password` — requires current password + new
     password. Clears `MustChangePassword`, returns new JWT.
 
-- [ ] **Add session info endpoint**
+- [x] **Add session info endpoint**
   - `GET /api/auth/me` — return current user, role, active Space, list of
     accessible Spaces
 

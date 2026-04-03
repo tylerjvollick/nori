@@ -10,17 +10,19 @@ import (
 	"github.com/tylerjvollick/nori/internal/models"
 )
 
-// SpaceMemberRepositoryInterface defines the methods needed by the space member handler
+// SpaceMemberRepositoryInterface defines the methods needed by handlers
 type SpaceMemberRepositoryInterface interface {
 	Create(spaceMember *models.SpaceMember) error
 	Delete(userID, spaceID uuid.UUID) error
 	GetByUserAndSpace(userID, spaceID uuid.UUID) (*models.SpaceMember, error)
+	GetByUser(userID uuid.UUID) ([]models.Space, error)
 	GetBySpace(spaceID uuid.UUID) ([]models.SpaceMember, error)
 }
 
-// SpaceRepositoryInterface defines the methods needed by the space member handler
+// SpaceRepositoryInterface defines the methods needed by handlers
 type SpaceRepositoryInterface interface {
 	FindByID(id uuid.UUID) (*models.Space, error)
+	FindByAccountID(accountID uuid.UUID) ([]models.Space, error)
 }
 
 type AdminSpaceMemberHandler struct {

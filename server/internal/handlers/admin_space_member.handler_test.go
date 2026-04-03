@@ -83,6 +83,10 @@ func (m *mockSpaceMemberRepo) GetBySpace(spaceID uuid.UUID) ([]models.SpaceMembe
 	return result, nil
 }
 
+func (m *mockSpaceMemberRepo) GetByUser(userID uuid.UUID) ([]models.Space, error) {
+	return nil, nil
+}
+
 type mockSpaceRepo struct {
 	spaces map[uuid.UUID]*models.Space
 }
@@ -99,6 +103,16 @@ func (m *mockSpaceRepo) FindByID(id uuid.UUID) (*models.Space, error) {
 		return nil, errors.New("record not found")
 	}
 	return space, nil
+}
+
+func (m *mockSpaceRepo) FindByAccountID(accountID uuid.UUID) ([]models.Space, error) {
+	var result []models.Space
+	for _, space := range m.spaces {
+		if space.AccountID == accountID {
+			result = append(result, *space)
+		}
+	}
+	return result, nil
 }
 
 // --- Test helpers ---
