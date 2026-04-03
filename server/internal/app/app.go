@@ -111,6 +111,7 @@ func New(cfg *config.Config) *App {
 	authMiddleware := auth.NewAuthMiddleware(userRepo, apiKeyRepo, spaceMemberRepo, cfg.JWTSecret)
 	handlers.RegisterHealthRoutes(app, nil)
 	authHandler.RegisterAuthRoutes(app)
+	authHandler.RegisterProtectedAuthRoutes(app, authMiddleware)
 	userHandler.RegisterUserRoutes(app, authMiddleware)
 	sopHandler.RegisterSOPRoutes(app, authMiddleware)
 	sopMediaHandler.RegisterMediaRoutes(app)

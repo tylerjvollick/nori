@@ -126,7 +126,7 @@ Each item is a small, committable unit of work. Work top-down.
   - If `MustChangePassword`, return a flag in the response so the client
     knows to redirect
 
-- [ ] **Add password change endpoint**
+- [x] **Add password change endpoint**
   - `POST /api/auth/change-password` — requires current password + new
     password. Clears `MustChangePassword`, returns new JWT.
 
