@@ -3,178 +3,278 @@
 ## Who
 
 - **Shop owners / managers**: Monitor the flow board, identify bottlenecks,
-  manage WIP.
-- **Operators**: See their station's queue, pull work, move jobs forward.
+  manage WIP, approve gates.
+- **Operators**: See their ready work, pull tasks, track progress.
 
 ## What
 
-The production flow board — the central UI and workflow engine of Nori. Jobs
-move through Stations in a pull-based system inspired by the Theory of
-Constraints (drum-buffer-rope). This is what replaces Jira's Kanban board
-with something native to physical manufacturing.
+The production flow system — how work moves through the shop. Instead of the
+old station-column Kanban (push jobs left-to-right through stations), Nori uses
+a **dependency-graph pull system** inspired by beads' ready-work algorithm and
+the Theory of Constraints.
+
+Work is organized as Jobs (root Tasks) containing child Tasks with
+dependencies. The ready-work algorithm finds what's unblocked and available.
+Operators pull from the ready queue. WIP limits at stations enforce capacity.
 
 ## Where
 
-- Backend: Job model, job flow API endpoints, WIP enforcement logic
-- Frontend: Flow board page (the primary view operators see)
+- Backend: Task service, ready-work service, job flow API endpoints
+- Frontend: Flow board page (primary view for operators and managers)
 - Data model: see data-model.md
 
 ## Why
 
-A push system (Jira) creates WIP pileups — you keep starting work regardless
-of whether the next station can absorb it. This leads to long lead times, lost
-jobs, and invisible bottlenecks.
+A station-column Kanban (Jira-style) has problems for small-shop manufacturing:
 
-A pull system (Nori) means downstream stations signal when they're ready.
-Work only moves forward when there's capacity. The bottleneck becomes visible
-*on the board itself* — it's the column that's always full.
+1. **Jobs don't move linearly** — A dining table goes: table saw → jointer →
+   table saw → mortiser → assembly → finish. It bounces between stations based
+   on the recipe, not a fixed left-to-right flow.
+2. **Push creates WIP pileups** — You keep starting work regardless of
+   downstream capacity.
+3. **Dependencies are invisible** — "Can't finish the top until the base is
+   done" isn't representable in a column-based board.
 
-From *The Goal* (Goldratt):
-- **Drum**: The bottleneck station sets the pace for the entire shop.
-- **Buffer**: A small queue of work before the bottleneck protects it from
-  starvation (so it's never idle waiting for work).
-- **Rope**: A signal that ties the release of new work to the drum's actual
-  throughput (so you don't over-release).
+A dependency-graph pull system solves all three:
+- Tasks declare what they depend on. The graph handles any flow pattern.
+- Ready-work only surfaces unblocked tasks. Operators pull, never push.
+- WIP limits at stations make the bottleneck visible.
+
+From *The Goal* (Goldratt): the drum (bottleneck) sets the pace, the buffer
+protects it from starvation, and the rope ties new work release to actual
+throughput.
 
 ## How
 
-### Job Model
+### Flow Model
+
+There is no "board with columns." Instead, there are three views into the
+same task graph:
+
+#### 1. Ready Queue (operator's primary view)
+
+"What can I work on right now?"
 
 ```
-Job
-  - ID: uuid
-  - SpaceID: uuid
-  - OrderLineItemID: uuid (nullable — internal/maintenance jobs have no order)
-  - SOPTemplateVersionID: int (snapshot at job creation)
-  - CurrentStationID: uuid (nullable — null = in order queue, not yet released)
-  - Status: enum (queued, in_progress, blocked, completed, cancelled)
-  - Priority: int (lower number = higher priority)
-  - AssignedToID: uuid (nullable)
-  - StartedAt, CompletedAt: timestamps
-  - Notes: text
+Ready Work — Joinery Station
+─────────────────────────────
+1. [shop-a4b2.3] Cut mortises — Walnut Dining Table     (pri: 1, due: Apr 15)
+2. [shop-c7d1.2] Cut tenons — Cherry Side Table          (pri: 2, due: Apr 20)
+3. [shop-e9f3.1] Mill blanks — Cutting Board Set         (pri: 3, due: Apr 22)
 ```
 
-### Flow Board Layout
+Filtered by station (optional), sorted by priority → due date → creation date.
+Only shows tasks where all `blocks` dependencies are resolved.
+
+#### 2. Job View (manager's tracking view)
+
+"How is this job progressing?"
 
 ```
-[ORDER QUEUE] → [MILL: 2/3] → [JOINERY: 3/3 !] → [ASSEMBLY: 1/3] → [FINISH: 0/3] → [DONE]
+Job: shop-a4b2 — Walnut Dining Table (Order #042)
+──────────────────────────────────────────────────
+[done] .1 Mill lumber (45m)
+[done] .2 Joint and plane (30m)
+[active] .3 Cut mortises ← Tyler, 23m elapsed
+[open] .4 Cut tenons (blocked by .3)
+[open] .5 Dry fit (blocked by .3, .4)
+[open] .gate-qc QC: Joinery inspection (gate, blocked by .5)
+[open] .6 Glue up (blocked by .gate-qc)
+[open] .7 Apply finish (blocked by .6)
+
+Progress: 2/8 done, 1 active | Est. remaining: 3h 45m
 ```
 
-- One column per active Station, ordered by DisplayOrder.
-- First pseudo-column: **Order Queue** — confirmed jobs not yet released to
-  the floor. This is the "rope" holding area.
-- Last pseudo-column: **Done** — completed jobs.
-- Each column header shows: station name, current WIP / WIP limit.
-- Visual alarm when a station is at capacity (color change, icon).
+Shows the full task tree with dependency status, who's working on what, and
+time data.
+
+#### 3. Station View (capacity view)
+
+"What's happening at each station?"
+
+```
+Stations
+────────────────────────────────────────────────────────
+Table Saw    [2/3]  ██░  shop-a4b2.3 (Tyler), shop-c7d1.2 (—)
+Jointer      [0/2]  ░░   (empty)
+Assembly     [1/2]  █░   shop-f2a1.6 (Mike)
+Finish Room  [0/1]  ░    (empty)
+────────────────────────────────────────────────────────
+Buffer: Table Saw has 1 task waiting (shop-e9f3.1)
+```
+
+Shows WIP at each station against limits. This is where the drum (bottleneck)
+becomes visually obvious — it's the station that's always at capacity.
 
 ### Pull Mechanics
 
-**Moving a job to the next station:**
-1. Operator completes work at their station.
-2. They click "Complete" on the job (or the current job step).
-3. The system checks if the next station has capacity (WIP < WIPLimit).
-4. **If yes**: Job moves to the next station's queue.
-5. **If no**: Job stays at the current station with a "waiting" indicator.
-   The next station operator sees a "ready to pull" signal.
+**There is no "move job to next station" action.** Instead:
 
-**Releasing work from the order queue:**
-- Jobs in the Order Queue are only released to the first station when the
-  first station has capacity.
-- The system can auto-release (FIFO by priority, then by due date) or
-  require manual release by a manager.
-- This is the "rope" — it prevents overloading the shop floor.
+1. Operator completes a task.
+2. Ready-work algorithm re-evaluates. Tasks that depended on the completed
+   task may become unblocked.
+3. Newly-ready tasks appear in the ready queue.
+4. The next operator (or the same one) claims a task from the ready queue.
+
+This is pure pull. Work only moves forward when someone actively claims it
+and their station has capacity.
 
 ### WIP Enforcement
 
-- **Soft limit** (default): When a station reaches its WIP limit, the board
-  shows a visual warning. Work can still be moved there manually (with
-  confirmation: "Station is at capacity. Move anyway?").
-- **Hard limit** (configurable): Work cannot be moved to a station that's at
-  capacity. Period. The pull signal is the only way.
+When an operator claims a task at a station:
 
-Soft limits are recommended for v1 — small shops need flexibility, and hard
-limits can cause frustration when learning the system.
+1. Count active tasks at that station.
+2. If count < WIPLimit: claim succeeds.
+3. If count >= WIPLimit (soft mode): warn "Station is at capacity. Claim
+   anyway?" Confirmation required.
+4. If count >= WIPLimit (hard mode): claim rejected. "Station at capacity.
+   Complete existing work first."
 
-### Drum-Buffer-Rope in Practice
+Default is soft limits — small shops need flexibility.
 
-Nori doesn't require the user to explicitly identify the drum. Instead:
-1. Over time, the bottleneck-analytics system (see bottleneck-analytics.md)
-   identifies which station is most frequently at capacity.
-2. The board *shows* the drum naturally — it's the column that's always full.
-3. The buffer is the queue in front of the drum — BufferSize on the Station
-   model controls how deep this queue can get.
-4. The rope is the Order Queue release mechanism — it gates new work based on
-   overall floor capacity.
+### Drum-Buffer-Rope
 
-Advanced users can explicitly mark a station as the drum, which enables:
-- Auto-pacing of the Order Queue release to match drum throughput
-- Buffer monitoring alerts ("drum buffer is empty — risk of starvation")
+Nori doesn't require explicit drum identification. Instead:
 
-### Job Cards on the Board
+1. **Drum emerges from data** — The bottleneck-analytics system (see
+   bottleneck-analytics.md) identifies which station is most frequently at
+   capacity over time.
+2. **Buffer is visible** — The station view shows queued (ready but unclaimed)
+   tasks per station. If the drum's buffer is empty, that's a risk.
+3. **Rope is the order release** — New jobs are only created (poured from
+   recipes) when floor capacity permits. The manager sees: "Current floor
+   WIP: 12/15. 3 jobs queued for release."
 
-Each job card on the board shows:
-- Job title / product name
-- Customer name (if from an order)
-- Due date (color-coded: green = on track, yellow = approaching, red = overdue)
-- Assigned operator (if any)
-- Current step name from the SOP
-- Time at current station
+Advanced: managers can mark a station as the drum, which enables auto-pacing
+of job release to match drum throughput and buffer monitoring alerts.
 
-Click to expand: full SOP step list, progress bar, deviation notes.
+### Job Lifecycle
+
+```
+[Created] → [Active] → [Done]
+                ↓
+           [Cancelled]
+```
+
+A Job (root Task) is:
+- `open` — Created, tasks not yet started. Waiting in release queue.
+- `active` — At least one child task is active.
+- `done` — All child tasks are done/skipped.
+- `cancelled` — Abandoned.
+
+Job status is computed from child task statuses, not set manually.
+
+### Dependency Patterns
+
+**Sequential** (most common — recipe step ordering):
+```
+mill → joinery → assembly → finish
+```
+
+**Parallel** (independent sub-assemblies):
+```
+top-assembly ──┐
+               ├── final-assembly
+base-assembly ─┘
+```
+
+**Gate** (QC hold):
+```
+joinery → qc-gate → assembly
+```
+
+**Cross-job** (batch coordination):
+```
+chair-1.assembly ──┐
+chair-2.assembly ──┤
+chair-3.assembly ──┼── batch-finish.prep
+chair-4.assembly ──┤
+chair-5.assembly ──┤
+chair-6.assembly ──┘
+```
+
+**Fan-out / fan-in** (concurrent work):
+```
+design → implement-A ──┐
+       → implement-B ──┤── integration-test
+       → implement-C ──┘
+```
+
+All of these are expressible with TaskDep edges. The ready-work algorithm
+handles them uniformly.
 
 ### Priority and Ordering
 
-Within a station's queue, jobs are ordered by:
-1. Priority (explicit, set by manager)
-2. Due date (earliest first)
-3. Creation date (FIFO)
+Within the ready queue, tasks are ordered by:
+1. Priority (lower number = higher, default 0)
+2. Due date of the parent Job (earliest first)
+3. Display order within the job
+4. Creation date (FIFO)
 
-Managers can drag to reorder within a station. Operators work top-down.
-
-### Job Types
-
-- **Order Job**: Created from an OrderLineItem. Has a customer, due date,
-  and flows through all stations defined in the SOP.
-- **Internal Job**: No order — maintenance tasks, prep work, shop improvements.
-  Created manually, tagged for filtering.
-- **Replenishment Job**: Auto-created by material pull signals (see
-  materials-and-bom.md). Tagged as "prep" or "restock."
+Managers can override priority on individual tasks or jobs.
 
 ### Tags
 
-Jobs can have tags for filtering the board:
-- `order` — customer work
-- `prep` — preparation tasks
-- `maintenance` — shop maintenance
-- `3s` — sweep/sort/standardize tasks
-- Custom tags per Space
+Tasks inherit tags from their parent Job. Tags enable filtering:
+- `order` — Customer work
+- `prep` — Preparation tasks
+- `maintenance` — Shop maintenance
+- `3s` — Sweep/sort/standardize tasks
+- Custom tags per space
 
-Operators can filter the board by tag to focus on their current mode (e.g.,
-morning = 3S tags, then prep, then orders once the shop opens).
+Operators can filter the ready queue by tag: "Show me only maintenance tasks."
+
+### Flow Board UI
+
+The flow board is a tabbed/split view combining the three perspectives:
+
+**Tab: Ready** (default for operators)
+- Ready work queue, optionally filtered by station
+- Claim button on each task
+- Shows task title, job name, station, priority, due date
+
+**Tab: Jobs** (default for managers)
+- List of active jobs with progress bars
+- Expandable to show task tree
+- Filter by status, customer, due date, tag
+- Color-coded: green (on track), yellow (approaching due), red (overdue)
+
+**Tab: Stations** (capacity overview)
+- Station cards with WIP gauges
+- Active tasks at each station with operator names
+- Buffer counts (ready tasks waiting)
+- Visual alarm when station hits capacity
 
 ### API Surface
 
 ```
-GET    /api/spaces/:spaceId/board                  — Full board state (all stations + jobs)
-GET    /api/spaces/:spaceId/jobs                   — List jobs (filterable by status, station, tag)
-POST   /api/spaces/:spaceId/jobs                   — Create a job (manual / internal)
-GET    /api/jobs/:id                               — Get job detail with steps
-PUT    /api/jobs/:id                               — Update job metadata
-POST   /api/jobs/:id/move                          — Move job to next station (with WIP check)
-POST   /api/jobs/:id/assign                        — Assign operator
-POST   /api/jobs/:id/complete                      — Complete job
-POST   /api/spaces/:spaceId/board/release          — Release jobs from order queue
+GET    /api/spaces/:spaceId/ready                       — Ready-work queue
+GET    /api/spaces/:spaceId/ready?station=:stationId    — Station-filtered
+GET    /api/spaces/:spaceId/ready?tag=:tag              — Tag-filtered
+
+GET    /api/spaces/:spaceId/jobs                        — List jobs
+POST   /api/spaces/:spaceId/jobs                        — Create job (manual)
+GET    /api/jobs/:id                                    — Job detail with task tree
+PUT    /api/jobs/:id                                    — Update job metadata
+POST   /api/jobs/:id/cancel                             — Cancel job
+
+GET    /api/spaces/:spaceId/stations/status              — Station WIP overview
+GET    /api/stations/:id/queue                           — Tasks at/queued for a station
+
+GET    /api/spaces/:spaceId/flow                         — Full flow state (jobs + stations + ready)
 ```
 
 ## Open Questions
 
-- Should the board support multiple "lanes" per station? (e.g., two operators
-  at the same station, each with their own WIP.) Probably not for v1.
-- Should there be an explicit "blocked" state with a reason field? (e.g.,
-  "waiting for material" or "waiting for glue to cure.") This is common in
-  manufacturing and would be useful.
-- How should the board handle jobs that skip stations? (e.g., a cutting board
-  doesn't need a joinery step.) Should the SOP define which stations apply,
-  or should operators manually skip?
-- Should the Order Queue have its own capacity limit (max jobs on the floor)?
-  This is the global WIP limit concept from Lean/TOC.
+- Should there be a global WIP limit (max total active tasks on the floor),
+  separate from per-station limits? This is the "release rope" concept.
+
+- Should the flow board support a dependency graph visualization (nodes and
+  edges, like beads-viewer's DependencyGraph component)? Useful for complex
+  jobs but potentially overwhelming. Maybe as an optional "graph view" tab.
+
+- How should the board handle stale work? A task that's been `active` for
+  3x the recipe estimate should be flagged.
+
+- Should there be an "expedite" lane for rush orders that bypasses normal
+  priority? Or just use priority = 0?

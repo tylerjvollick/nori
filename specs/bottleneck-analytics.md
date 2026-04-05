@@ -16,8 +16,8 @@ this shop from producing more throughput?"
 
 ## Where
 
-- Backend: Analytics computation engine (queries against TimeEvent, Job,
-  JobStep, Station tables)
+- Backend: Analytics computation engine (queries against TimeEvent, Task,
+  Station tables)
 - Frontend: Analytics dashboard, constraint reports
 - AI: Plain-language summaries via Ollama (see ai-features.md)
 
@@ -46,24 +46,24 @@ The Theory of Constraints five focusing steps:
 **Station-Level:**
 - **Utilization**: % of available hours a station is occupied (check-in to
   check-out time / total available hours)
-- **WIP Depth**: Average number of jobs at this station over time
-- **Queue Time**: Average time a job spends waiting in a station's buffer
+- **WIP Depth**: Average number of active tasks at this station over time
+- **Queue Time**: Average time a task spends waiting in a station's buffer
   before being worked on
-- **Processing Time**: Average time a job spends being actively worked at
+- **Processing Time**: Average time a task spends being actively worked at
   this station
-- **Throughput**: Jobs completed per day/week at this station
+- **Throughput**: Tasks completed per day/week at this station
 
 **Job-Level:**
 - **Lead Time**: Total time from job creation to completion
-- **Touch Time**: Sum of all active processing time across stations
-- **Wait Time**: Lead Time - Touch Time (time spent in queues)
+- **Touch Time**: Sum of all active processing time across tasks
+- **Wait Time**: Lead Time - Touch Time (time spent waiting on dependencies)
 - **Flow Efficiency**: Touch Time / Lead Time (higher = less waiting)
 
-**SOP-Level:**
-- **Step Time Variance**: Actual time vs. estimated time per step, averaged
-  across all executions
-- **Deviation Frequency**: How often operators deviate from the SOP per step
-- **Execution Count**: How many times this SOP has been run (experience curve)
+**Recipe-Level:**
+- **Task Time Variance**: Actual time vs. recipe estimated time per task,
+  averaged across all executions
+- **Deviation Frequency**: How often operators deviate from the recipe per task
+- **Execution Count**: How many times this recipe has been poured (experience curve)
 
 **Order-Level:**
 - **On-Time Delivery Rate**: % of orders completed by their due date
@@ -106,9 +106,9 @@ bottleneck.
 - Lead time trend: are orders getting delivered faster or slower?
 
 **SOP Performance**:
-- Steps that consistently take longer than estimated → candidates for SOP
-  update or process improvement
-- Steps with high deviation frequency → process not standardized yet
+- Tasks that consistently take longer than recipe estimates → candidates for
+  recipe update or process improvement
+- Tasks with high deviation frequency → process not standardized yet
 
 ### TOC Five Focusing Steps — System Support
 
@@ -124,9 +124,9 @@ bottleneck.
 
 This spec depends on:
 - time-tracking.md — raw TimeEvent data
-- job-flow.md — job status and station assignment data
+- job-flow.md — task/job status and station assignment data
 - stations.md — WIP limits and buffer sizes
-- sop-execution.md — step-level timing data
+- task-execution.md — task-level timing data
 
 Analytics are only meaningful after sufficient data accumulates. The system
 should indicate confidence: "Based on 3 jobs (low confidence)" vs. "Based on
@@ -138,7 +138,7 @@ should indicate confidence: "Based on 3 jobs (low confidence)" vs. "Based on
 GET    /api/spaces/:spaceId/analytics/bottleneck     — Current constraint analysis
 GET    /api/spaces/:spaceId/analytics/stations        — Station-level metrics
 GET    /api/spaces/:spaceId/analytics/jobs            — Job-level metrics (lead time, etc.)
-GET    /api/spaces/:spaceId/analytics/sops/:sopId     — SOP performance metrics
+GET    /api/spaces/:spaceId/analytics/recipes/:recipeId — Recipe performance metrics
 GET    /api/spaces/:spaceId/analytics/orders          — Order-level metrics (on-time rate)
 GET    /api/spaces/:spaceId/analytics/trends          — Time-series data for charting
 ```

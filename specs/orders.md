@@ -10,12 +10,12 @@
 
 Customer and order management — the entry point for work into the shop. Orders
 represent customer commitments with due dates. Each order contains line items
-that describe what's being built. Line items spawn Jobs that flow through the
-shop (see job-flow.md).
+that describe what's being built. Confirming an order **pours recipes** to
+create Jobs that flow through the shop (see job-flow.md, recipes.md).
 
 ## Where
 
-- Backend: Customer and Order models, order API endpoints
+- Backend: Customer, Order, and OrderLineItem models, order API endpoints
 - Frontend: Order list, order detail page, quote-to-order flow
 - Data model: see data-model.md
 
@@ -23,106 +23,124 @@ shop (see job-flow.md).
 
 Currently, there's no connection between "a customer wants a table" and "the
 shop is building a table." Sales lives in email/spreadsheets, and project
-management lives in Jira. Nori closes this gap with a single pipeline from
+management is separate. Nori closes this gap with a single pipeline from
 quote to delivery.
 
 This also enables a critical metric: **quoted lead time vs. actual lead time**.
-If you consistently quote 6 weeks but deliver in 8, you have a systemic
-problem that Nori can surface.
+If you consistently quote 6 weeks but deliver in 8, Nori surfaces the gap.
 
 ## How
 
 ### Order Lifecycle
 
 ```
-[Quoted] → [Confirmed] → [In Progress] → [Completed]
-                                              ↓
-                                         [Delivered]
+[Quoted] → [Confirmed] → [In Progress] → [Completed] → [Delivered]
+                                                          ↑
+                                                    [Cancelled]
 ```
 
-- **Quoted**: A proposal sent to the customer. Not yet committed. No jobs
-  created.
-- **Confirmed**: Customer accepted. Jobs are created from line items and
-  enter the order queue (first station on the flow board).
-- **In Progress**: At least one job from this order has started.
-- **Completed**: All jobs finished. Ready for delivery/pickup.
-- **Delivered**: Customer has received the product. Order is closed.
-- **Cancelled**: Order was cancelled at any stage.
+- **Quoted**: A proposal sent to the customer. No jobs created yet.
+- **Confirmed**: Customer accepted. Recipes are poured → Jobs created.
+- **In Progress**: At least one job has active tasks.
+- **Completed**: All jobs done. Ready for delivery/pickup.
+- **Delivered**: Customer has received the product. Order closed.
+- **Cancelled**: Order cancelled at any stage.
 
-### Order → Job Creation
+### Order → Job Creation (Pouring)
 
 When an order is confirmed:
-1. For each line item, Nori creates Job(s) linked to the line item's
-   SOPTemplate.
-2. If quantity is 1, one Job is created.
-3. If quantity > 1, the user chooses: one Job for the batch, or one Job
-   per unit. (Batch is common for identical items like dining chairs;
-   per-unit is better for TOC flow visibility.)
-4. Each Job snapshots the current published SOPTemplateVersion.
-5. Jobs enter the first station's queue (or a special "Order Queue" holding
-   area before being released to the floor — the "rope" in drum-buffer-rope).
+
+1. For each line item with a linked Recipe, Nori **pours the recipe** to
+   create a Job (root Task) with its full task subgraph.
+2. Recipe variables are populated from the line item (wood species, dimensions,
+   finish type, etc.).
+3. If quantity is 1: one Job.
+4. If quantity > 1: the user chooses:
+   - **Per-unit**: N separate Jobs (one per item). Better for TOC flow
+     visibility. The recipe's `batch_size` variable is set to 1.
+   - **Batch**: One Job with a loop variable `batch_size=N`. Tasks repeat
+     per unit within a single job.
+5. Each Job references the Customer and has the order's due date.
+6. Jobs enter the ready-work system. Tasks at the first station appear in
+   the ready queue.
 
 ### Customer Model
 
-Simple for v1. Not a full CRM — just enough to associate orders with people.
+Simple for v1. Not a full CRM.
 
 ```
 Customer
-  - Name (required)
-  - Email, Phone, Address (optional)
-  - Notes (free text)
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - Name: string (required)
+  - Email: string (nullable)
+  - Phone: string (nullable)
+  - Address: text (nullable)
+  - Notes: text (nullable)
+  - CreatedAt, UpdatedAt: timestamp
 ```
-
-Customers are scoped to a Space. A customer can have multiple orders.
 
 ### Order Model
 
 ```
 Order
-  - OrderNumber: auto-generated, human-readable (e.g., "ORD-2026-042")
-  - Customer: FK
-  - Status: enum
-  - DueDate: when the customer expects delivery
-  - QuotedAt / ConfirmedAt / CompletedAt: lifecycle timestamps
-  - Notes: free text for special instructions
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - CustomerID: uuid (FK → Customer)
+  - OrderNumber: string (auto-generated, e.g., "ORD-2026-042")
+  - Status: enum (quoted, confirmed, in_progress, completed, delivered, cancelled)
+  - DueDate: timestamp (nullable — when customer expects delivery)
+  - Notes: text (nullable — special instructions)
+  - QuotedAt: timestamp (nullable)
+  - ConfirmedAt: timestamp (nullable)
+  - CompletedAt: timestamp (nullable)
+  - DeliveredAt: timestamp (nullable)
+  - CreatedByID: uuid (FK → User)
+  - CreatedAt, UpdatedAt: timestamp
 ```
 
 ### OrderLineItem Model
 
 ```
 OrderLineItem
-  - Order: FK
-  - SOPTemplate: FK (what product type — e.g., "Walnut Dining Table")
-  - Description: human-readable ("72x36 with breadboard ends")
+  - ID: uuid
+  - OrderID: uuid (FK → Order)
+  - RecipeID: uuid (FK → Recipe, nullable — what product type)
+  - Description: string ("72x36 Walnut Dining Table with breadboard ends")
   - Quantity: int
-  - UnitPrice: decimal (optional — for quote generation)
-  - Notes: customization details
+  - UnitPrice: decimal (nullable — for quote generation)
+  - Notes: text (nullable — customization details)
+  - Vars: jsonb (nullable — recipe variable overrides: {"wood_species": "Walnut"})
+  - DisplayOrder: int
+  - CreatedAt, UpdatedAt: timestamp
 ```
+
+The `Vars` field maps to recipe variables. When the order is confirmed and
+recipes are poured, these values are passed to the formula engine.
 
 ### Lead Time Tracking
 
-Two key metrics computed from order data:
+Two key metrics computed from order + job data:
 - **Quoted lead time**: DueDate - ConfirmedAt
 - **Actual lead time**: CompletedAt - ConfirmedAt
 - **Delta**: Actual - Quoted (positive = late, negative = early)
 
-Over time, this surfaces systemic quoting problems. If you're always 2 weeks
-late on dining tables but on time for cutting boards, that tells you something
-about where the constraint is.
+Over time, this surfaces systemic quoting problems. If dining tables are
+always 2 weeks late but cutting boards are on time, the constraint is visible.
 
-### Order List UI
+### Order UI
 
+**Order List**:
 - Sortable by status, due date, customer
 - Color-coded status badges
-- At-a-glance: overdue orders highlighted in red
-- Click through to see all jobs and their progress
+- Overdue orders highlighted in red
+- Click through to detail
 
-### Order Detail UI
-
+**Order Detail**:
 - Customer info
-- Line items with linked SOPs
-- Jobs spawned from each line item with current station/status
-- Timeline: key dates (quoted, confirmed, started, completed)
+- Line items with linked recipes
+- Jobs created from each line item with current progress
+- Timeline: key dates (quoted, confirmed, started, completed, delivered)
 - Actual vs. quoted lead time comparison
 
 ### API Surface
@@ -136,8 +154,9 @@ GET    /api/spaces/:spaceId/orders                 — List orders (filterable)
 POST   /api/spaces/:spaceId/orders                 — Create order (quote)
 GET    /api/orders/:id                             — Get order with line items + jobs
 PUT    /api/orders/:id                             — Update order
-POST   /api/orders/:id/confirm                     — Confirm → create jobs
+POST   /api/orders/:id/confirm                     — Confirm → pour recipes → create jobs
 POST   /api/orders/:id/complete                    — Mark completed
+POST   /api/orders/:id/deliver                     — Mark delivered
 
 POST   /api/orders/:id/line-items                  — Add line item
 PUT    /api/order-line-items/:id                   — Update line item
@@ -146,13 +165,17 @@ DELETE /api/order-line-items/:id                   — Remove line item
 
 ## Open Questions
 
-- Should Nori support generating PDF quotes from orders? (Nice to have but
-  scope creep for v1.)
-- Should there be a "Delivered" status separate from "Completed"? (Completed
-  = built, Delivered = in customer's hands. Probably yes — delivery logistics
-  is a real concern for furniture.)
-- How should repeat orders work? ("Same table as last time.") Should there be
-  a "reorder" button that clones line items from a previous order?
-- Should pricing/invoicing be in scope at all, or is that better left to
-  QuickBooks/Wave/etc.? (Leaning toward basic pricing on line items for quotes,
-  but no invoicing or payment processing.)
+- Should Nori support generating PDF quotes? Nice to have but scope creep
+  for v1. Most small shops use separate invoicing software.
+
+- How should repeat orders work? A "reorder" button that clones line items
+  from a previous order, pours fresh jobs? Probably yes — common use case.
+
+- Should pricing/invoicing be in scope? Leaning toward basic pricing on line
+  items for quotes, but no invoicing or payment processing. Leave that to
+  QuickBooks/Wave.
+
+- Should Order be a first-class entity or just a Task with type `order`?
+  Keeping it separate for now because orders have lifecycle states and line
+  items that don't map cleanly to the Task model. But this could be
+  reconsidered.

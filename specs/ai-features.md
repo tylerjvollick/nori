@@ -3,7 +3,7 @@
 ## Who
 
 - **Operators**: Receive contextual prompts during work, voice/photo input.
-- **Managers / owners**: Get AI-generated summaries, SOP improvement
+- **Managers / owners**: Get AI-generated summaries, recipe improvement
   suggestions, plain-language bottleneck reports.
 - **The system**: Uses AI for auto-tagging, transcription, and content
   structuring.
@@ -12,14 +12,14 @@
 
 Embedded AI capabilities powered by a local Ollama instance. These are
 features *within* Nori itself (not the MCP server, which exposes Nori to
-*external* LLMs). The AI layer handles: SOP refinement suggestions, first-time
-capture assistance, voice-to-text transcription, photo annotation, bottleneck
-summaries in plain language, and auto-tagging.
+*external* LLMs). The AI layer handles: recipe refinement suggestions,
+first-time capture assistance, voice-to-text transcription, photo annotation,
+bottleneck summaries in plain language, and auto-tagging.
 
 ## Where
 
 - Backend: AI service layer that communicates with Ollama
-- Frontend: AI prompt UI elements embedded in the execution and SOP views
+- Frontend: AI prompt UI elements embedded in the execution and recipe views
 - Infrastructure: Ollama container in Docker Compose (optional)
 
 ## Why
@@ -61,29 +61,30 @@ Recommended models (subject to change as ecosystem evolves):
 ### Feature: First-Time Capture Assistant
 
 When an operator is running a job in first-time capture mode (see
-sop-execution.md), the AI helps structure the captured data:
+task-execution.md), the AI helps structure the captured data:
 
 1. **Between steps**: "You just completed a 25-minute step. Based on the
    photo you took, it looks like you were fitting mortise and tenon joints.
    Want me to title this step 'Cut and fit mortise-and-tenon joints'?"
 2. **After the job**: Takes all captured notes, photos, and timing data and
-   generates a structured SOP draft with titled steps, instructions, and
-   estimated times.
-3. **Review prompt**: Presents the draft for human review before saving.
+   generates a structured recipe draft (TOML) with titled steps, instructions,
+   and estimated times.
+3. **Review prompt**: Presents the draft for human review before saving as a
+   RecipeVersion.
 
-### Feature: SOP Refinement Suggestions
+### Feature: Recipe Refinement Suggestions
 
 After a job completes (not first-time — normal execution against an existing
-SOP):
+recipe):
 
-1. Compare actual step times to estimates across recent executions.
+1. Compare actual task times to recipe estimates across recent executions.
 2. Review deviation notes from this and recent executions.
 3. Generate suggestions:
-   - "Step 4 consistently takes 2x the estimated time. Consider splitting
-     it into two steps or updating the estimate."
-   - "3 out of 5 recent operators deviated on Step 7. The instruction may
+   - "Task 4 consistently takes 2x the estimated time. Consider splitting
+     it into two tasks or updating the estimate."
+   - "3 out of 5 recent operators deviated on Task 7. The instruction may
      need updating."
-   - "Step 3 and Step 4 are always completed together in under 5 minutes.
+   - "Task 3 and Task 4 are always completed together in under 5 minutes.
      Consider merging them."
 
 ### Feature: Voice-to-Text
@@ -93,19 +94,19 @@ For hands-dirty situations where typing is impractical:
 1. Operator taps "Voice Note" on the execution UI.
 2. Browser records audio (using Web Speech API or MediaRecorder).
 3. Audio is sent to Ollama/Whisper for transcription.
-4. Transcribed text is attached as a deviation note or SOP annotation.
+4. Transcribed text is attached as a deviation note or recipe annotation.
 
 Fallback: Use the browser's built-in Web Speech API for on-device
 transcription (works offline, lower quality but zero latency).
 
 ### Feature: Photo Understanding
 
-When an operator attaches a photo to a job step:
+When an operator attaches a photo to a task:
 
 1. The photo is sent to the vision model.
 2. The model generates a description: "Close-up of a mortise-and-tenon joint
    being dry-fitted. The tenon appears slightly loose."
-3. This description is suggested as a caption or added to the SOP step
+3. This description is suggested as a caption or added to the task or recipe
    instructions.
 
 This is especially useful for first-time capture: instead of the operator
@@ -126,7 +127,7 @@ The AI layer translates these into actionable summaries:
 
 ### Feature: Auto-Tagging
 
-When jobs or notes are created, the AI suggests tags:
+When jobs or tasks are created, the AI suggests tags:
 - Job description mentions "sand and spray" → suggest tags: `finish`, `spray`
 - Deviation note mentions "glue" → suggest tag: `adhesive`, `assembly`
 - Replenishment task for lumber → auto-tag: `restock`, `lumber`
@@ -134,8 +135,8 @@ When jobs or notes are created, the AI suggests tags:
 ### Graceful Degradation
 
 Every AI feature must work without AI:
-- First-time capture: Steps are captured with manual titles, no auto-structuring
-- SOP refinement: Raw stats shown instead of narrative suggestions
+- First-time capture: Tasks are captured with manual titles, no auto-structuring
+- Recipe refinement: Raw stats shown instead of narrative suggestions
 - Voice-to-text: Falls back to typed notes
 - Photo understanding: Photos attached without auto-description
 - Bottleneck summary: Dashboard shows numbers without narrative

@@ -16,11 +16,12 @@ system that understands physical production flow.
    automatically from time data. Pull-based flow with WIP limits makes
    constraints visible on the board without analysis.
 
-2. **Documentation as a side effect**: SOPs are built incrementally during
-   real work, not written in a vacuum. Time is captured automatically from
-   step transitions. The goal is zero-friction knowledge capture.
+2. **Documentation as a side effect**: Recipes (TOML process templates) are
+   built incrementally during real work, not written in a vacuum. Time is
+   captured automatically from task transitions. The goal is zero-friction
+   knowledge capture.
 
-3. **AI-native, not AI-bolted-on**: Local LLM (Ollama) assists with SOP
+3. **AI-native, not AI-bolted-on**: Local LLM (Ollama) assists with Recipe
    drafting, voice-to-text, photo understanding, and bottleneck summaries.
    MCP server exposes Nori to external LLM clients (OpenCode, Claude Desktop).
    All AI features degrade gracefully if Ollama is unavailable.
@@ -38,7 +39,7 @@ Customer Order → Released to Floor (rope) → Station 1 → Station 2 (drum) �
                                               ↑ WIP limits enforce pull
 ```
 
-Operators execute jobs step-by-step against SOPs. Time is logged automatically.
+Operators execute tasks step-by-step against Recipes. Time is logged automatically.
 First-time builds capture the process as it's figured out. Bottlenecks surface
 from accumulated data.
 
@@ -178,19 +179,22 @@ nori/
 
 The repo has a working (but dated) implementation of:
 - User / Account / UserAccount / Space models and auth
-- SOPTemplate → SOPTemplateVersion → SOPStep → SOPStepMedia CRUD
 - TUS-based chunked media upload
 - Basic SvelteKit web UI (Svelte 4 / Tailwind v3 — needs upgrade)
 
 New features being added (see specs for details):
-- Station, Job, JobStep, Order, Customer, Material, BOMItem, TimeEvent models
-- Flow board with pull-based WIP limits
-- SOP execution with first-time capture mode
-- CLI (`nori checkin`, `nori step complete`, etc.)
+- Task model with hierarchical string IDs and dependency graph
+- Recipe + RecipeVersion models (TOML stored in database)
+- Formula engine (extracted from beads project) for pouring Recipes into Tasks
+- Ready-work algorithm for pull-based task execution
+- Station, Order, Customer, Material, BOMItem, TimeEvent models
+- Flow board with dependency-graph pull system
+- Task execution with first-time capture mode
+- CLI (`nori ready`, `nori task claim`, `nori recipe pour`, etc.)
 - MCP server for LLM integration
 - Ollama-powered AI features
 - Passive observation via cameras/sensors (long-term)
-- SOP marketplace for community sharing (long-term)
+- Recipe marketplace for community sharing (long-term)
 
 ## Context for New Sessions
 
@@ -203,7 +207,7 @@ If you're starting a fresh context window, here's what matters:
    workflow with a native integration.
 4. **The frontend is being rebuilt** in Svelte 5 + Tailwind v4. The existing
    web/ code is Svelte 4 + Tailwind v3 and will be replaced.
-5. **Priority order**: data model → auth → stations → SOPs → orders → job flow
+5. **Priority order**: data model → auth → stations → recipes → orders → job flow
    → execution → materials → time tracking → analytics → CLI → MCP → AI →
    sensors → marketplace.
 

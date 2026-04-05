@@ -11,7 +11,7 @@
 ## What
 
 A source-agnostic time event store. Every time-relevant action in Nori
-(starting a step, checking in at a station, pausing work) creates a TimeEvent.
+(starting a task, checking in at a station, pausing work) creates a TimeEvent.
 Events can come from multiple sources: the web UI, the CLI, a tablet tap-in,
 or future camera/sensor systems. The data model is the same regardless of
 source.
@@ -50,8 +50,7 @@ TimeEvent
   - ID: uuid
   - SpaceID: uuid
   - UserID: uuid (who)
-  - JobID: uuid (nullable — what job)
-  - JobStepID: uuid (nullable — what step)
+  - TaskID: string (nullable — what task)
   - StationID: uuid (nullable — where)
   - EventType: enum (check_in, check_out, pause, resume)
   - Source: enum (manual, web, cli, tap, sensor, api, system)
@@ -64,7 +63,7 @@ TimeEvent
 
 | Source | How it works | Friction level |
 |--------|-------------|----------------|
-| `system` | Auto-generated when a job step starts/completes in the web UI | Zero — happens automatically |
+| `system` | Auto-generated when a task starts/completes in the web UI | Zero — happens automatically |
 | `web` | Manual time entry in the web UI (corrections, forgot to log) | Low |
 | `cli` | `nori checkin joinery` from a terminal | Low |
 | `tap` | Tap a button on a tablet/phone mounted at a station | Very low |
@@ -72,20 +71,20 @@ TimeEvent
 | `api` | External system posts a time event via API | Zero |
 | `manual` | Backfill entry with explicit timestamp | Medium |
 
-### Automatic Time Capture (via SOP Execution)
+### Automatic Time Capture (via Task Execution)
 
-When the execution system (see sop-execution.md) transitions steps, it
+When the execution system (see task-execution.md) transitions tasks, it
 automatically creates TimeEvents:
 
 ```
-Step 3 started   → TimeEvent(type=check_in, jobStep=3, station=Joinery, source=system)
-Step 3 paused    → TimeEvent(type=pause, jobStep=3, source=system)
-Step 3 resumed   → TimeEvent(type=resume, jobStep=3, source=system)
-Step 3 completed → TimeEvent(type=check_out, jobStep=3, source=system)
-Step 4 started   → TimeEvent(type=check_in, jobStep=4, station=Joinery, source=system)
+Task claimed    → TimeEvent(type=check_in, task=abc.3, station=Joinery, source=system)
+Task paused     → TimeEvent(type=pause, task=abc.3, source=system)
+Task resumed    → TimeEvent(type=resume, task=abc.3, source=system)
+Task completed  → TimeEvent(type=check_out, task=abc.3, source=system)
+Next claimed    → TimeEvent(type=check_in, task=abc.4, station=Joinery, source=system)
 ```
 
-This means: if an operator is using the SOP execution UI, time tracking is
+This means: if an operator is using the task execution UI, time tracking is
 100% automatic. No extra action needed.
 
 ### Station Check-In (without a specific job)
@@ -113,17 +112,17 @@ Since the store is append-only, corrections work by adding new events:
 
 The frontend provides:
 - **Daily log**: Timeline of events for a user, showing when they were at
-  which station working on which job
-- **Weekly summary**: Total hours, broken down by station and job
+  at which station working on which task
+- **Weekly summary**: Total hours, broken down by station and job/task
 - **Anomaly detection**: "You were checked in at Mill for 6 hours without
-  any step completions — is that accurate?"
+  any task completions — is that accurate?"
 
 ### Computed Fields
 
 While TimeEvents are the raw data, computed aggregates are cached for
 performance:
-- `JobStep.ActualTimeSeconds` — sum of active time from events for that step
-- `Job.TotalTimeSeconds` — sum across all steps
+- `Task.ActualTimeSeconds` — sum of active time from events for that task
+- Job total time — sum across all child tasks
 - Station utilization per day/week — sum of check-in to check-out durations
 
 These are recomputed from events on demand or on a schedule, not stored as
@@ -132,7 +131,7 @@ the source of truth.
 ### API Surface
 
 ```
-GET    /api/spaces/:spaceId/time-events            — List events (filterable by date, user, station, job)
+GET    /api/spaces/:spaceId/time-events            — List events (filterable by date, user, station, task)
 POST   /api/spaces/:spaceId/time-events            — Create manual event
 GET    /api/spaces/:spaceId/time-summary            — Aggregated summary (daily/weekly)
 GET    /api/users/:userId/time-log                  — User's time log

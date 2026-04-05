@@ -11,8 +11,8 @@
 A Model Context Protocol (MCP) server that exposes Nori's data and actions
 as tools and resources that LLM clients can use. This enables natural language
 interaction with the production system: "What's the bottleneck this week?",
-"Log 30 minutes at joinery for job 42", "What's the next step in the SOP for
-the dining table?"
+"Log 30 minutes at joinery for task abc.3", "What's the next ready task for
+the dining table job?"
 
 ## Where
 
@@ -44,47 +44,48 @@ Tools are functions the LLM can call to perform actions:
 ```
 nori_checkin
   - station: string (required)
-  - job_id: string (optional)
+  - task_id: string (optional)
   - notes: string (optional)
-  → Checks the user in at a station, optionally for a specific job
+  → Checks the user in at a station, optionally for a specific task
 
 nori_checkout
   → Checks the user out from their current station
 
-nori_step_complete
-  - notes: string (optional)
-  → Completes the current step and advances to the next
+nori_task_claim
+  - task_id: string (required)
+  → Claims a task and starts the timer
 
-nori_step_pause / nori_step_resume
-  → Pause or resume the current step timer
+nori_task_complete
+  - task_id: string (optional — defaults to current active task)
+  - notes: string (optional)
+  → Completes the current/specified task
+
+nori_task_pause / nori_task_resume
+  → Pause or resume the current task timer
 
 nori_add_deviation_note
-  - job_step_id: string (optional — defaults to current step)
+  - task_id: string (optional — defaults to current task)
   - note: string (required)
-  → Adds a deviation note to a job step
+  → Adds a deviation note to a task
 
-nori_create_job
-  - sop_template_id: string (required)
-  - order_line_item_id: string (optional)
-  - priority: int (optional)
-  - notes: string (optional)
-  → Creates a new job
+nori_recipe_pour
+  - recipe_name: string (required)
+  - vars: object (optional — variable overrides)
+  - customer: string (optional)
+  - due_date: string (optional)
+  → Pours a recipe to create a new job
 
-nori_move_job
-  - job_id: string (required)
-  - station: string (required)
-  → Moves a job to the next station (with WIP check)
-
-nori_update_sop_step
-  - sop_step_id: string (required)
-  - instructions: string (optional)
-  - notes: string (optional)
-  → Suggests an update to an SOP step (creates a draft change)
+nori_task_add
+  - title: string (required)
+  - parent_id: string (optional — defaults to current job)
+  - station: string (optional)
+  - after: string (optional — task ID to add dependency on)
+  → Adds an ad-hoc task to a job
 
 nori_log_time
   - station: string (required)
   - duration_minutes: int (required)
-  - job_id: string (optional)
+  - task_id: string (optional)
   - notes: string (optional)
   → Manually log time (for backdated entries)
 
@@ -101,19 +102,22 @@ Resources are data the LLM can read for context:
 
 ```
 nori://board
-  → Current flow board state: all stations with jobs and WIP counts
+  → Current flow state: ready-work queue, active jobs, station WIP
+
+nori://ready
+  → Ready-work queue for the current user's space
 
 nori://jobs/active
-  → List of active jobs with status, station, current step
+  → List of active jobs with status, progress, current tasks
 
 nori://jobs/{id}
-  → Full job detail including all steps and their status
+  → Full job detail including task tree and dependencies
 
-nori://sops
-  → List of all SOPs with current version info
+nori://recipes
+  → List of all recipes with current version info
 
-nori://sops/{id}
-  → Full SOP with steps, materials, equipment
+nori://recipes/{id}
+  → Full recipe with TOML content
 
 nori://stations
   → List of stations with current WIP and capacity
@@ -141,27 +145,28 @@ The MCP server authenticates via the same mechanism as the REST API:
 ### Example Conversations
 
 **Hands-dirty scenario (voice via OpenCode):**
-> "Hey, check me in at joinery and start job 42."
-> → LLM calls `nori_checkin(station="joinery", job_id="42")`
-> → "You're checked in at Joinery, working on Job #42: Walnut Dining Table.
->    Step 1: Cut mortises. Estimated time: 30 minutes."
+> "Hey, check me in at joinery and claim the next ready task."
+> → LLM reads `nori://ready`, calls `nori_checkin(station="joinery")`,
+>    then `nori_task_claim(task_id="shop-a4b2.3")`
+> → "You're checked in at Joinery. Claimed task shop-a4b2.3: Cut mortises
+>    for the Walnut Dining Table. Estimated time: 30 minutes."
 
 **End of day review:**
 > "What did I work on today?"
 > → LLM reads `nori://time/today`
-> → "Today you spent 2h 15m at Joinery (Jobs #42, #43), 1h at Assembly
->    (Job #38), and 45m at Finish (Job #37). Total: 4h."
+> → "Today you spent 2h 15m at Joinery (tasks on the Dining Table and Side
+>    Table jobs), 1h at Assembly, and 45m at Finish. Total: 4h."
 
-**SOP update from the bench:**
-> "For step 4 of the dining table SOP, add a note that the tenon should be
->  1/16 deeper than specified for a tighter fit."
-> → LLM calls `nori_add_deviation_note` or `nori_update_sop_step`
+**Recipe update from the bench:**
+> "For the dining table recipe, the tenon should be 1/16 deeper than
+>  specified for a tighter fit."
+> → LLM calls `nori_add_deviation_note(note="...")`
 
 **Bottleneck check:**
 > "What's been my biggest bottleneck this month?"
 > → LLM reads `nori://bottleneck`
-> → "Joinery has been the constraint for 65% of this month. Average queue
->    time: 2.1 days. 4 jobs are currently waiting."
+> → "Joinery has been the constraint for 65% of this month. Average wait
+>    time: 2.1 days. 4 tasks are currently blocked by joinery dependencies."
 
 ### Implementation
 

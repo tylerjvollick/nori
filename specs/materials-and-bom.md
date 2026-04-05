@@ -9,16 +9,16 @@
 
 ## What
 
-Structured material tracking and bill-of-materials (BOM) per SOP. Materials
-are stock items in the shop with quantities, locations, and replenishment
-thresholds. Each SOP version has a BOM listing what materials and how much
-are needed. When stock drops below threshold during job execution, Nori
-auto-creates replenishment tasks.
+Structured material tracking and bill-of-materials (BOM) per recipe version.
+Materials are stock items in the shop with quantities, locations, and
+replenishment thresholds. Each recipe version has a BOM listing what materials
+and how much are needed. When stock drops below threshold during job execution,
+Nori auto-creates replenishment tasks.
 
 ## Where
 
 - Backend: Material and BOMItem models, material API endpoints
-- Frontend: Material inventory page, BOM section in SOP editor, pull signal
+- Frontend: Material inventory page, BOM section in recipe editor, pull signal
   notifications
 - Data model: see data-model.md
 
@@ -34,12 +34,12 @@ For a woodworking shop, this means:
   to reorder last week.
 - You know exactly how many board feet of walnut you need before starting a
   job, and whether you have enough in stock.
-- Replenishment tasks appear in the job flow board alongside production work,
-  so they don't get forgotten.
+- Replenishment tasks appear in the ready-work queue alongside production
+  work, so they don't get forgotten.
 
 The existing model stores materials as a `pq.StringArray` (plain text list).
-This needs to become structured data for pull signals and stock tracking to
-work.
+This is replaced by structured BOM data in the recipe TOML (see recipes.md)
+and BOMItem records in the database.
 
 ## How
 
@@ -79,32 +79,33 @@ Material
 
 ### BOMItem Model
 
-Links a material to an SOP version, optionally to a specific step.
+Links a material to a recipe version, optionally to a specific step.
 
 ```
 BOMItem
-  - ID: int
-  - SOPTemplateVersionID: int
+  - ID: uuid
+  - RecipeVersionID: int
   - MaterialID: uuid (nullable — for ad-hoc items not in inventory)
   - Name: string (display name)
   - Quantity: decimal
   - Unit: string
-  - SOPStepID: int (nullable — which step uses this material)
+  - StepRef: string (nullable — which recipe step uses this material, by step key)
+  - UnitCost: decimal (nullable — cost per unit for estimation)
   - Notes: string (nullable — "cut to 36 inches")
 ```
 
 When MaterialID is set, stock tracking and pull signals are active. When it's
-null, the BOM item is informational only (useful when first authoring an SOP
+null, the BOM item is informational only (useful when first authoring a recipe
 before setting up inventory).
 
 ### Pull Signals
 
-When a job starts (or when a specific step that consumes material begins):
+When a job starts (or when a specific task that consumes material begins):
 1. System checks: does the BOMItem have a linked Material?
 2. If yes, check: Material.CurrentStock - BOMItem.Quantity <= Material.ReorderThreshold?
 3. If yes, create a **Replenishment Job** (see job-flow.md) tagged as
    `restock` with the details.
-4. Replenishment jobs appear on the flow board and can also trigger
+4. Replenishment jobs appear in the ready-work queue and can also trigger
    notifications.
 
 For trigger-based consumables (no stock quantity), the pull signal fires:
@@ -116,19 +117,19 @@ For trigger-based consumables (no stock quantity), the pull signal fires:
 ### Stock Adjustment
 
 Stock is adjusted in two ways:
-1. **Automatic**: When a job step that consumes a material is completed,
+1. **Automatic**: When a task that consumes a material is completed,
    deduct the BOM quantity from CurrentStock.
 2. **Manual**: Operators or managers can adjust stock directly (receiving
    a shipment, inventory correction).
 
 Stock adjustments are logged as events for audit trail.
 
-### BOM in the SOP Editor
+### BOM in the Recipe Editor
 
-The SOP authoring UI (see sop-authoring.md) has a Materials section:
+The recipe authoring UI (see recipes.md) has a BOM section in the TOML:
 - Add materials from inventory (autocomplete search) or as free text
 - Set quantity and unit per material
-- Optionally link to a specific step
+- Optionally link to a specific step via `step` field
 - Show current stock level inline ("12 board feet in stock")
 - Visual warning if current stock is insufficient for the BOM
 
@@ -147,8 +148,8 @@ POST   /api/spaces/:spaceId/materials              — Create material
 PUT    /api/materials/:id                          — Update material
 POST   /api/materials/:id/adjust                   — Adjust stock (manual)
 
-GET    /api/sop-versions/:versionId/bom            — Get BOM for a version
-POST   /api/sop-versions/:versionId/bom            — Add BOM item
+GET    /api/recipe-versions/:versionId/bom            — Get BOM for a version
+POST   /api/recipe-versions/:versionId/bom            — Add BOM item
 PUT    /api/bom-items/:id                          — Update BOM item
 DELETE /api/bom-items/:id                          — Remove BOM item
 ```

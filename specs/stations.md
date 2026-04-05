@@ -9,14 +9,14 @@
 ## What
 
 Stations represent the physical locations, tools, or work areas in a shop
-where work happens. They are the nodes in the production flow — jobs move
-from station to station. Each station has a configurable WIP limit that
-enforces pull-based flow and makes bottlenecks visible.
+where work happens. They are physical nodes in the production flow — tasks
+reference the station where they occur. Each station has a configurable WIP
+limit that enforces pull-based flow and makes bottlenecks visible.
 
 ## Where
 
 - Backend: `server/internal/models/station.go`, station API endpoints
-- Frontend: Station configuration page, flow board columns
+- Frontend: Station configuration page, station view on flow board
 - Data model: see data-model.md
 
 ## Why
@@ -48,8 +48,8 @@ Station
   - Name: string ("Rough Mill", "Joinery", "Assembly", "Finish", "QC")
   - Description: string (nullable — "Table saw, jointer, planer area")
   - DisplayOrder: int (left-to-right position on the flow board)
-  - WIPLimit: int (max jobs actively being worked at this station)
-  - BufferSize: int (max jobs queued waiting for this station)
+  - WIPLimit: int (max tasks actively being worked at this station)
+  - BufferSize: int (max tasks queued waiting for this station)
   - IsActive: bool (soft delete / disable without losing data)
   - Color: string (nullable — hex color for board visualization)
   - CreatedAt, UpdatedAt: timestamp
@@ -81,11 +81,12 @@ points — the owner adjusts based on their actual capacity.
 
 ### Flow Board Integration
 
-The flow board (see job-flow.md) renders one column per active station,
-ordered by DisplayOrder. Each column shows:
+The flow board's station view (see job-flow.md) shows one card per active
+station, ordered by DisplayOrder. Each card shows:
 - Station name
 - Current WIP count vs. limit (e.g., "2/3")
 - Buffer queue count vs. size (e.g., "1/2 queued")
+- Active tasks at the station with operator names
 - Visual indicator when at capacity (color change, icon)
 
 ### API Surface
@@ -102,10 +103,10 @@ PUT    /api/spaces/:spaceId/stations/reorder   — Bulk update DisplayOrder
 
 - Should stations support sub-stations? (e.g., "Finish" has "Sanding" and
   "Spraying" as children.) Probably not for v1 — keep it flat.
-- Should WIP limits count only "in progress" jobs, or also "paused" jobs at
-  that station? (Leaning toward counting all non-completed jobs at the station,
-  since a paused job still physically occupies the space.)
+- Should WIP limits count only "active" tasks, or also "paused" tasks at
+  that station? (Leaning toward counting all non-completed tasks at the
+  station, since a paused task still physically occupies the space.)
 - Do we need a concept of "station capacity" beyond WIP limit? (e.g., a
-  station with 2 workbenches can handle 2 parallel jobs, but WIP limit might
-  be 3 to include one in the buffer.) The WIPLimit + BufferSize split may
-  already cover this.
+  station with 2 workbenches can handle 2 parallel tasks, but WIP limit
+  might be 3 to include one in the buffer.) The WIPLimit + BufferSize split
+  may already cover this.
