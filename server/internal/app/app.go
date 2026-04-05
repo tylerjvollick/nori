@@ -34,6 +34,7 @@ func New(cfg *config.Config) *App {
 	apiKeyRepo := repositories.NewAPIKeyRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
 	spaceMemberRepo := repositories.NewSpaceMemberRepository(database.DB)
+	taskRepo := repositories.NewTaskRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -59,10 +60,12 @@ func New(cfg *config.Config) *App {
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, nil)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
+	taskService := services.NewTaskService(taskRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
 	spaceHandler := handlers.NewSpaceHandler(spaceService, spaceMemberRepo)
+	taskHandler := handlers.NewTaskHandler(taskService)
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
@@ -95,6 +98,7 @@ func New(cfg *config.Config) *App {
 
 	// ── Fully guarded routes (auth + password changed) ─────────────────
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
+	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())
