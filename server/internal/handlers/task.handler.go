@@ -70,6 +70,11 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 			filter.StationID = &id
 		}
 	}
+	if assigneeID := c.Query("assigneeId"); assigneeID != "" {
+		if id, err := uuid.Parse(assigneeID); err == nil {
+			filter.AssigneeID = &id
+		}
+	}
 	if parentID := c.Query("parentId"); parentID != "" {
 		filter.ParentID = &parentID
 	}
