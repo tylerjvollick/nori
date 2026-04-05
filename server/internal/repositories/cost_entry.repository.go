@@ -34,31 +34,7 @@ func (r *CostEntryRepository) GetByID(id uuid.UUID) (*models.CostEntry, error) {
 	return &entry, nil
 }
 
-// GetByTicketID returns all cost entries for a ticket, ordered by creation time.
-func (r *CostEntryRepository) GetByTicketID(ticketID uuid.UUID) ([]models.CostEntry, error) {
-	var entries []models.CostEntry
-	err := r.db.Where("ticket_id = ?", ticketID).
-		Order("created_at ASC").
-		Find(&entries).Error
-	return entries, err
-}
-
-// GetByTicketIDAndType returns cost entries for a ticket filtered by cost type.
-func (r *CostEntryRepository) GetByTicketIDAndType(ticketID uuid.UUID, costType models.CostType) ([]models.CostEntry, error) {
-	var entries []models.CostEntry
-	err := r.db.Where("ticket_id = ? AND cost_type = ?", ticketID, costType).
-		Order("created_at ASC").
-		Find(&entries).Error
-	return entries, err
-}
-
 // Delete removes a cost entry by ID.
 func (r *CostEntryRepository) Delete(id uuid.UUID) error {
 	return r.db.Delete(&models.CostEntry{}, "id = ?", id).Error
-}
-
-// DeleteByTicketID removes all cost entries for a ticket.
-func (r *CostEntryRepository) DeleteByTicketID(ticketID uuid.UUID) error {
-	return r.db.Where("ticket_id = ?", ticketID).
-		Delete(&models.CostEntry{}).Error
 }

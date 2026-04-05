@@ -34,24 +34,20 @@ const (
 // TimeEvent. These records are immutable — corrections are new events with
 // backdated timestamps.
 type TimeEvent struct {
-	ID           uuid.UUID       `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
-	SpaceID      uuid.UUID       `gorm:"type:uuid;not null" json:"spaceId"`
-	UserID       uuid.UUID       `gorm:"type:uuid;not null" json:"userId"`
-	TicketID     *uuid.UUID      `gorm:"type:uuid" json:"ticketId,omitempty"`
-	TicketStepID *uuid.UUID      `gorm:"type:uuid" json:"ticketStepId,omitempty"`
-	StationID    *uuid.UUID      `gorm:"type:uuid" json:"stationId,omitempty"`
-	EventType    TimeEventType   `gorm:"type:varchar(20);not null" json:"eventType"`
-	Source       TimeEventSource `gorm:"type:varchar(20);not null" json:"source"`
-	Timestamp    time.Time       `gorm:"not null" json:"timestamp"`
-	Notes        *string         `gorm:"type:text" json:"notes,omitempty"`
-	CreatedAt    time.Time       `gorm:"default:now()" json:"createdAt"`
+	ID        uuid.UUID       `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	SpaceID   uuid.UUID       `gorm:"type:uuid;not null" json:"spaceId"`
+	UserID    uuid.UUID       `gorm:"type:uuid;not null" json:"userId"`
+	StationID *uuid.UUID      `gorm:"type:uuid" json:"stationId,omitempty"`
+	EventType TimeEventType   `gorm:"type:varchar(20);not null" json:"eventType"`
+	Source    TimeEventSource `gorm:"type:varchar(20);not null" json:"source"`
+	Timestamp time.Time       `gorm:"not null" json:"timestamp"`
+	Notes     *string         `gorm:"type:text" json:"notes,omitempty"`
+	CreatedAt time.Time       `gorm:"default:now()" json:"createdAt"`
 
 	// Relations
-	Space      *Space      `gorm:"foreignKey:SpaceID" json:"space,omitempty"`
-	User       *User       `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	Ticket     *Ticket     `gorm:"foreignKey:TicketID" json:"ticket,omitempty"`
-	TicketStep *TicketStep `gorm:"foreignKey:TicketStepID" json:"ticketStep,omitempty"`
-	Station    *Station    `gorm:"foreignKey:StationID" json:"station,omitempty"`
+	Space   *Space   `gorm:"foreignKey:SpaceID" json:"space,omitempty"`
+	User    *User    `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	Station *Station `gorm:"foreignKey:StationID" json:"station,omitempty"`
 }
 
 func (TimeEvent) TableName() string {

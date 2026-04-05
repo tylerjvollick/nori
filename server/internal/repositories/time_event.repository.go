@@ -10,14 +10,12 @@ import (
 
 // TimeEventFilters holds optional filter parameters for querying time events.
 type TimeEventFilters struct {
-	UserID       *uuid.UUID
-	TicketID     *uuid.UUID
-	TicketStepID *uuid.UUID
-	StationID    *uuid.UUID
-	EventType    *models.TimeEventType
-	Source       *models.TimeEventSource
-	From         *time.Time
-	To           *time.Time
+	UserID    *uuid.UUID
+	StationID *uuid.UUID
+	EventType *models.TimeEventType
+	Source    *models.TimeEventSource
+	From      *time.Time
+	To        *time.Time
 }
 
 type TimeEventRepository struct {
@@ -41,15 +39,6 @@ func (r *TimeEventRepository) GetBySpaceID(spaceID uuid.UUID, filters *TimeEvent
 	q := r.db.Where("space_id = ?", spaceID)
 	q = applyTimeEventFilters(q, filters)
 	err := q.Order(`"timestamp" DESC`).Find(&events).Error
-	return events, err
-}
-
-// GetByTicketID returns all time events for a ticket, ordered by timestamp descending.
-func (r *TimeEventRepository) GetByTicketID(ticketID uuid.UUID) ([]models.TimeEvent, error) {
-	var events []models.TimeEvent
-	err := r.db.Where("ticket_id = ?", ticketID).
-		Order(`"timestamp" DESC`).
-		Find(&events).Error
 	return events, err
 }
 
@@ -78,12 +67,6 @@ func applyTimeEventFilters(q *gorm.DB, f *TimeEventFilters) *gorm.DB {
 	}
 	if f.UserID != nil {
 		q = q.Where("user_id = ?", *f.UserID)
-	}
-	if f.TicketID != nil {
-		q = q.Where("ticket_id = ?", *f.TicketID)
-	}
-	if f.TicketStepID != nil {
-		q = q.Where("ticket_step_id = ?", *f.TicketStepID)
 	}
 	if f.StationID != nil {
 		q = q.Where("station_id = ?", *f.StationID)

@@ -32,19 +32,8 @@ func New(cfg *config.Config) *App {
 	accountRepo := repositories.NewAccountRepository(database.DB)
 	userAccountRepo := repositories.NewUserAccountRepository(database.DB)
 	apiKeyRepo := repositories.NewAPIKeyRepository(database.DB)
-	sopTemplateRepo := repositories.NewSOPTemplateRepository(database.DB)
-	sopVersionRepo := repositories.NewSOPVersionRepository(database.DB)
-	sopStepRepo := repositories.NewSOPStepRepository(database.DB)
-	sopSubStepRepo := repositories.NewSOPSubStepRepository(database.DB)
-	_ = sopSubStepRepo // TODO: wire into service when SOPSubStep CRUD endpoints are added
-	bomItemRepo := repositories.NewBOMItemRepository(database.DB)
-	_ = bomItemRepo // TODO: wire into service when BOMItem CRUD endpoints are added
-	sopStepMediaRepo := repositories.NewSOPStepMediaRepository(database.DB)
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
 	spaceMemberRepo := repositories.NewSpaceMemberRepository(database.DB)
-	sopCategoryRepo := repositories.NewSOPCategoryRepository(database.DB)
-	ticketTypeRepo := repositories.NewTicketTypeRepository(database.DB)
-	statusDefRepo := repositories.NewStatusDefinitionRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -60,9 +49,6 @@ func New(cfg *config.Config) *App {
 		}
 	}
 
-	allowedMimeTypesStr := os.Getenv("ALLOWED_MIME_TYPES")
-	allowedMimeTypes := services.ParseAllowedMimeTypes(allowedMimeTypesStr)
-
 	// First-boot seed
 	seedService := services.NewSeedService(accountRepo, userRepo, accountRepo, userAccountRepo, cfg)
 	if err := seedService.SeedIfNeeded(); err != nil {
@@ -71,22 +57,11 @@ func New(cfg *config.Config) *App {
 
 	// Services
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo)
-	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
-	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
-	spaceService := services.NewSpaceService(spaceRepo, userRepo, services.NewSpaceTemplateService(ticketTypeRepo, statusDefRepo, sopCategoryRepo))
+	spaceService := services.NewSpaceService(spaceRepo, userRepo, nil)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
-
-	// Initialize tus service for chunked uploads
-	tusService, err := services.NewTusService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
-	if err != nil {
-		log.Fatal("Failed to initialize tus service: " + err.Error())
-	}
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
-	sopHandler := handlers.NewSOPHandler(sopService)
-	sopMediaHandler := handlers.NewSOPStepMediaHandler(sopMediaService)
-	tusHandler := handlers.NewTusHandler(tusService)
 	spaceHandler := handlers.NewSpaceHandler(spaceService, spaceMemberRepo)
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
@@ -97,23 +72,17 @@ func New(cfg *config.Config) *App {
 		BodyLimit: int(maxUploadSize), // Use the configured max upload size
 	})
 
-	// Add CORS middleware with TUS-specific headers
-	// TUS built-in CORS is disabled, so Fiber handles all CORS
+	// Add CORS middleware
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "http://localhost:5173,http://localhost:5174",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, Content-Length, " +
-			"Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, " +
-			"Upload-Defer-Length, Upload-Concat, X-Requested-With, X-Space-ID",
-		AllowMethods: "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
-		ExposeHeaders: "Tus-Resumable, Tus-Version, Tus-Extension, " +
-			"Upload-Offset, Upload-Length, Upload-Metadata, Location, Content-Length",
+		AllowOrigins:     "http://localhost:5173,http://localhost:5174",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Content-Length, X-Requested-With, X-Space-ID",
+		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
 		AllowCredentials: true,
 	}))
 
 	// Middleware
 	authMiddleware := auth.NewAuthMiddleware(userRepo, apiKeyRepo, spaceMemberRepo, cfg.JWTSecret)
 	requirePasswordChanged := middleware.RequirePasswordChanged()
-	requireSpaceAccess := middleware.RequireSpaceAccess(spaceMemberRepo)
 
 	// ── Public routes (no auth) ────────────────────────────────────────
 	handlers.RegisterHealthRoutes(app, nil)
@@ -125,9 +94,6 @@ func New(cfg *config.Config) *App {
 	authHandler.RegisterProtectedAuthRoutes(app, authMiddleware)
 
 	// ── Fully guarded routes (auth + password changed) ─────────────────
-	sopHandler.RegisterSOPRoutes(app, authMiddleware, requirePasswordChanged, requireSpaceAccess)
-	sopMediaHandler.RegisterMediaRoutes(app, authMiddleware)
-	tusHandler.RegisterTusRoutes(app, authMiddleware)
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────

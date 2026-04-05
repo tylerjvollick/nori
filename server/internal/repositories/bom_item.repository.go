@@ -32,31 +32,6 @@ func (r *BOMItemRepository) GetByID(id int) (*models.BOMItem, error) {
 	return &item, nil
 }
 
-func (r *BOMItemRepository) GetByVersionID(versionID int) ([]models.BOMItem, error) {
-	var items []models.BOMItem
-	err := r.db.Where("sop_version_id = ?", versionID).
-		Order("id ASC").
-		Find(&items).Error
-	return items, err
-}
-
-func (r *BOMItemRepository) GetByVersionIDWithMaterial(versionID int) ([]models.BOMItem, error) {
-	var items []models.BOMItem
-	err := r.db.Where("sop_version_id = ?", versionID).
-		Preload("Material").
-		Order("id ASC").
-		Find(&items).Error
-	return items, err
-}
-
-func (r *BOMItemRepository) GetByStepID(stepID int) ([]models.BOMItem, error) {
-	var items []models.BOMItem
-	err := r.db.Where("sop_step_id = ?", stepID).
-		Order("id ASC").
-		Find(&items).Error
-	return items, err
-}
-
 func (r *BOMItemRepository) GetByMaterialID(materialID uuid.UUID) ([]models.BOMItem, error) {
 	var items []models.BOMItem
 	err := r.db.Where("material_id = ?", materialID).
@@ -71,23 +46,4 @@ func (r *BOMItemRepository) Update(item *models.BOMItem) error {
 
 func (r *BOMItemRepository) Delete(id int) error {
 	return r.db.Delete(&models.BOMItem{}, "id = ?", id).Error
-}
-
-func (r *BOMItemRepository) DeleteByVersionID(versionID int) error {
-	return r.db.Where("sop_version_id = ?", versionID).Delete(&models.BOMItem{}).Error
-}
-
-func (r *BOMItemRepository) GetByVersionIDWithTx(tx *gorm.DB, versionID int) ([]models.BOMItem, error) {
-	var items []models.BOMItem
-	err := tx.Where("sop_version_id = ?", versionID).
-		Order("id ASC").
-		Find(&items).Error
-	return items, err
-}
-
-func (r *BOMItemRepository) CreateBatchWithTx(tx *gorm.DB, items []models.BOMItem) error {
-	if len(items) == 0 {
-		return nil
-	}
-	return tx.Create(&items).Error
 }
