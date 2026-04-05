@@ -39,7 +39,7 @@
       <div class="px-4 py-6 sm:px-0">
         <div class="text-center mb-12">
           <h2 class="text-3xl font-bold text-foreground mb-4">
-            Welcome back, {user.firstName}!
+            Welcome back{user.firstName ? `, ${user.firstName}` : ''}!
           </h2>
           <p class="text-muted-foreground text-lg">
             A thin layer that holds everything together for your business processes.

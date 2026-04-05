@@ -1,4 +1,27 @@
+import { browser } from '$app/environment';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+
+/**
+ * Get the active space ID from localStorage.
+ * The auth store writes this value when a space is selected.
+ */
+function getActiveSpaceID(): string | null {
+  if (!browser) return null;
+  return localStorage.getItem('activeSpaceId');
+}
+
+/**
+ * Set the active space ID in localStorage.
+ */
+export function setActiveSpaceID(spaceId: string | null): void {
+  if (!browser) return;
+  if (spaceId) {
+    localStorage.setItem('activeSpaceId', spaceId);
+  } else {
+    localStorage.removeItem('activeSpaceId');
+  }
+}
 
 export class ApiClient {
   private baseURL: string;
@@ -7,9 +30,24 @@ export class ApiClient {
     this.baseURL = baseURL;
   }
 
-  private getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('accessToken');
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  private getHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+
+    // Auth token from localStorage (fallback; primary auth is via HTTP-only cookie)
+    if (browser) {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+
+    // Space scoping header
+    const spaceId = getActiveSpaceID();
+    if (spaceId) {
+      headers['X-Space-ID'] = spaceId;
+    }
+
+    return headers;
   }
 
   async request<T>(
@@ -17,18 +55,41 @@ export class ApiClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
-    const headers = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...this.getAuthHeaders(),
-      ...options.headers,
+      ...this.getHeaders(),
+      ...(options.headers as Record<string, string> || {}),
     };
 
     const response = await fetch(url, {
       ...options,
       headers,
+      credentials: 'include', // Send HTTP-only cookies with every request
     });
 
     if (!response.ok) {
+      // Handle 401 Unauthorized — redirect to login
+      if (response.status === 401) {
+        if (browser) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('activeSpaceId');
+          window.location.href = '/login';
+        }
+        throw new Error('Unauthorized');
+      }
+
+      // Handle 403 Forbidden — check for MUST_CHANGE_PASSWORD code
+      if (response.status === 403) {
+        const body = await response.json().catch(() => ({}));
+        if (body.code === 'MUST_CHANGE_PASSWORD') {
+          if (browser) {
+            window.location.href = '/change-password';
+          }
+          throw new Error('Must change password');
+        }
+        throw new Error(body.error || 'Forbidden');
+      }
+
       const error = await response.json().catch(() => ({ error: 'Network error' }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }
@@ -45,14 +106,14 @@ export class ApiClient {
     return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<T> {
+  async post<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  async put<T>(endpoint: string, data?: any): Promise<T> {
+  async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,
@@ -63,7 +124,7 @@ export class ApiClient {
     return this.request<T>(endpoint, { method: 'DELETE' });
   }
 
-  async patch<T>(endpoint: string, data?: any): Promise<T> {
+  async patch<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PATCH',
       body: data ? JSON.stringify(data) : undefined,
@@ -74,16 +135,37 @@ export class ApiClient {
     const url = `${this.baseURL}${endpoint}`;
     const headers = {
       // Don't set Content-Type, let browser set it with boundary
-      ...this.getAuthHeaders(),
+      ...this.getHeaders(),
     };
 
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: formData,
+      credentials: 'include',
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        if (browser) {
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('activeSpaceId');
+          window.location.href = '/login';
+        }
+        throw new Error('Unauthorized');
+      }
+
+      if (response.status === 403) {
+        const body = await response.json().catch(() => ({}));
+        if (body.code === 'MUST_CHANGE_PASSWORD') {
+          if (browser) {
+            window.location.href = '/change-password';
+          }
+          throw new Error('Must change password');
+        }
+        throw new Error(body.error || 'Forbidden');
+      }
+
       const error = await response.json().catch(() => ({ error: 'Network error' }));
       throw new Error(error.error || `HTTP ${response.status}`);
     }

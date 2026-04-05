@@ -1,20 +1,21 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
-import type { User, LoginResponse } from '$lib/api/auth';
+import { authApi, type User, type LoginResponse } from '$lib/api/auth';
+import { setActiveSpaceID } from '$lib/api/client';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  mustChangePassword: boolean;
 }
 
 function createAuthStore() {
   const initialState: AuthState = {
     user: null,
-    token: null,
     isLoading: true,
     isAuthenticated: false,
+    mustChangePassword: false,
   };
 
   const { subscribe, set, update } = writable<AuthState>(initialState);
@@ -22,79 +23,119 @@ function createAuthStore() {
   return {
     subscribe,
 
+    /**
+     * Initialize auth state by calling GET /auth/me.
+     * The backend reads the JWT from the HTTP-only `nori_token` cookie,
+     * so no token needs to be sent manually. The apiClient sends
+     * `credentials: 'include'` to ensure the cookie is attached.
+     *
+     * Falls back to localStorage token (Authorization header) for
+     * backwards compatibility during migration.
+     */
     async initialize() {
       if (!browser) return;
 
-      const token = localStorage.getItem('accessToken');
-      if (!token) {
-        update(state => ({ ...state, isLoading: false }));
-        return;
-      }
-
       try {
-        // Verify token by fetching user profile
-        const response = await fetch('http://localhost:8080/user/me', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const user = await authApi.getCurrentUser();
 
-        if (response.ok) {
-          const user = await response.json();
-          set({
-            user,
-            token,
-            isLoading: false,
-            isAuthenticated: true,
-          });
-        } else {
-          // Token is invalid, clear it
-          localStorage.removeItem('accessToken');
-          set({
-            user: null,
-            token: null,
-            isLoading: false,
-            isAuthenticated: false,
-          });
+        // Persist the active space ID for the X-Space-ID header
+        if (user.activeSpaceId) {
+          setActiveSpaceID(user.activeSpaceId);
         }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
+
+        set({
+          user,
+          isLoading: false,
+          isAuthenticated: true,
+          mustChangePassword: false,
+        });
+      } catch {
+        // Token/cookie is invalid or missing — user is not authenticated
         localStorage.removeItem('accessToken');
+        setActiveSpaceID(null);
         set({
           user: null,
-          token: null,
           isLoading: false,
           isAuthenticated: false,
+          mustChangePassword: false,
         });
       }
     },
 
+    /**
+     * Process a successful login response.
+     * The backend sets the HTTP-only cookie automatically on POST /auth/login.
+     * We also store the token in localStorage as a fallback for the
+     * Authorization header (the apiClient sends both).
+     */
     async login(loginResponse: LoginResponse) {
       if (!browser) return;
 
+      // Store token in localStorage as fallback
       localStorage.setItem('accessToken', loginResponse.accessToken);
-      set({
-        user: {
-          id: loginResponse.userId,
-          email: loginResponse.userEmail,
-          firstName: loginResponse.firstName,
-          lastName: loginResponse.lastName,
-        },
-        token: loginResponse.accessToken,
-        isLoading: false,
-        isAuthenticated: true,
-      });
+
+      // Persist active space ID
+      if (loginResponse.activeSpaceId) {
+        setActiveSpaceID(loginResponse.activeSpaceId);
+      }
+
+      if (loginResponse.mustChangePassword) {
+        set({
+          user: null,
+          isLoading: false,
+          isAuthenticated: true,
+          mustChangePassword: true,
+        });
+        return;
+      }
+
+      // Fetch full user profile (includes accessibleSpaces, role, etc.)
+      try {
+        const user = await authApi.getCurrentUser();
+        set({
+          user,
+          isLoading: false,
+          isAuthenticated: true,
+          mustChangePassword: false,
+        });
+      } catch {
+        // Fallback: use the login response data directly
+        set({
+          user: {
+            id: loginResponse.userId,
+            email: loginResponse.userEmail,
+            firstName: loginResponse.firstName,
+            lastName: loginResponse.lastName,
+            activeSpaceId: loginResponse.activeSpaceId,
+            accessibleSpaces: [],
+          },
+          isLoading: false,
+          isAuthenticated: true,
+          mustChangePassword: false,
+        });
+      }
     },
 
-    logout() {
+    /**
+     * Log out the user. Calls POST /auth/logout to clear the HTTP-only cookie
+     * on the backend, then clears local state.
+     */
+    async logout() {
       if (!browser) return;
 
+      try {
+        await authApi.logout();
+      } catch {
+        // Best-effort: even if the server call fails, clear local state
+      }
+
       localStorage.removeItem('accessToken');
+      setActiveSpaceID(null);
       set({
         user: null,
-        token: null,
         isLoading: false,
         isAuthenticated: false,
+        mustChangePassword: false,
       });
     },
 

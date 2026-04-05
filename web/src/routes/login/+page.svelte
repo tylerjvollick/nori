@@ -22,6 +22,13 @@
     try {
       const loginData: LoginRequest = { email, password };
       const response = await authApi.login(loginData);
+
+      if (response.mustChangePassword) {
+        await authStore.login(response);
+        goto('/change-password');
+        return;
+      }
+
       await authStore.login(response);
       goto('/');
     } catch (err) {
@@ -63,12 +70,6 @@
       <h2 class="mt-6 text-center text-3xl font-extrabold text-foreground">
         Sign in to your account
       </h2>
-      <p class="mt-2 text-center text-sm text-muted-foreground">
-        Or
-        <a href="/register" class="font-medium text-primary hover:text-primary/80">
-          create a new account
-        </a>
-      </p>
     </div>
 
     <form class="mt-8 space-y-6" on:submit|preventDefault={handleLogin}>

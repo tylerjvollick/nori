@@ -151,7 +151,7 @@
         {#if user}
           <div class="flex items-center gap-3 pl-3 border-l border-border">
             <span class="text-sm text-foreground hidden sm:inline">
-              {user.firstName} {user.lastName}
+              {user.firstName ?? ''} {user.lastName ?? ''}
             </span>
             <Button
               onclick={handleLogout}

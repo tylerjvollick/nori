@@ -267,7 +267,7 @@
 									</div>
 									<div class="grid flex-1 text-left text-sm leading-tight">
 										<span class="truncate font-semibold"
-											>{user?.firstName} {user?.lastName}</span
+											>{user?.firstName ?? ''} {user?.lastName ?? ''}</span
 										>
 										<span class="truncate text-xs text-muted-foreground">{user?.email}</span>
 									</div>

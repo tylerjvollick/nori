@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import favicon from '$lib/assets/favicon.svg';
 	import { authStore } from '$lib/stores/auth';
@@ -33,10 +34,10 @@
 		theme = value;
 	});
 
-	// Check if we're on login or register page
+	// Check if we're on login, register, or change-password page
 	let isAuthPage = $derived(() => {
-		const pathname = $page.url.pathname;
-		return pathname === '/login' || pathname === '/register';
+		const pathname: string = $page.url.pathname;
+		return pathname === '/login' || pathname === '/register' || pathname === '/change-password';
 	});
 
 	onMount(() => {
@@ -62,8 +63,9 @@
 		showCreateSOPModal = false;
 	}
 
-	function handleLogout() {
-		authStore.logout();
+	async function handleLogout() {
+		await authStore.logout();
+		goto('/login');
 	}
 
 	function toggleTheme() {
@@ -183,8 +185,7 @@
 					{#if user}
 						<div class="flex items-center gap-3 pl-3 border-l border-border">
 							<span class="text-sm text-foreground hidden sm:inline">
-								{user.firstName}
-								{user.lastName}
+								{user.firstName ?? ''} {user.lastName ?? ''}
 							</span>
 							<Button onclick={handleLogout} variant="ghost" size="sm" class="text-sm">
 								Logout
