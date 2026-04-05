@@ -5,12 +5,14 @@
   import type { LoginRequest } from '$lib/api/auth';
   import { Button } from '$lib/components/ui/button';
 
-  let email = '';
-  let password = '';
-  let isLoading = false;
-  let error = '';
+  let email = $state('');
+  let password = $state('');
+  let isLoading = $state(false);
+  let error = $state('');
 
-  async function handleLogin() {
+  async function handleLogin(event: SubmitEvent) {
+    event.preventDefault();
+
     if (!email || !password) {
       error = 'Please fill in all fields';
       return;
@@ -35,12 +37,6 @@
       error = err instanceof Error ? err.message : 'Login failed';
     } finally {
       isLoading = false;
-    }
-  }
-
-  function handleKeyPress(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      handleLogin();
     }
   }
 </script>
@@ -72,7 +68,7 @@
       </h2>
     </div>
 
-    <form class="mt-8 space-y-6" on:submit|preventDefault={handleLogin}>
+    <form class="mt-8 space-y-6" onsubmit={handleLogin}>
       <div class="rounded-md shadow-sm -space-y-px">
         <div>
           <label for="email" class="sr-only">Email address</label>
@@ -85,7 +81,6 @@
             class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-t-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Email address"
             bind:value={email}
-            on:keypress={handleKeyPress}
           />
         </div>
         <div>
@@ -99,7 +94,6 @@
             class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-b-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Password"
             bind:value={password}
-            on:keypress={handleKeyPress}
           />
         </div>
       </div>

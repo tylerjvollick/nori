@@ -14,33 +14,30 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Button } from '$lib/components/ui/button';
 	import { Moon, Sun, Plus } from 'lucide-svelte';
-	import type { User } from '$lib/api/auth';
 
 	let { children } = $props();
 
 	let showCreateTaskModal = $state(false);
 	let showCreateSOPModal = $state(false);
 	let showCreateDropdown = $state(false);
-	let user = $state<User | null>(null);
 	let theme: 'light' | 'dark' = $state('light');
 
-	// Subscribe to authStore to check if user is logged in
-	authStore.subscribe((state) => {
-		user = state.user;
-	});
+	// Use server-provided user from hooks.server.ts via +layout.server.ts
+	let user = $derived($page.data.user);
 
 	// Subscribe to theme store
 	themeStore.subscribe((value) => {
 		theme = value;
 	});
 
-	// Check if we're on login, register, or change-password page
+	// Check if we're on login or change-password page (no app shell needed)
 	let isAuthPage = $derived(() => {
 		const pathname: string = $page.url.pathname;
-		return pathname === '/login' || pathname === '/register' || pathname === '/change-password';
+		return pathname === '/login' || pathname === '/change-password';
 	});
 
 	onMount(() => {
+		// Initialize the client-side auth store for API calls (logout, etc.)
 		authStore.initialize();
 		themeStore.initialize();
 	});

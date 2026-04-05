@@ -30,6 +30,7 @@ export interface User {
   firstName?: string;
   lastName?: string;
   role?: 'admin' | 'user';
+  mustChangePassword: boolean;
   activeSpaceId?: string;
   accessibleSpaces: Space[];
 }

@@ -1,38 +1,15 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-  import { authStore } from '$lib/stores/auth';
-  import type { User } from '$lib/api/auth';
+  import { page } from '$app/stores';
   import { Button } from '$lib/components/ui/button';
 
-  let user: User | null = null;
-  let isLoading = true;
-
-  onMount(() => {
-    authStore.initialize();
-  });
-
-  // Subscribe to auth store changes
-  authStore.subscribe((state) => {
-    user = state.user;
-    isLoading = state.isLoading;
-
-    // Redirect to login if not authenticated
-    if (!isLoading && !state.isAuthenticated) {
-      goto('/login');
-    }
-  });
+  let user = $derived($page.data.user);
 </script>
 
 <svelte:head>
   <title>Dashboard - Nori</title>
 </svelte:head>
 
-{#if isLoading}
-  <div class="min-h-screen flex items-center justify-center bg-background">
-    <div class="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"></div>
-  </div>
-{:else if user}
+{#if user}
   <div class="min-h-screen bg-background">
     <!-- Main content -->
     <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">

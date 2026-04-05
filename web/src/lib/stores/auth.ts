@@ -106,6 +106,7 @@ function createAuthStore() {
             email: loginResponse.userEmail,
             firstName: loginResponse.firstName,
             lastName: loginResponse.lastName,
+            mustChangePassword: false,
             activeSpaceId: loginResponse.activeSpaceId,
             accessibleSpaces: [],
           },

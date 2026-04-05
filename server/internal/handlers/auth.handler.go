@@ -165,13 +165,14 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusOK).JSON(dtos.MeResponseDTO{
-		ID:               user.ID,
-		Email:            user.Email,
-		FirstName:        user.FirstName,
-		LastName:         user.LastName,
-		Role:             user.Role,
-		ActiveSpaceID:    authDTO.ActiveSpaceID,
-		AccessibleSpaces: spacesDTOs,
+		ID:                 user.ID,
+		Email:              user.Email,
+		FirstName:          user.FirstName,
+		LastName:           user.LastName,
+		Role:               user.Role,
+		MustChangePassword: user.MustChangePassword,
+		ActiveSpaceID:      authDTO.ActiveSpaceID,
+		AccessibleSpaces:   spacesDTOs,
 	})
 }
 
