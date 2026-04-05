@@ -7,7 +7,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
-	"github.com/tylerjvollick/nori/internal/middleware"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/services"
 )
@@ -22,17 +21,12 @@ func NewAdminUserHandler(adminUserService *services.AdminUserService) *AdminUser
 	}
 }
 
-func (h *AdminUserHandler) RegisterAdminUserRoutes(app *fiber.App) {
-	admin := app.Group("/admin")
-
-	// Apply RequireAdmin middleware to all admin routes
-	admin.Use(middleware.RequireAdmin())
-
+func (h *AdminUserHandler) RegisterAdminUserRoutes(router fiber.Router) {
 	// User management endpoints
-	admin.Post("/users", h.CreateUser)
-	admin.Get("/users", h.ListUsers)
-	admin.Put("/users/:id", h.UpdateUser)
-	admin.Delete("/users/:id", h.DeleteUser)
+	router.Post("/users", h.CreateUser)
+	router.Get("/users", h.ListUsers)
+	router.Put("/users/:id", h.UpdateUser)
+	router.Delete("/users/:id", h.DeleteUser)
 }
 
 // CreateUserRequest defines the request body for creating a user

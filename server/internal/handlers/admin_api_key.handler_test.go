@@ -108,8 +108,9 @@ func setupAPIKeyApp(handler *AdminAPIKeyHandler, authDTO *dtos.AuthDTO) *fiber.A
 
 func TestAdminAPIKeyRoutes_AllRegistered(t *testing.T) {
 	app := fiber.New()
+	admin := app.Group("/admin")
 	handler := NewAdminAPIKeyHandler(nil, nil)
-	handler.RegisterAdminAPIKeyRoutes(app)
+	handler.RegisterAdminAPIKeyRoutes(admin)
 
 	routes := app.GetRoutes()
 
@@ -155,7 +156,7 @@ func TestAdminAPIKeyRoutes_RequireAdminMiddleware(t *testing.T) {
 	handler := NewAdminAPIKeyHandler(&mockAPIKeyService{}, &mockAPIKeyRepo{})
 	admin := app.Group("/admin")
 	admin.Use(middleware.RequireAdmin())
-	admin.Post("/api-keys", handler.CreateAPIKey)
+	handler.RegisterAdminAPIKeyRoutes(admin)
 
 	requestBody := map[string]interface{}{
 		"name": "My API Key",

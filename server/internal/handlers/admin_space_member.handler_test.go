@@ -144,8 +144,9 @@ func setupSpaceMemberApp(handler *AdminSpaceMemberHandler, authDTO *dtos.AuthDTO
 
 func TestAdminSpaceMemberRoutes_AllRegistered(t *testing.T) {
 	app := fiber.New()
+	admin := app.Group("/admin")
 	handler := NewAdminSpaceMemberHandler(newMockSpaceMemberRepo(), newMockSpaceRepo())
-	handler.RegisterAdminSpaceMemberRoutes(app)
+	handler.RegisterAdminSpaceMemberRoutes(admin)
 
 	routes := app.GetRoutes()
 
@@ -191,7 +192,7 @@ func TestAdminSpaceMemberRoutes_RequireAdminMiddleware(t *testing.T) {
 	handler := NewAdminSpaceMemberHandler(newMockSpaceMemberRepo(), newMockSpaceRepo())
 	admin := app.Group("/admin")
 	admin.Use(middleware.RequireAdmin())
-	admin.Post("/spaces/:id/members", handler.AddSpaceMember)
+	handler.RegisterAdminSpaceMemberRoutes(admin)
 
 	spaceID := uuid.New()
 	requestBody := map[string]interface{}{

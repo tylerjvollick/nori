@@ -17,8 +17,8 @@ func NewSpaceHandler(spaceService *services.SpaceService) *SpaceHandler {
 	return &SpaceHandler{spaceService: spaceService}
 }
 
-func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, authMiddleware fiber.Handler) {
-	group := app.Group("/api/spaces", authMiddleware)
+func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, middlewares ...fiber.Handler) {
+	group := app.Group("/api/spaces", middlewares...)
 
 	group.Post("", h.CreateSpace)
 	group.Get("", h.GetSpaces)

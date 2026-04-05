@@ -16,22 +16,22 @@ func NewSOPStepMediaHandler(mediaService *services.SOPStepMediaService) *SOPStep
 	return &SOPStepMediaHandler{mediaService: mediaService}
 }
 
-func (h *SOPStepMediaHandler) RegisterMediaRoutes(app *fiber.App) {
+func (h *SOPStepMediaHandler) RegisterMediaRoutes(app *fiber.App, authMiddleware fiber.Handler) {
 	// Media routes under /sops/:id/steps/:stepId/media
-	app.Post("/sops/:id/steps/:stepId/media", h.UploadMedia)
-	app.Get("/sops/:id/steps/:stepId/media", h.GetStepMedia)
-	app.Delete("/media/:mediaId", h.DeleteMedia)
-	app.Patch("/media/:mediaId/reorder", h.ReorderMedia)
+	app.Post("/sops/:id/steps/:stepId/media", authMiddleware, h.UploadMedia)
+	app.Get("/sops/:id/steps/:stepId/media", authMiddleware, h.GetStepMedia)
+	app.Delete("/media/:mediaId", authMiddleware, h.DeleteMedia)
+	app.Patch("/media/:mediaId/reorder", authMiddleware, h.ReorderMedia)
 
 	// Serve media files
-	app.Get("/media/:uuid", h.ServeMedia)
+	app.Get("/media/:uuid", authMiddleware, h.ServeMedia)
 
 	// Backwards compatibility: keep /photos routes
-	app.Post("/sops/:id/steps/:stepId/photos", h.UploadMedia)
-	app.Get("/sops/:id/steps/:stepId/photos", h.GetStepMedia)
-	app.Delete("/photos/:photoId", h.DeleteMedia)
-	app.Patch("/photos/:photoId/reorder", h.ReorderMedia)
-	app.Get("/photos/:uuid", h.ServeMedia)
+	app.Post("/sops/:id/steps/:stepId/photos", authMiddleware, h.UploadMedia)
+	app.Get("/sops/:id/steps/:stepId/photos", authMiddleware, h.GetStepMedia)
+	app.Delete("/photos/:photoId", authMiddleware, h.DeleteMedia)
+	app.Patch("/photos/:photoId/reorder", authMiddleware, h.ReorderMedia)
+	app.Get("/photos/:uuid", authMiddleware, h.ServeMedia)
 }
 
 // UploadMedia handles media upload for a step (photo or video)

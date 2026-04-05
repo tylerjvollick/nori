@@ -16,10 +16,10 @@ func NewUserHandler(userService *services.UserService) *UserHandler {
 	return &UserHandler{userService: userService}
 }
 
-func (h *UserHandler) RegisterUserRoutes(app *fiber.App, authMiddleware fiber.Handler) {
+func (h *UserHandler) RegisterUserRoutes(app *fiber.App, middlewares ...fiber.Handler) {
 	group := app.Group("/user")
 
-	group.Get("/me", authMiddleware, h.Me)
+	group.Get("/me", append(middlewares, h.Me)...)
 }
 
 func (h *UserHandler) Me(c *fiber.Ctx) error {

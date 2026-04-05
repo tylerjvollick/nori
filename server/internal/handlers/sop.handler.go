@@ -18,27 +18,27 @@ func NewSOPHandler(sopService *services.SOPService) *SOPHandler {
 	return &SOPHandler{sopService: sopService}
 }
 
-func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App, authMiddleware fiber.Handler) {
+func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App, middlewares ...fiber.Handler) {
 	group := app.Group("/sops")
 
 	// Step operation routes - work with template ID
-	group.Post("/:id/steps", authMiddleware, h.CreateStep)
-	group.Put("/:id/steps/:stepId", authMiddleware, h.UpdateStep)
-	group.Delete("/:id/steps/:stepId", authMiddleware, h.DeleteStep)
-	group.Patch("/:id/steps/:stepId/reorder", authMiddleware, h.ReorderSteps)
+	group.Post("/:id/steps", append(middlewares, h.CreateStep)...)
+	group.Put("/:id/steps/:stepId", append(middlewares, h.UpdateStep)...)
+	group.Delete("/:id/steps/:stepId", append(middlewares, h.DeleteStep)...)
+	group.Patch("/:id/steps/:stepId/reorder", append(middlewares, h.ReorderSteps)...)
 
 	// Version routes (must come before generic /:id route)
-	group.Get("/versions/:versionId", authMiddleware, h.GetSOPVersion)
+	group.Get("/versions/:versionId", append(middlewares, h.GetSOPVersion)...)
 
 	// Public routes
-	group.Get("/", authMiddleware, h.GetAllSOPs)
-	group.Post("/", authMiddleware, h.CreateSOP)
+	group.Get("/", append(middlewares, h.GetAllSOPs)...)
+	group.Post("/", append(middlewares, h.CreateSOP)...)
 
 	// Parameterized routes (must come after specific routes)
-	group.Get("/:id", authMiddleware, h.GetSOP)
-	group.Put("/:id", authMiddleware, h.UpdateSOP)
-	group.Delete("/:id", authMiddleware, h.DeleteSOP)
-	group.Get("/:id/versions", authMiddleware, h.GetSOPVersions)
+	group.Get("/:id", append(middlewares, h.GetSOP)...)
+	group.Put("/:id", append(middlewares, h.UpdateSOP)...)
+	group.Delete("/:id", append(middlewares, h.DeleteSOP)...)
+	group.Get("/:id/versions", append(middlewares, h.GetSOPVersions)...)
 }
 
 // CreateSOP creates a new SOP template with its first version

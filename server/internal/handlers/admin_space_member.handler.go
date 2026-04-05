@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
-	"github.com/tylerjvollick/nori/internal/middleware"
 	"github.com/tylerjvollick/nori/internal/models"
 )
 
@@ -40,16 +39,11 @@ func NewAdminSpaceMemberHandler(
 	}
 }
 
-func (h *AdminSpaceMemberHandler) RegisterAdminSpaceMemberRoutes(app *fiber.App) {
-	admin := app.Group("/admin")
-
-	// Apply RequireAdmin middleware to all admin routes
-	admin.Use(middleware.RequireAdmin())
-
+func (h *AdminSpaceMemberHandler) RegisterAdminSpaceMemberRoutes(router fiber.Router) {
 	// Space membership endpoints
-	admin.Post("/spaces/:id/members", h.AddSpaceMember)
-	admin.Get("/spaces/:id/members", h.GetSpaceMembers)
-	admin.Delete("/spaces/:id/members/:userId", h.RemoveSpaceMember)
+	router.Post("/spaces/:id/members", h.AddSpaceMember)
+	router.Get("/spaces/:id/members", h.GetSpaceMembers)
+	router.Delete("/spaces/:id/members/:userId", h.RemoveSpaceMember)
 }
 
 // AddSpaceMemberRequest defines the request body for adding a user to a space

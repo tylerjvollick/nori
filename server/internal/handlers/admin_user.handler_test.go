@@ -19,8 +19,9 @@ func TestAdminUserRoutes_AllRegistered(t *testing.T) {
 	// This test verifies that all admin user routes are registered
 
 	app := fiber.New()
+	admin := app.Group("/admin")
 	handler := NewAdminUserHandler(nil) // nil is okay for route registration test
-	handler.RegisterAdminUserRoutes(app)
+	handler.RegisterAdminUserRoutes(admin)
 
 	routes := app.GetRoutes()
 
@@ -287,9 +288,7 @@ func TestDeleteUser_ValidatesUserID(t *testing.T) {
 func TestAdminUserRoutes_RequireAdminMiddleware(t *testing.T) {
 	// This test verifies that admin routes require admin role
 
-	app := fiber.New()
 	handler := NewAdminUserHandler(nil)
-	handler.RegisterAdminUserRoutes(app)
 
 	// Create a regular user (non-admin)
 	userRole := models.RoleUser
@@ -302,23 +301,17 @@ func TestAdminUserRoutes_RequireAdminMiddleware(t *testing.T) {
 		AccountID: accountID,
 	}
 
-	// Inject authDTO into the request context manually
+	// Set up app with auth mock and RequireAdmin middleware
+	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("authDTO", authDTO)
 		return c.Next()
 	})
 
-	// Also need to re-register the admin routes AFTER the auth mock
-	app2 := fiber.New()
-	app2.Use(func(c *fiber.Ctx) error {
-		c.Locals("authDTO", authDTO)
-		return c.Next()
-	})
-
-	// Apply RequireAdmin middleware
-	admin := app2.Group("/admin")
+	// Apply RequireAdmin middleware to the admin group
+	admin := app.Group("/admin")
 	admin.Use(middleware.RequireAdmin())
-	admin.Post("/users", handler.CreateUser)
+	handler.RegisterAdminUserRoutes(admin)
 
 	requestBody := map[string]interface{}{
 		"email":        "test@example.com",
@@ -334,7 +327,7 @@ func TestAdminUserRoutes_RequireAdminMiddleware(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	// Act
-	resp, err := app2.Test(req, -1)
+	resp, err := app.Test(req, -1)
 
 	// Assert
 	assert.NoError(t, err)

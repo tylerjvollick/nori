@@ -1,0 +1,278 @@
+{
+  "name": "Auth & Tenancy Completion",
+  "description": "Complete the remaining 30% of auth and tenancy: wire middleware to routes, register admin handlers, build frontend auth flows in Svelte 5 + Tailwind v4, implement CLI authentication, and clean up dead code.",
+  "branchName": "ralph/auth-tenancy-completion",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Wire middleware and register admin routes in app.go",
+      "description": "As a developer, I want all middleware guards wired to the correct route groups and admin handlers registered so that the backend enforces authentication, authorization, and space scoping.",
+      "acceptanceCriteria": [
+        "RequirePasswordChanged() middleware is applied to all authenticated route groups except /auth/change-password and /auth/logout",
+        "RequireSpaceAccess() middleware is applied to space-scoped route groups (SOPs, future station/ticket routes)",
+        "authMiddleware is applied to media upload routes (/sops/:id/steps/:stepId/media/*, /media/*) and TUS routes (/api/tus/*)",
+        "AdminUserHandler, AdminAPIKeyHandler, and AdminSpaceMemberHandler are instantiated and their Register*Routes() methods are called in app.go",
+        "Admin routes are grouped under an authenticated route group with RequireAdmin() applied",
+        "Existing tests continue to pass; new integration tests verify that unauthenticated requests to media/TUS routes return 401",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "",
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-002",
+      "title": "Restrict space creation and filter space listing",
+      "description": "As an admin, I want only admins to create spaces and users to only see spaces they're members of, so that space access is properly controlled.",
+      "acceptanceCriteria": [
+        "POST /api/spaces returns 403 for non-admin users",
+        "GET /api/spaces returns all account spaces for admins",
+        "GET /api/spaces returns only spaces where the user has a SpaceMember record for non-admin users",
+        "Tests verify both admin and user behavior for space creation and listing",
+        "Existing space endpoints (GET /api/spaces/:id, PUT, DELETE) check space access (admin or SpaceMember)",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-003",
+      "title": "Add space scoping to SOP queries",
+      "description": "As a user, I want SOP queries filtered by active space so that I only see SOPs belonging to my current space.",
+      "acceptanceCriteria": [
+        "SOP list and detail queries filter by the ActiveSpaceID from the auth context",
+        "Creating an SOP associates it with the active space",
+        "Requests without an active space return an appropriate error (e.g., 400 'no active space')",
+        "Tests verify no cross-space data leakage (user in Space A cannot see SOPs from Space B)",
+        "If the SOP model doesn't have a SpaceID field, add it with a migration",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-001",
+        "US-002"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Clean up dead backend code",
+      "description": "As a developer, I want dead code removed so the codebase is clean and doesn't confuse future contributors.",
+      "acceptanceCriteria": [
+        "server/internal/auth/permissions.go (bitmask permission system) is deleted",
+        "Any references to the old auth.Role type from permissions.go are removed",
+        "The duplicate GET /user/me route is removed (replaced by GET /auth/me)",
+        "All tests pass after cleanup",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Independent of other stories, can be done anytime.",
+      "dependsOn": []
+    },
+    {
+      "id": "US-005",
+      "title": "Update frontend auth store and API client",
+      "description": "As a frontend developer, I want the auth store and API client updated to match the new backend so that login, session management, and API calls work correctly.",
+      "acceptanceCriteria": [
+        "Auth store initialize() calls /auth/me instead of /user/me and uses the apiClient instead of hardcoded fetch",
+        "Auth store handles mustChangePassword flag from the login/me response",
+        "authApi removes the register() method and updates getCurrentUser() to call /auth/me",
+        "API client sends X-Space-ID header when an active space is set",
+        "API client intercepts 401 responses and redirects to /login",
+        "API client intercepts 403 with MUST_CHANGE_PASSWORD code and redirects to /change-password",
+        "User type is updated to match backend DTO (role: admin | user, includes mustChangePassword)",
+        "Token is read from HTTP-only cookie (backend sets it) rather than only localStorage",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Must be completed before frontend page stories (US-006 through US-010).",
+      "dependsOn": []
+    },
+    {
+      "id": "US-006",
+      "title": "Add SvelteKit route guards and server hooks",
+      "description": "As a user, I want to be redirected to login when unauthenticated and to password change when required, from any page.",
+      "acceptanceCriteria": [
+        "hooks.server.ts (or hooks.client.ts) is created with auth logic that protects all routes except /login",
+        "Unauthenticated users are redirected to /login from any page (not just /)",
+        "Users with mustChangePassword are redirected to /change-password from any page except /change-password and /login",
+        "app.d.ts types are uncommented and populated with proper Locals and PageData types",
+        "The register page (/register) is removed since self-registration is disabled",
+        "Login and register pages are migrated from Svelte 4 event syntax (on:submit|preventDefault) to Svelte 5 syntax (onsubmit)",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-005"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Build password change page",
+      "description": "As a user who must change their password, I want a password change form so that I can set a new password and access the application.",
+      "acceptanceCriteria": [
+        "New route at /change-password with old password, new password, and confirm password fields",
+        "Client-side validation: all fields required, new passwords must match, minimum length",
+        "Calls POST /auth/change-password endpoint",
+        "On success, updates auth store with new token/user and redirects to / (or onboarding if no spaces)",
+        "Shows error messages for incorrect old password or server errors",
+        "Built with Svelte 5 runes syntax and Tailwind v4",
+        "Page is accessible without full app chrome (sidebar/header) since user hasn't completed auth flow",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-005",
+        "US-006"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Build onboarding flow for first space creation",
+      "description": "As an admin logging in for the first time, I want to be guided to create my first space so that I can start using Nori.",
+      "acceptanceCriteria": [
+        "After login (and password change if required), if the user is an admin and no spaces exist, show the onboarding flow",
+        "Onboarding page at /onboarding (or modal) with space name input and template selector",
+        "Calls POST /api/spaces to create the space",
+        "On success, sets the new space as active and redirects to the space view",
+        "Non-admin users who have no spaces see a message like 'No spaces available. Contact your admin.'",
+        "Built with Svelte 5 runes syntax and Tailwind v4",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-007"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Build space selector in header/sidebar",
+      "description": "As a user with access to multiple spaces, I want to switch between spaces so that I can work in different areas.",
+      "acceptanceCriteria": [
+        "Space selector dropdown in the sidebar or header showing accessible spaces",
+        "Admins see all account spaces; regular users see only their SpaceMember spaces",
+        "Selecting a space updates the active space in the auth/space store",
+        "Subsequent API requests include the X-Space-ID header with the selected space",
+        "Selecting a space calls POST /api/spaces/:id/visit to update recent spaces",
+        "Current active space is visually indicated",
+        "Built with Svelte 5 runes syntax and Tailwind v4",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-005",
+        "US-006"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Build admin settings pages",
+      "description": "As an admin, I want settings pages for managing users, API keys, and space members so that I can administer the Nori instance from the UI.",
+      "acceptanceCriteria": [
+        "Admin section accessible from sidebar navigation, only visible to admin role",
+        "User management page: list users, create user (email, name, temp password), edit role, deactivate",
+        "API key management page: list keys (name, last used, status), create key (show raw key once), revoke key",
+        "Space member management: within each space's settings, add/remove users",
+        "All pages call the /admin/* endpoints",
+        "Non-admin users cannot navigate to admin pages (redirect or 404)",
+        "Built with Svelte 5 runes syntax and Tailwind v4",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "This is a large story. Consider splitting into sub-stories if it exceeds one iteration.",
+      "dependsOn": [
+        "US-005",
+        "US-006"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Clean up dead frontend code",
+      "description": "As a developer, I want unused frontend code removed so the codebase is clean.",
+      "acceptanceCriteria": [
+        "TopNav.svelte is deleted (its functionality is inlined in the root layout)",
+        "Register page (/register) is deleted (self-registration is disabled)",
+        "authApi.register() method is removed",
+        "Any imports or references to removed files are cleaned up",
+        "SvelteKit adapter is switched from adapter-auto to adapter-node in svelte.config.js (since adapter-node is already a dependency)",
+        "npm run build passes",
+        "npm run check passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Can be done alongside US-005 or US-006.",
+      "dependsOn": [
+        "US-005"
+      ]
+    },
+    {
+      "id": "US-012",
+      "title": "Implement nori login CLI command",
+      "description": "As a CLI user, I want to authenticate with nori login so that I can use Nori from the command line.",
+      "acceptanceCriteria": [
+        "nori login command added using cobra",
+        "Prompts for server URL, email, and password",
+        "Calls POST /auth/login and stores the JWT in ~/.config/nori/credentials",
+        "If mustChangePassword is true, prompts for new password inline and calls POST /auth/change-password",
+        "Stored credentials are used by subsequent CLI commands via Authorization: Bearer header",
+        "nori login can be re-run to refresh credentials",
+        "Credentials file has restrictive permissions (0600)",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "Independent of frontend work.",
+      "dependsOn": []
+    },
+    {
+      "id": "US-013",
+      "title": "Add API key support and 401 re-auth to CLI",
+      "description": "As a CLI user, I want to configure an API key and have the CLI handle expired tokens so that headless and long-running usage works smoothly.",
+      "acceptanceCriteria": [
+        "nori config set api-key nori_... stores the API key in ~/.config/nori/credentials",
+        "CLI prefers API key over JWT if both are configured",
+        "On 401 response, CLI prompts user to re-authenticate (or exits with clear message if non-interactive)",
+        "nori config show displays current auth method (JWT or API key) without revealing secrets",
+        "Tests verify credential storage and retrieval",
+        "go test ./... passes",
+        "go vet ./... passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-012"
+      ]
+    }
+  ],
+  "metadata": {
+    "updatedAt": "2026-04-05T01:38:18.627Z"
+  }
+}

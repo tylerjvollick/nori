@@ -7,7 +7,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
-	"github.com/tylerjvollick/nori/internal/middleware"
 	"github.com/tylerjvollick/nori/internal/models"
 )
 
@@ -39,16 +38,11 @@ func NewAdminAPIKeyHandler(
 	}
 }
 
-func (h *AdminAPIKeyHandler) RegisterAdminAPIKeyRoutes(app *fiber.App) {
-	admin := app.Group("/admin")
-
-	// Apply RequireAdmin middleware to all admin routes
-	admin.Use(middleware.RequireAdmin())
-
+func (h *AdminAPIKeyHandler) RegisterAdminAPIKeyRoutes(router fiber.Router) {
 	// API key management endpoints
-	admin.Post("/api-keys", h.CreateAPIKey)
-	admin.Get("/api-keys", h.ListAPIKeys)
-	admin.Delete("/api-keys/:id", h.DeleteAPIKey)
+	router.Post("/api-keys", h.CreateAPIKey)
+	router.Get("/api-keys", h.ListAPIKeys)
+	router.Delete("/api-keys/:id", h.DeleteAPIKey)
 }
 
 // CreateAPIKeyRequest defines the request body for creating an API key
