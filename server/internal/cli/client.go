@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // Client is a simple HTTP client for CLI commands that adds the Authorization header.
@@ -17,10 +20,11 @@ type Client struct {
 }
 
 // NewClient creates a new CLI HTTP client from stored credentials.
+// Uses ActiveToken() to prefer API key over JWT.
 func NewClient(creds *Credentials) *Client {
 	return &Client{
 		ServerURL: creds.ServerURL,
-		Token:     creds.AccessToken,
+		Token:     creds.ActiveToken(),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -38,20 +42,26 @@ func NewClientWithURL(serverURL string) *Client {
 	}
 }
 
-// Post sends a POST request with JSON body and returns the response.
-func (c *Client) Post(path string, body interface{}) (*http.Response, error) {
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+// doRequest sends an HTTP request with the Authorization header set.
+func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(jsonBody)
 	}
 
 	url := c.ServerURL + path
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(jsonBody))
+	req, err := http.NewRequest(method, url, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -62,6 +72,16 @@ func (c *Client) Post(path string, body interface{}) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+// Post sends a POST request with JSON body and returns the response.
+func (c *Client) Post(path string, body interface{}) (*http.Response, error) {
+	return c.doRequest(http.MethodPost, path, body)
+}
+
+// Get sends a GET request and returns the response.
+func (c *Client) Get(path string) (*http.Response, error) {
+	return c.doRequest(http.MethodGet, path, nil)
 }
 
 // ReadJSON reads and unmarshals a JSON response body. Caller is responsible for
@@ -76,4 +96,22 @@ func ReadJSON(resp *http.Response, target interface{}) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 	return nil
+}
+
+// IsUnauthorized returns true if the response status is 401 Unauthorized.
+func IsUnauthorized(resp *http.Response) bool {
+	return resp.StatusCode == http.StatusUnauthorized
+}
+
+// isInteractiveFunc is a variable so it can be overridden in tests.
+var isInteractiveFunc = defaultIsInteractive
+
+// IsInteractive returns true if stdin is a terminal (not piped/redirected).
+// Used to decide whether to prompt for re-authentication on 401.
+func IsInteractive() bool {
+	return isInteractiveFunc()
+}
+
+func defaultIsInteractive() bool {
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }

@@ -702,14 +702,19 @@ SOPStep, SOPStepMedia. These should be carried forward and enhanced, not
 rewritten from scratch.
 
 Key changes from existing models:
+- SOPTemplate is renamed to SOP (model, table name, and all FK references).
+  All references across specs and code (SOPTemplateID → SOPID,
+  sop_template_tag → sop_tag, LinkedSOPTemplateID → LinkedSOPID,
+  DefaultSOPTemplateID → DefaultSOPID, Ticket.SOPTemplateID → Ticket.SOPID,
+  SOPComment.SOPTemplateID → SOPComment.SOPID) must be updated.
 - SOPTemplateVersion is renamed to SOPVersion (model and table name)
 - SOPTemplateVersion.Materials changes from `pq.StringArray` to BOMItem records
 - SOPTemplateVersion.Equipment follows the same pattern
 - SOPTemplateVersion.Status (draft/published) is removed — replaced by
   auto-versioning with CurrentVersionID pointer
-- SOPStep gains StationID, LinkedSOPTemplateID, and sub-steps
+- SOPStep gains StationID, LinkedSOPID, and sub-steps
 - SOPStepMedia gains SOPSubStepID for sub-step media
-- SOPTemplate gains SpaceID and SOPCategoryID
+- SOP gains SpaceID and SOPCategoryID
 
 ### Migration Strategy
 
@@ -717,8 +722,9 @@ Use numbered SQL migration files in `server/migrations/`. Each new entity or
 entity change gets its own migration. Run migrations on startup via
 golang-migrate.
 
-Migrations should be additive and non-destructive where possible. The rename
-from SOPTemplateVersion → SOPVersion requires a table rename migration.
+Migrations should be additive and non-destructive where possible. The renames
+from SOPTemplate → SOP and SOPTemplateVersion → SOPVersion each require a
+table rename migration.
 
 ---
 
