@@ -70,7 +70,6 @@ func New(cfg *config.Config) *App {
 	}
 
 	// Services
-	userService := services.NewUserService(userRepo)
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo)
 	sopService := services.NewSOPService(database.DB, sopTemplateRepo, sopVersionRepo, sopStepRepo)
 	sopMediaService := services.NewSOPStepMediaService(database.DB, sopStepMediaRepo, sopStepRepo, uploadDir, maxUploadSize, allowedMimeTypes)
@@ -85,7 +84,6 @@ func New(cfg *config.Config) *App {
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
-	userHandler := handlers.NewUserHandler(userService)
 	sopHandler := handlers.NewSOPHandler(sopService)
 	sopMediaHandler := handlers.NewSOPStepMediaHandler(sopMediaService)
 	tusHandler := handlers.NewTusHandler(tusService)
@@ -127,7 +125,6 @@ func New(cfg *config.Config) *App {
 	authHandler.RegisterProtectedAuthRoutes(app, authMiddleware)
 
 	// ── Fully guarded routes (auth + password changed) ─────────────────
-	userHandler.RegisterUserRoutes(app, authMiddleware, requirePasswordChanged)
 	sopHandler.RegisterSOPRoutes(app, authMiddleware, requirePasswordChanged, requireSpaceAccess)
 	sopMediaHandler.RegisterMediaRoutes(app, authMiddleware)
 	tusHandler.RegisterTusRoutes(app, authMiddleware)
