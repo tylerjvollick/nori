@@ -32,6 +32,21 @@ func (r *SOPTemplateRepository) GetByID(id int) (*models.SOPTemplate, error) {
 	return &template, nil
 }
 
+func (r *SOPTemplateRepository) GetByIDAndSpaceID(id int, spaceID uuid.UUID) (*models.SOPTemplate, error) {
+	var template models.SOPTemplate
+	err := r.db.Where("id = ? AND space_id = ?", id, spaceID).
+		Preload("CurrentVersion.Steps").
+		Preload("CurrentVersion").
+		First(&template).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("SOP template not found")
+		}
+		return nil, err
+	}
+	return &template, nil
+}
+
 func (r *SOPTemplateRepository) GetByIDWithTx(tx *gorm.DB, id int) (*models.SOPTemplate, error) {
 	var template models.SOPTemplate
 	err := tx.Preload("CurrentVersion.Steps").Preload("CurrentVersion").First(&template, id).Error

@@ -5,16 +5,32 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
-	"github.com/tylerjvollick/nori/internal/services"
 )
 
-type SOPHandler struct {
-	sopService *services.SOPService
+// SOPServiceInterface defines the methods needed by SOPHandler.
+// The concrete *services.SOPService satisfies this interface implicitly.
+type SOPServiceInterface interface {
+	CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPTemplate, error)
+	GetSOP(templateID int, spaceID uuid.UUID) (*models.SOPTemplate, error)
+	GetAllSOPs(spaceID uuid.UUID) ([]models.SOPTemplate, error)
+	UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPTemplate, error)
+	DeleteSOP(templateID int, spaceID uuid.UUID) error
+	GetSOPVersions(templateID int, spaceID uuid.UUID) ([]models.SOPVersion, error)
+	GetSOPVersion(versionID int) (*models.SOPVersion, error)
+	CreateStepForTemplate(templateID int, dto *dtos.CreateStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error)
+	UpdateStepForTemplate(templateID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error)
+	DeleteStepForTemplate(templateID int, stepID int, userID uuid.UUID, spaceID uuid.UUID) error
+	ReorderStepForTemplate(templateID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error)
 }
 
-func NewSOPHandler(sopService *services.SOPService) *SOPHandler {
+type SOPHandler struct {
+	sopService SOPServiceInterface
+}
+
+func NewSOPHandler(sopService SOPServiceInterface) *SOPHandler {
 	return &SOPHandler{sopService: sopService}
 }
 
@@ -41,6 +57,18 @@ func (h *SOPHandler) RegisterSOPRoutes(app *fiber.App, middlewares ...fiber.Hand
 	group.Get("/:id/versions", append(middlewares, h.GetSOPVersions)...)
 }
 
+// requireActiveSpaceID extracts and validates the ActiveSpaceID from the auth context.
+// Returns the spaceID or writes a 400 error and returns uuid.Nil.
+func requireActiveSpaceID(c *fiber.Ctx, authDTO *dtos.AuthDTO) (uuid.UUID, bool) {
+	if authDTO.ActiveSpaceID == nil {
+		c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "no active space",
+		})
+		return uuid.Nil, false
+	}
+	return *authDTO.ActiveSpaceID, true
+}
+
 // CreateSOP creates a new SOP template with its first version
 func (h *SOPHandler) CreateSOP(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
@@ -50,6 +78,11 @@ func (h *SOPHandler) CreateSOP(c *fiber.Ctx) error {
 		})
 	}
 
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	var dto dtos.CreateSOPDTO
 	if err := c.BodyParser(&dto); err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -57,7 +90,7 @@ func (h *SOPHandler) CreateSOP(c *fiber.Ctx) error {
 		})
 	}
 
-	template, err := h.sopService.CreateSOP(&dto, authDTO.User.ID)
+	template, err := h.sopService.CreateSOP(&dto, authDTO.User.ID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -76,6 +109,11 @@ func (h *SOPHandler) UpdateSOP(c *fiber.Ctx) error {
 		})
 	}
 
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -90,7 +128,7 @@ func (h *SOPHandler) UpdateSOP(c *fiber.Ctx) error {
 		})
 	}
 
-	template, err := h.sopService.UpdateSOP(id, &dto, authDTO.User.ID)
+	template, err := h.sopService.UpdateSOP(id, &dto, authDTO.User.ID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -102,6 +140,18 @@ func (h *SOPHandler) UpdateSOP(c *fiber.Ctx) error {
 
 // GetSOP gets an SOP template by ID
 func (h *SOPHandler) GetSOP(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -109,7 +159,7 @@ func (h *SOPHandler) GetSOP(c *fiber.Ctx) error {
 		})
 	}
 
-	template, err := h.sopService.GetSOP(id)
+	template, err := h.sopService.GetSOP(id, spaceID)
 	if err != nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "SOP not found",
@@ -119,9 +169,21 @@ func (h *SOPHandler) GetSOP(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(h.templateToResponse(template))
 }
 
-// GetAllSOPs gets all SOP templates
+// GetAllSOPs gets all SOP templates for the active space
 func (h *SOPHandler) GetAllSOPs(c *fiber.Ctx) error {
-	templates, err := h.sopService.GetAllSOPs()
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
+	templates, err := h.sopService.GetAllSOPs(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -139,6 +201,18 @@ func (h *SOPHandler) GetAllSOPs(c *fiber.Ctx) error {
 
 // GetSOPVersions gets all versions of an SOP template
 func (h *SOPHandler) GetSOPVersions(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -146,7 +220,7 @@ func (h *SOPHandler) GetSOPVersions(c *fiber.Ctx) error {
 		})
 	}
 
-	versions, err := h.sopService.GetSOPVersions(id)
+	versions, err := h.sopService.GetSOPVersions(id, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -189,6 +263,11 @@ func (h *SOPHandler) DeleteSOP(c *fiber.Ctx) error {
 		})
 	}
 
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	id, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -196,7 +275,7 @@ func (h *SOPHandler) DeleteSOP(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := h.sopService.DeleteSOP(id); err != nil {
+	if err := h.sopService.DeleteSOP(id, spaceID); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -275,6 +354,11 @@ func (h *SOPHandler) CreateStep(c *fiber.Ctx) error {
 		})
 	}
 
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	templateID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -289,7 +373,7 @@ func (h *SOPHandler) CreateStep(c *fiber.Ctx) error {
 		})
 	}
 
-	step, err := h.sopService.CreateStepForTemplate(templateID, &dto, authDTO.User.ID)
+	step, err := h.sopService.CreateStepForTemplate(templateID, &dto, authDTO.User.ID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -307,6 +391,11 @@ func (h *SOPHandler) UpdateStep(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
 			"error": "unauthorized",
 		})
+	}
+
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
 	}
 
 	templateID, err := strconv.Atoi(c.Params("id"))
@@ -330,7 +419,7 @@ func (h *SOPHandler) UpdateStep(c *fiber.Ctx) error {
 		})
 	}
 
-	step, err := h.sopService.UpdateStepForTemplate(templateID, stepID, &dto, authDTO.User.ID)
+	step, err := h.sopService.UpdateStepForTemplate(templateID, stepID, &dto, authDTO.User.ID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -350,6 +439,11 @@ func (h *SOPHandler) DeleteStep(c *fiber.Ctx) error {
 		})
 	}
 
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
+	}
+
 	templateID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -364,7 +458,7 @@ func (h *SOPHandler) DeleteStep(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := h.sopService.DeleteStepForTemplate(templateID, stepID, authDTO.User.ID); err != nil {
+	if err := h.sopService.DeleteStepForTemplate(templateID, stepID, authDTO.User.ID, spaceID); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -380,6 +474,11 @@ func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
 		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
 			"error": "unauthorized",
 		})
+	}
+
+	spaceID, ok := requireActiveSpaceID(c, authDTO)
+	if !ok {
+		return nil
 	}
 
 	templateID, err := strconv.Atoi(c.Params("id"))
@@ -403,7 +502,7 @@ func (h *SOPHandler) ReorderSteps(c *fiber.Ctx) error {
 		})
 	}
 
-	step, err := h.sopService.ReorderStepForTemplate(templateID, stepID, &dto, authDTO.User.ID)
+	step, err := h.sopService.ReorderStepForTemplate(templateID, stepID, &dto, authDTO.User.ID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

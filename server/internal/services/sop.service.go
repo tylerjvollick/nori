@@ -47,7 +47,7 @@ func NewSOPService(
 }
 
 // CreateSOP creates a new SOP template with its first version and steps
-func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*models.SOPTemplate, error) {
+func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPTemplate, error) {
 	var template *models.SOPTemplate
 
 	// Use transaction to ensure all creates succeed or all fail
@@ -55,6 +55,7 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 		// 1. Create the SOP template (without current_version_id yet)
 		template = &models.SOPTemplate{
 			Name:      dto.Name,
+			SpaceID:   &spaceID,
 			CreatedBy: userID,
 		}
 
@@ -135,13 +136,13 @@ func (s *SOPService) CreateSOP(dto *dtos.CreateSOPDTO, userID uuid.UUID) (*model
 }
 
 // UpdateSOP creates a new version of an existing SOP (auto-versioning)
-func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uuid.UUID) (*models.SOPTemplate, error) {
+func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPTemplate, error) {
 	var template *models.SOPTemplate
 
 	// Use transaction to ensure all creates succeed or all fail
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the existing template
-		existingTemplate, err := s.templateRepo.GetByID(templateID)
+		// 1. Get the existing template (scoped to space)
+		existingTemplate, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 		if err != nil {
 			return fmt.Errorf("failed to get SOP template: %w", err)
 		}
@@ -228,9 +229,9 @@ func (s *SOPService) UpdateSOP(templateID int, dto *dtos.UpdateSOPDTO, userID uu
 	return template, nil
 }
 
-// GetSOP gets an SOP template by ID with its current version
-func (s *SOPService) GetSOP(templateID int) (*models.SOPTemplate, error) {
-	template, err := s.templateRepo.GetByID(templateID)
+// GetSOP gets an SOP template by ID, scoped to a space
+func (s *SOPService) GetSOP(templateID int, spaceID uuid.UUID) (*models.SOPTemplate, error) {
+	template, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,13 +248,18 @@ func (s *SOPService) GetSOP(templateID int) (*models.SOPTemplate, error) {
 	return template, nil
 }
 
-// GetAllSOPs gets all SOP templates
-func (s *SOPService) GetAllSOPs() ([]models.SOPTemplate, error) {
-	return s.templateRepo.GetAll()
+// GetAllSOPs gets all SOP templates for a space
+func (s *SOPService) GetAllSOPs(spaceID uuid.UUID) ([]models.SOPTemplate, error) {
+	return s.templateRepo.GetBySpaceID(spaceID)
 }
 
-// GetSOPVersions gets all versions of an SOP template
-func (s *SOPService) GetSOPVersions(templateID int) ([]models.SOPVersion, error) {
+// GetSOPVersions gets all versions of an SOP template, scoped to a space
+func (s *SOPService) GetSOPVersions(templateID int, spaceID uuid.UUID) ([]models.SOPVersion, error) {
+	// Verify the template belongs to this space
+	_, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
+	if err != nil {
+		return nil, err
+	}
 	return s.versionRepo.GetByTemplateID(templateID)
 }
 
@@ -263,7 +269,13 @@ func (s *SOPService) GetSOPVersion(versionID int) (*models.SOPVersion, error) {
 }
 
 // DeleteSOP deletes an SOP template and all its versions/steps (cascade)
-func (s *SOPService) DeleteSOP(templateID int) error {
+// First verifies the template belongs to the specified space
+func (s *SOPService) DeleteSOP(templateID int, spaceID uuid.UUID) error {
+	// Verify the template belongs to this space before deleting
+	_, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
+	if err != nil {
+		return err
+	}
 	return s.templateRepo.Delete(templateID)
 }
 
@@ -372,12 +384,12 @@ func (s *SOPService) CreateStep(versionID int, dto *dtos.CreateStepDTO, userID u
 }
 
 // CreateStepForTemplate creates a step for a template's current version (creates new version if needed)
-func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+func (s *SOPService) CreateStepForTemplate(templateID int, dto *dtos.CreateStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the template
-		template, err := s.templateRepo.GetByID(templateID)
+		// 1. Get the template (scoped to space)
+		template, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 		if err != nil {
 			return fmt.Errorf("failed to get template: %w", err)
 		}
@@ -633,12 +645,12 @@ func (s *SOPService) DeleteStep(versionID int, stepID int, userID uuid.UUID) err
 }
 
 // UpdateStepForTemplate updates a step in the template's current version
-func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos.UpdateStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the template to find its current version
-		template, err := s.templateRepo.GetByID(templateID)
+		// 1. Get the template to find its current version (scoped to space)
+		template, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 		if err != nil {
 			return fmt.Errorf("failed to get template: %w", err)
 		}
@@ -701,10 +713,10 @@ func (s *SOPService) UpdateStepForTemplate(templateID int, stepID int, dto *dtos
 }
 
 // DeleteStepForTemplate deletes a step from the template's current version
-func (s *SOPService) DeleteStepForTemplate(templateID int, stepID int, userID uuid.UUID) error {
+func (s *SOPService) DeleteStepForTemplate(templateID int, stepID int, userID uuid.UUID, spaceID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the template to find its current version
-		template, err := s.templateRepo.GetByID(templateID)
+		// 1. Get the template to find its current version (scoped to space)
+		template, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 		if err != nil {
 			return fmt.Errorf("failed to get template: %w", err)
 		}
@@ -779,15 +791,15 @@ func (s *SOPService) ReorderStep(versionID int, stepID int, dto *dtos.ReorderSte
 }
 
 // ReorderStepForTemplate updates the order of a step in the template's current version
-func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID) (*models.SOPStep, error) {
+func (s *SOPService) ReorderStepForTemplate(templateID int, stepID int, dto *dtos.ReorderStepDTO, userID uuid.UUID, spaceID uuid.UUID) (*models.SOPStep, error) {
 	var step *models.SOPStep
 
 	log.Printf("ReorderStep - templateID: %d, stepID: %d, beforeStepID: %v, afterStepID: %v",
 		templateID, stepID, dto.BeforeStepID, dto.AfterStepID)
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Get the template to find its current version
-		template, err := s.templateRepo.GetByID(templateID)
+		// 1. Get the template to find its current version (scoped to space)
+		template, err := s.templateRepo.GetByIDAndSpaceID(templateID, spaceID)
 		if err != nil {
 			return fmt.Errorf("failed to get template: %w", err)
 		}

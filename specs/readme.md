@@ -68,3 +68,15 @@ Specs listed in priority order. Work top-down.
 | 14 | [ai-features.md](ai-features.md) | Embedded Ollama: SOP suggestions, capture prompts | AI, ollama, local, suggestions, prompts, summaries, inference | |
 | 15 | [passive-observation.md](passive-observation.md) | Camera/sensor integration, presence detection | camera, sensors, passive, presence, frigate, vision, detection | |
 | 16 | [sop-marketplace.md](sop-marketplace.md) | Public SOP sharing, forking, community | marketplace, public, fork, share, community, open source |
+
+---
+
+## Roadmap
+
+Future features identified through competitive analysis but not yet promoted
+to full specs. These are organized by priority tier and will be turned into
+proper specs when the need becomes clear through real usage.
+
+| Document | Description |
+|---|---|
+| [roadmap-competitive-gaps.md](roadmap-competitive-gaps.md) | Tiered feature roadmap from Odoo/ERPNext cross-analysis: invoicing, purchasing, maintenance, knowledge base, quoting, customer portal, quality inspections, reporting, document management, and integration strategy |
