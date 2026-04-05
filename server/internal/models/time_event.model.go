@@ -37,6 +37,7 @@ type TimeEvent struct {
 	ID        uuid.UUID       `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	SpaceID   uuid.UUID       `gorm:"type:uuid;not null" json:"spaceId"`
 	UserID    uuid.UUID       `gorm:"type:uuid;not null" json:"userId"`
+	TaskID    *string         `gorm:"type:varchar(255)" json:"taskId,omitempty"`
 	StationID *uuid.UUID      `gorm:"type:uuid" json:"stationId,omitempty"`
 	EventType TimeEventType   `gorm:"type:varchar(20);not null" json:"eventType"`
 	Source    TimeEventSource `gorm:"type:varchar(20);not null" json:"source"`
@@ -47,6 +48,7 @@ type TimeEvent struct {
 	// Relations
 	Space   *Space   `gorm:"foreignKey:SpaceID" json:"space,omitempty"`
 	User    *User    `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	Task    *Task    `gorm:"foreignKey:TaskID" json:"task,omitempty"`
 	Station *Station `gorm:"foreignKey:StationID" json:"station,omitempty"`
 }
 

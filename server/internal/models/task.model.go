@@ -92,6 +92,7 @@ type Task struct {
 	Customer   *Customer `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
 	AssignedTo *User     `gorm:"foreignKey:AssignedToID" json:"assignedTo,omitempty"`
 	CreatedBy  *User     `gorm:"foreignKey:CreatedByID" json:"createdBy,omitempty"`
+	Tags       []Tag     `gorm:"many2many:task_tag;joinForeignKey:TaskID;joinReferences:TagID" json:"tags,omitempty"`
 }
 
 func (Task) TableName() string {

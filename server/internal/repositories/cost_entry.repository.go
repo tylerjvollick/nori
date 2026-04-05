@@ -38,3 +38,12 @@ func (r *CostEntryRepository) GetByID(id uuid.UUID) (*models.CostEntry, error) {
 func (r *CostEntryRepository) Delete(id uuid.UUID) error {
 	return r.db.Delete(&models.CostEntry{}, "id = ?", id).Error
 }
+
+// GetByTaskID returns all cost entries for a task, ordered by creation time.
+func (r *CostEntryRepository) GetByTaskID(taskID string) ([]models.CostEntry, error) {
+	var entries []models.CostEntry
+	err := r.db.Where("task_id = ?", taskID).
+		Order("created_at ASC").
+		Find(&entries).Error
+	return entries, err
+}

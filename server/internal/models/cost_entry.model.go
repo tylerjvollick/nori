@@ -18,11 +18,12 @@ const (
 	CostTypeOther      CostType = "other"
 )
 
-// CostEntry tracks costs. Supports labor, materials, consumables,
-// marketing, and other cost types. Labor costs can be auto-computed from
-// TimeEvents × labor rate, or entered manually.
+// CostEntry tracks costs against a task. Supports labor, materials,
+// consumables, marketing, and other cost types. Labor costs can be
+// auto-computed from TimeEvents × labor rate, or entered manually.
 type CostEntry struct {
 	ID          uuid.UUID        `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
+	TaskID      string           `gorm:"type:varchar(255);not null" json:"taskId"`
 	CostType    CostType         `gorm:"type:varchar(20);not null" json:"costType"`
 	Description string           `gorm:"type:text;not null" json:"description"`
 	Amount      decimal.Decimal  `gorm:"type:numeric(12,4);not null" json:"amount"`
@@ -35,6 +36,7 @@ type CostEntry struct {
 	CreatedAt   time.Time        `gorm:"default:now()" json:"createdAt"`
 
 	// Relations
+	Task      *Task      `gorm:"foreignKey:TaskID" json:"task,omitempty"`
 	Material  *Material  `gorm:"foreignKey:MaterialID" json:"material,omitempty"`
 	TimeEvent *TimeEvent `gorm:"foreignKey:TimeEventID" json:"timeEvent,omitempty"`
 	CreatedBy *User      `gorm:"foreignKey:CreatedByID" json:"createdBy,omitempty"`

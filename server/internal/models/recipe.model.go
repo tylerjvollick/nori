@@ -39,6 +39,7 @@ type Recipe struct {
 	ExtendsRecipe  *Recipe         `gorm:"foreignKey:ExtendsRecipeID" json:"extendsRecipe,omitempty"`
 	CreatedBy      *User           `gorm:"foreignKey:CreatedByID" json:"createdBy,omitempty"`
 	Versions       []RecipeVersion `gorm:"foreignKey:RecipeID" json:"versions,omitempty"`
+	Tags           []Tag           `gorm:"many2many:recipe_tag;joinForeignKey:RecipeID;joinReferences:TagID" json:"tags,omitempty"`
 }
 
 func (Recipe) TableName() string {

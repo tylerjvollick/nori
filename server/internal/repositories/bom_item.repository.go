@@ -40,6 +40,15 @@ func (r *BOMItemRepository) GetByMaterialID(materialID uuid.UUID) ([]models.BOMI
 	return items, err
 }
 
+// GetByRecipeVersionID returns all BOM items for a recipe version, ordered by ID.
+func (r *BOMItemRepository) GetByRecipeVersionID(recipeVersionID int) ([]models.BOMItem, error) {
+	var items []models.BOMItem
+	err := r.db.Where("recipe_version_id = ?", recipeVersionID).
+		Order("id ASC").
+		Find(&items).Error
+	return items, err
+}
+
 func (r *BOMItemRepository) Update(item *models.BOMItem) error {
 	return r.db.Save(item).Error
 }

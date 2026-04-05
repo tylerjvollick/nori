@@ -11,6 +11,7 @@ import (
 // TimeEventFilters holds optional filter parameters for querying time events.
 type TimeEventFilters struct {
 	UserID    *uuid.UUID
+	TaskID    *string
 	StationID *uuid.UUID
 	EventType *models.TimeEventType
 	Source    *models.TimeEventSource
@@ -60,6 +61,15 @@ func (r *TimeEventRepository) GetByStationID(stationID uuid.UUID) ([]models.Time
 	return events, err
 }
 
+// GetByTaskID returns all time events for a task, ordered by timestamp descending.
+func (r *TimeEventRepository) GetByTaskID(taskID string) ([]models.TimeEvent, error) {
+	var events []models.TimeEvent
+	err := r.db.Where("task_id = ?", taskID).
+		Order(`"timestamp" DESC`).
+		Find(&events).Error
+	return events, err
+}
+
 // applyTimeEventFilters adds optional WHERE clauses to a query.
 func applyTimeEventFilters(q *gorm.DB, f *TimeEventFilters) *gorm.DB {
 	if f == nil {
@@ -67,6 +77,9 @@ func applyTimeEventFilters(q *gorm.DB, f *TimeEventFilters) *gorm.DB {
 	}
 	if f.UserID != nil {
 		q = q.Where("user_id = ?", *f.UserID)
+	}
+	if f.TaskID != nil {
+		q = q.Where("task_id = ?", *f.TaskID)
 	}
 	if f.StationID != nil {
 		q = q.Where("station_id = ?", *f.StationID)
