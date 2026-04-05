@@ -1,6 +1,6 @@
 module github.com/tylerjvollick/nori
 
-go 1.23.1
+go 1.25.0
 
 require (
 	github.com/gofiber/fiber/v2 v2.52.9
@@ -10,9 +10,11 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/shopspring/decimal v1.4.0
+	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.10.0
 	github.com/tus/tusd/v2 v2.8.0
 	golang.org/x/crypto v0.37.0
+	golang.org/x/term v0.31.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.0
 )
@@ -20,6 +22,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -33,6 +36,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
