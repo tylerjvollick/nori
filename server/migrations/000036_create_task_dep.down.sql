@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS task_dep;
+DROP TYPE IF EXISTS dep_type;
