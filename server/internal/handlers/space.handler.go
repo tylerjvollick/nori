@@ -6,15 +6,30 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
-	"github.com/tylerjvollick/nori/internal/services"
+	"github.com/tylerjvollick/nori/internal/models"
 )
 
-type SpaceHandler struct {
-	spaceService *services.SpaceService
+// SpaceServiceInterface defines the methods needed by SpaceHandler
+type SpaceServiceInterface interface {
+	CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO) (*models.Space, error)
+	GetSpaceByID(spaceID uuid.UUID, accountID uuid.UUID) (*models.Space, error)
+	GetSpacesByAccountID(accountID uuid.UUID) ([]models.Space, error)
+	GetRecentSpaces(userID uuid.UUID, accountID uuid.UUID) ([]models.Space, error)
+	UpdateSpace(spaceID uuid.UUID, accountID uuid.UUID, dto *dtos.UpdateSpaceDTO) (*models.Space, error)
+	DeleteSpace(spaceID uuid.UUID, accountID uuid.UUID) error
+	RecordSpaceVisit(userID uuid.UUID, spaceID uuid.UUID) error
 }
 
-func NewSpaceHandler(spaceService *services.SpaceService) *SpaceHandler {
-	return &SpaceHandler{spaceService: spaceService}
+type SpaceHandler struct {
+	spaceService    SpaceServiceInterface
+	spaceMemberRepo SpaceMemberRepositoryInterface
+}
+
+func NewSpaceHandler(spaceService SpaceServiceInterface, spaceMemberRepo SpaceMemberRepositoryInterface) *SpaceHandler {
+	return &SpaceHandler{
+		spaceService:    spaceService,
+		spaceMemberRepo: spaceMemberRepo,
+	}
 }
 
 func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, middlewares ...fiber.Handler) {
@@ -29,12 +44,34 @@ func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, middlewares ...fiber.
 	group.Post("/:id/visit", h.RecordSpaceVisit)
 }
 
-// CreateSpace creates a new space
+// isAdmin returns true if the authenticated user has admin role
+func isAdmin(authDTO *dtos.AuthDTO) bool {
+	return authDTO.User.Role != nil && *authDTO.User.Role == models.RoleAdmin
+}
+
+// hasSpaceAccess returns true if the user is an admin or a member of the given space.
+func (h *SpaceHandler) hasSpaceAccess(authDTO *dtos.AuthDTO, spaceID uuid.UUID) bool {
+	if isAdmin(authDTO) {
+		return true
+	}
+
+	_, err := h.spaceMemberRepo.GetByUserAndSpace(authDTO.User.ID, spaceID)
+	return err == nil
+}
+
+// CreateSpace creates a new space (admin only)
 func (h *SpaceHandler) CreateSpace(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
 		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
 			"error": "unauthorized",
+		})
+	}
+
+	// Only admins can create spaces
+	if !isAdmin(authDTO) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "admin access required",
 		})
 	}
 
@@ -64,7 +101,8 @@ func (h *SpaceHandler) CreateSpace(c *fiber.Ctx) error {
 	return c.Status(http.StatusCreated).JSON(response)
 }
 
-// GetSpaces retrieves all spaces for the user's account
+// GetSpaces retrieves spaces for the user.
+// Admins see all account spaces; regular users see only spaces they are a member of.
 func (h *SpaceHandler) GetSpaces(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -73,7 +111,17 @@ func (h *SpaceHandler) GetSpaces(c *fiber.Ctx) error {
 		})
 	}
 
-	spaces, err := h.spaceService.GetSpacesByAccountID(authDTO.AccountID)
+	var spaceModels []models.Space
+	var err error
+
+	if isAdmin(authDTO) {
+		// Admins see all spaces for the account
+		spaceModels, err = h.spaceService.GetSpacesByAccountID(authDTO.AccountID)
+	} else {
+		// Regular users see only spaces they are a member of
+		spaceModels, err = h.spaceMemberRepo.GetByUser(authDTO.User.ID)
+	}
+
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -81,7 +129,11 @@ func (h *SpaceHandler) GetSpaces(c *fiber.Ctx) error {
 	}
 
 	response := []dtos.SpaceResponseDTO{}
-	for _, space := range spaces {
+	for _, space := range spaceModels {
+		// For non-admin users, also filter to their account
+		if space.AccountID != authDTO.AccountID {
+			continue
+		}
 		response = append(response, dtos.SpaceResponseDTO{
 			ID:        space.ID,
 			Name:      space.Name,
@@ -126,7 +178,7 @@ func (h *SpaceHandler) GetRecentSpaces(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(response)
 }
 
-// GetSpaceByID retrieves a single space by ID
+// GetSpaceByID retrieves a single space by ID (admin or space member)
 func (h *SpaceHandler) GetSpaceByID(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -149,6 +201,13 @@ func (h *SpaceHandler) GetSpaceByID(c *fiber.Ctx) error {
 		})
 	}
 
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, spaceID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
+		})
+	}
+
 	response := &dtos.SpaceResponseDTO{
 		ID:        space.ID,
 		Name:      space.Name,
@@ -161,7 +220,7 @@ func (h *SpaceHandler) GetSpaceByID(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(response)
 }
 
-// UpdateSpace updates a space
+// UpdateSpace updates a space (admin or space member)
 func (h *SpaceHandler) UpdateSpace(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -174,6 +233,13 @@ func (h *SpaceHandler) UpdateSpace(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "invalid space ID",
+		})
+	}
+
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, spaceID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
 		})
 	}
 
@@ -203,7 +269,7 @@ func (h *SpaceHandler) UpdateSpace(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(response)
 }
 
-// DeleteSpace deletes a space
+// DeleteSpace deletes a space (admin or space member)
 func (h *SpaceHandler) DeleteSpace(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -219,6 +285,13 @@ func (h *SpaceHandler) DeleteSpace(c *fiber.Ctx) error {
 		})
 	}
 
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, spaceID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
+		})
+	}
+
 	err = h.spaceService.DeleteSpace(spaceID, authDTO.AccountID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
@@ -229,7 +302,7 @@ func (h *SpaceHandler) DeleteSpace(c *fiber.Ctx) error {
 	return c.Status(http.StatusNoContent).Send(nil)
 }
 
-// RecordSpaceVisit records a visit to a space
+// RecordSpaceVisit records a visit to a space (admin or space member)
 func (h *SpaceHandler) RecordSpaceVisit(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 	if authDTO == nil {
@@ -250,6 +323,13 @@ func (h *SpaceHandler) RecordSpaceVisit(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": err.Error(),
+		})
+	}
+
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, spaceID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
 		})
 	}
 
