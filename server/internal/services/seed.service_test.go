@@ -490,3 +490,79 @@ func TestSeedIfNeeded_AccountPlanIsTrial(t *testing.T) {
 	assert.NotNil(t, createdAccount)
 	assert.Equal(t, models.Trial, createdAccount.Plan)
 }
+
+func TestSeedIfNeeded_SkipPasswordChange(t *testing.T) {
+	// When SkipPasswordChange is true, user should be created with MustChangePassword: false
+	cfg := newTestSeedConfig()
+	cfg.SkipPasswordChange = true
+
+	var createdUser *models.User
+	counter := &mockAccountCounter{
+		countFunc: func() (int64, error) { return 0, nil },
+	}
+
+	userCreator := &mockUserCreator{
+		createUserFunc: func(user *models.User) error {
+			createdUser = user
+			return nil
+		},
+	}
+
+	accountCreator := &mockAccountCreator{
+		createAccountFunc: func(account *models.Account) error { return nil },
+	}
+
+	userAccountCreator := &mockUserAccountCreator{
+		createWithRoleFunc: func(userID uuid.UUID, accountID uuid.UUID, role models.Role) (*models.UserAccount, error) {
+			return &models.UserAccount{}, nil
+		},
+	}
+
+	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+
+	// Act
+	err := svc.SeedIfNeeded()
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, createdUser)
+	assert.False(t, createdUser.MustChangePassword, "MustChangePassword should be false when SkipPasswordChange is true")
+}
+
+func TestSeedIfNeeded_DefaultRequiresPasswordChange(t *testing.T) {
+	// Default config (SkipPasswordChange = false) should create user with MustChangePassword: true
+	cfg := newTestSeedConfig()
+	// SkipPasswordChange defaults to false
+
+	var createdUser *models.User
+	counter := &mockAccountCounter{
+		countFunc: func() (int64, error) { return 0, nil },
+	}
+
+	userCreator := &mockUserCreator{
+		createUserFunc: func(user *models.User) error {
+			createdUser = user
+			return nil
+		},
+	}
+
+	accountCreator := &mockAccountCreator{
+		createAccountFunc: func(account *models.Account) error { return nil },
+	}
+
+	userAccountCreator := &mockUserAccountCreator{
+		createWithRoleFunc: func(userID uuid.UUID, accountID uuid.UUID, role models.Role) (*models.UserAccount, error) {
+			return &models.UserAccount{}, nil
+		},
+	}
+
+	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+
+	// Act
+	err := svc.SeedIfNeeded()
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, createdUser)
+	assert.True(t, createdUser.MustChangePassword, "MustChangePassword should be true by default")
+}

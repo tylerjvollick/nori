@@ -95,7 +95,7 @@ func (s *SeedService) SeedIfNeeded() error {
 		Email:              s.cfg.AdminEmail,
 		Password:           &hashedPasswordStr,
 		Role:               &adminRole,
-		MustChangePassword: true,
+		MustChangePassword: !s.cfg.SkipPasswordChange,
 		RecentSpaces:       models.RecentSpaces{},
 	}
 

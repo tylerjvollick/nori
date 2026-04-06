@@ -39,6 +39,10 @@ func TestLoad_Success(t *testing.T) {
 	if cfg.AccountName != "Test Account" {
 		t.Errorf("Expected AccountName to be 'Test Account', got: %s", cfg.AccountName)
 	}
+
+	if cfg.SkipPasswordChange != false {
+		t.Error("Expected SkipPasswordChange to default to false when env var is not set")
+	}
 }
 
 func TestLoad_MissingJWTSecret(t *testing.T) {
@@ -205,5 +209,107 @@ func TestValidate_EmptyAccountName(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("Expected error for empty AccountName, got nil")
+	}
+}
+
+func TestLoad_SkipPasswordChangeTrue(t *testing.T) {
+	os.Setenv("NORI_JWT_SECRET", "test-secret-key-at-least-32-chars")
+	os.Setenv("NORI_ADMIN_EMAIL", "admin@test.com")
+	os.Setenv("NORI_ADMIN_PASSWORD", "testpassword123")
+	os.Setenv("NORI_ACCOUNT_NAME", "Test Account")
+	os.Setenv("NORI_SKIP_PASSWORD_CHANGE", "true")
+	defer func() {
+		os.Unsetenv("NORI_JWT_SECRET")
+		os.Unsetenv("NORI_ADMIN_EMAIL")
+		os.Unsetenv("NORI_ADMIN_PASSWORD")
+		os.Unsetenv("NORI_ACCOUNT_NAME")
+		os.Unsetenv("NORI_SKIP_PASSWORD_CHANGE")
+	}()
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if !cfg.SkipPasswordChange {
+		t.Error("Expected SkipPasswordChange to be true when NORI_SKIP_PASSWORD_CHANGE=true")
+	}
+}
+
+func TestLoad_SkipPasswordChangeFalseByDefault(t *testing.T) {
+	os.Setenv("NORI_JWT_SECRET", "test-secret-key-at-least-32-chars")
+	os.Setenv("NORI_ADMIN_EMAIL", "admin@test.com")
+	os.Setenv("NORI_ADMIN_PASSWORD", "testpassword123")
+	os.Setenv("NORI_ACCOUNT_NAME", "Test Account")
+	os.Unsetenv("NORI_SKIP_PASSWORD_CHANGE")
+	defer func() {
+		os.Unsetenv("NORI_JWT_SECRET")
+		os.Unsetenv("NORI_ADMIN_EMAIL")
+		os.Unsetenv("NORI_ADMIN_PASSWORD")
+		os.Unsetenv("NORI_ACCOUNT_NAME")
+	}()
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if cfg.SkipPasswordChange {
+		t.Error("Expected SkipPasswordChange to be false when NORI_SKIP_PASSWORD_CHANGE is not set")
+	}
+}
+
+func TestParseBool(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"true", true},
+		{"True", true},
+		{"TRUE", true},
+		{"1", true},
+		{"yes", true},
+		{"Yes", true},
+		{"YES", true},
+		{"false", false},
+		{"False", false},
+		{"0", false},
+		{"no", false},
+		{"", false},
+		{"  true  ", true},
+		{"anything", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseBool(tt.input)
+			if result != tt.expected {
+				t.Errorf("parseBool(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidate_SkipPasswordChangeNotRequired(t *testing.T) {
+	// SkipPasswordChange is optional - validation should pass regardless of its value
+	cfg := &Config{
+		JWTSecret:          "valid-secret-key",
+		AdminEmail:         "admin@test.com",
+		AdminPassword:      "password123",
+		AccountName:        "Test Account",
+		SkipPasswordChange: false,
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Expected no error with SkipPasswordChange=false, got: %v", err)
+	}
+
+	cfg.SkipPasswordChange = true
+	err = cfg.Validate()
+	if err != nil {
+		t.Fatalf("Expected no error with SkipPasswordChange=true, got: %v", err)
 	}
 }
