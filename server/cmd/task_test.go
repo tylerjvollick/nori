@@ -24,7 +24,7 @@ func TestTaskCommandRegistered(t *testing.T) {
 }
 
 func TestTaskSubcommandsRegistered(t *testing.T) {
-	subcommands := map[string]bool{"claim": false, "complete": false, "pause": false}
+	subcommands := map[string]bool{"claim": false, "complete": false, "pause": false, "resume": false, "skip": false}
 	for _, cmd := range taskCmd.Commands() {
 		if _, ok := subcommands[cmd.Name()]; ok {
 			subcommands[cmd.Name()] = true
@@ -174,6 +174,64 @@ func TestRunTaskPause_Conflict(t *testing.T) {
 	err := runTaskPause(taskPauseCmd, []string{"shop-a1.1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot be paused")
+}
+
+// --- Resume Tests ---
+
+func TestRunTaskResume_Success(t *testing.T) {
+	resp := taskActionResponse{
+		ID:     "shop-a1.1",
+		Title:  "Cut mortises",
+		Status: "active",
+	}
+	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/resume", http.MethodPost, resp, http.StatusOK)
+	setupCredentials(t, server.URL)
+
+	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
+	require.NoError(t, err)
+}
+
+func TestRunTaskResume_Conflict(t *testing.T) {
+	server := setupTestServer(t,
+		"/api/v1/tasks/shop-a1.1/resume",
+		http.MethodPost,
+		errorResponse{Error: `task "shop-a1.1" cannot be resumed: status is "active", must be "paused"`},
+		http.StatusConflict,
+	)
+	setupCredentials(t, server.URL)
+
+	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be resumed")
+}
+
+// --- Skip Tests ---
+
+func TestRunTaskSkip_Success(t *testing.T) {
+	resp := taskActionResponse{
+		ID:     "shop-a1.1",
+		Title:  "Cut mortises",
+		Status: "skipped",
+	}
+	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/skip", http.MethodPost, resp, http.StatusOK)
+	setupCredentials(t, server.URL)
+
+	err := runTaskSkip(taskSkipCmd, []string{"shop-a1.1"})
+	require.NoError(t, err)
+}
+
+func TestRunTaskSkip_Conflict(t *testing.T) {
+	server := setupTestServer(t,
+		"/api/v1/tasks/shop-a1.1/skip",
+		http.MethodPost,
+		errorResponse{Error: `task "shop-a1.1" cannot be skipped: status is "done" (already terminal)`},
+		http.StatusConflict,
+	)
+	setupCredentials(t, server.URL)
+
+	err := runTaskSkip(taskSkipCmd, []string{"shop-a1.1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot be skipped")
 }
 
 // --- No Credentials Test ---

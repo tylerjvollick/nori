@@ -25,7 +25,7 @@ var taskJSONFlag bool
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks",
-	Long:  "Task lifecycle commands: claim, complete, and pause tasks.",
+	Long:  "Task lifecycle commands: claim, complete, pause, resume, and skip tasks.",
 }
 
 var taskClaimCmd = &cobra.Command{
@@ -52,11 +52,29 @@ var taskPauseCmd = &cobra.Command{
 	RunE:  runTaskPause,
 }
 
+var taskResumeCmd = &cobra.Command{
+	Use:   "resume <id>",
+	Short: "Resume a paused task",
+	Long:  "Resume a paused task back to active status. Only the assigned user can resume it.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskResume,
+}
+
+var taskSkipCmd = &cobra.Command{
+	Use:   "skip <id>",
+	Short: "Skip a task",
+	Long:  "Mark a task as skipped. Skipping triggers downstream readiness checks. Only the assigned user can skip it (if assigned).",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runTaskSkip,
+}
+
 func init() {
 	taskCmd.PersistentFlags().BoolVar(&taskJSONFlag, "json", false, "Output as JSON")
 	taskCmd.AddCommand(taskClaimCmd)
 	taskCmd.AddCommand(taskCompleteCmd)
 	taskCmd.AddCommand(taskPauseCmd)
+	taskCmd.AddCommand(taskResumeCmd)
+	taskCmd.AddCommand(taskSkipCmd)
 	rootCmd.AddCommand(taskCmd)
 }
 
@@ -70,6 +88,14 @@ func runTaskComplete(cmd *cobra.Command, args []string) error {
 
 func runTaskPause(cmd *cobra.Command, args []string) error {
 	return runTaskAction(args[0], "pause")
+}
+
+func runTaskResume(cmd *cobra.Command, args []string) error {
+	return runTaskAction(args[0], "resume")
+}
+
+func runTaskSkip(cmd *cobra.Command, args []string) error {
+	return runTaskAction(args[0], "skip")
 }
 
 // runTaskAction performs a POST to /api/v1/tasks/:id/<action> and prints the result.

@@ -301,6 +301,71 @@ func (s *TaskService) AddChildTask(parentID string, title string, description *s
 	return child, nil
 }
 
+// ResumeTask resumes a paused task back to active status. Only the assigned user can resume it.
+// Clears the PausedAt timestamp on resume.
+func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if task.Status != models.TaskStatusPaused {
+		return nil, fmt.Errorf("task %q cannot be resumed: status is %q, must be %q", taskID, task.Status, models.TaskStatusPaused)
+	}
+
+	if task.AssignedToID == nil || *task.AssignedToID != userID {
+		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
+	}
+
+	now := time.Now()
+	task.Status = models.TaskStatusActive
+	task.PausedAt = nil
+	task.UpdatedAt = now
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, err
+	}
+
+	return task, nil
+}
+
+// SkipTask marks a task as skipped. Only the assigned user can skip it (if assigned).
+// Skipping a task triggers downstream readiness checks via maybeCompleteParent.
+// The task must not already be in a terminal status (done, skipped, cancelled).
+func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	if isTerminalStatus(task.Status) {
+		return nil, fmt.Errorf("task %q cannot be skipped: status is %q (already terminal)", taskID, task.Status)
+	}
+
+	// If the task is assigned, only the assignee can skip it.
+	if task.AssignedToID != nil && *task.AssignedToID != userID {
+		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
+	}
+
+	now := time.Now()
+	task.Status = models.TaskStatusSkipped
+	task.CompletedAt = &now
+	task.UpdatedAt = now
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, err
+	}
+
+	// Skipped is a terminal status — check if parent can be auto-completed.
+	if task.ParentID != nil {
+		if err := s.maybeCompleteParent(*task.ParentID); err != nil {
+			_ = err
+		}
+	}
+
+	return task, nil
+}
+
 // PauseTask pauses an active task. Only the assigned user can pause it.
 // Returns an error if the task is not in "active" status or is not assigned to the user.
 func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, error) {

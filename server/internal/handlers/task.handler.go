@@ -21,6 +21,8 @@ type TaskServiceInterface interface {
 	ClaimTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	CompleteTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	SkipTask(taskID string, userID uuid.UUID) (*models.Task, error)
 }
 
 // ReadyWorkServiceInterface defines the methods needed for ready-work queries.
@@ -52,6 +54,8 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Post("/:id/claim", h.ClaimTask)
 	group.Post("/:id/complete", h.CompleteTask)
 	group.Post("/:id/pause", h.PauseTask)
+	group.Post("/:id/resume", h.ResumeTask)
+	group.Post("/:id/skip", h.SkipTask)
 }
 
 // ListTasks returns a paginated list of tasks for the active space.
@@ -351,6 +355,64 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 	}
 
 	task, err := h.taskService.PauseTask(id, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// ResumeTask resumes a paused task. Only the assigned user can resume it.
+func (h *TaskHandler) ResumeTask(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	// Verify task belongs to the requester's space before resuming.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
+	task, err := h.taskService.ResumeTask(id, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// SkipTask marks a task as skipped. Only the assigned user can skip it (if assigned).
+func (h *TaskHandler) SkipTask(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	// Verify task belongs to the requester's space before skipping.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
+	task, err := h.taskService.SkipTask(id, authDTO.User.ID)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),

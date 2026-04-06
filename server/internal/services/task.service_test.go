@@ -462,6 +462,517 @@ func TestPauseTask_NoAssignee(t *testing.T) {
 	assert.Contains(t, err.Error(), "not assigned to user")
 }
 
+// --- ResumeTask Tests ---
+
+func TestResumeTask_Success(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	userID := uuid.New()
+	pausedAt := time.Now().Add(-5 * time.Minute)
+	startedAt := time.Now().Add(-15 * time.Minute)
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusPaused,
+		AssignedToID: &userID,
+		StartedAt:    &startedAt,
+		PausedAt:     &pausedAt,
+		Title:        "Cut mortises",
+	}
+
+	var updatedTask *models.Task
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == taskID {
+				return task, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		updateFunc: func(t *models.Task) error {
+			updatedTask = t
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.ResumeTask(taskID, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusActive, result.Status)
+	assert.Nil(t, result.PausedAt, "PausedAt should be cleared on resume")
+	assert.NotNil(t, result.StartedAt, "StartedAt should be preserved")
+	assert.WithinDuration(t, time.Now(), result.UpdatedAt, 2*time.Second)
+
+	// Verify update was called
+	assert.NotNil(t, updatedTask)
+	assert.Equal(t, models.TaskStatusActive, updatedTask.Status)
+	assert.Nil(t, updatedTask.PausedAt)
+}
+
+func TestResumeTask_TaskNotFound(t *testing.T) {
+	// Arrange
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return nil, errors.New("task not found")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.ResumeTask("nonexistent", uuid.New())
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "task not found")
+}
+
+func TestResumeTask_NotPausedStatus(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	// Test each non-paused status
+	statuses := []models.TaskStatus{
+		models.TaskStatusOpen,
+		models.TaskStatusActive,
+		models.TaskStatusDone,
+		models.TaskStatusSkipped,
+		models.TaskStatusCancelled,
+	}
+
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			task := &models.Task{
+				ID:           taskID,
+				Status:       status,
+				AssignedToID: &userID,
+				Title:        "Some task",
+			}
+
+			mockRepo := &MockTaskRepository{
+				getByIDFunc: func(id string) (*models.Task, error) {
+					return task, nil
+				},
+			}
+
+			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+			// Act
+			result, err := svc.ResumeTask(taskID, userID)
+
+			// Assert
+			assert.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "cannot be resumed")
+			assert.Contains(t, err.Error(), string(status))
+		})
+	}
+}
+
+func TestResumeTask_NotAssignedToUser(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	assignedUserID := uuid.New()
+	otherUserID := uuid.New()
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusPaused,
+		AssignedToID: &assignedUserID,
+		Title:        "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.ResumeTask(taskID, otherUserID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "not assigned to user")
+	assert.Contains(t, err.Error(), otherUserID.String())
+}
+
+func TestResumeTask_NoAssignee(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusPaused,
+		AssignedToID: nil, // no assignee
+		Title:        "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.ResumeTask(taskID, userID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "not assigned to user")
+}
+
+func TestResumeTask_UpdateFails(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	userID := uuid.New()
+	pausedAt := time.Now().Add(-5 * time.Minute)
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusPaused,
+		AssignedToID: &userID,
+		PausedAt:     &pausedAt,
+		Title:        "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+		updateFunc: func(t *models.Task) error {
+			return errors.New("database error")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.ResumeTask(taskID, userID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "database error")
+}
+
+// --- SkipTask Tests ---
+
+func TestSkipTask_Success_OpenTask(t *testing.T) {
+	// Arrange — skip an open, unassigned task
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	task := &models.Task{
+		ID:     taskID,
+		Status: models.TaskStatusOpen,
+		Title:  "Cut mortises",
+	}
+
+	var updatedTask *models.Task
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == taskID {
+				return task, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		updateFunc: func(t *models.Task) error {
+			updatedTask = t
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusSkipped, result.Status)
+	assert.NotNil(t, result.CompletedAt)
+	assert.WithinDuration(t, time.Now(), *result.CompletedAt, 2*time.Second)
+	assert.WithinDuration(t, time.Now(), result.UpdatedAt, 2*time.Second)
+
+	assert.NotNil(t, updatedTask)
+	assert.Equal(t, models.TaskStatusSkipped, updatedTask.Status)
+}
+
+func TestSkipTask_Success_ActiveTask(t *testing.T) {
+	// Arrange — skip an active task assigned to the user
+	taskID := "job-abc.3"
+	userID := uuid.New()
+	startedAt := time.Now().Add(-10 * time.Minute)
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusActive,
+		AssignedToID: &userID,
+		StartedAt:    &startedAt,
+		Title:        "Cut mortises",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == taskID {
+				return task, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		updateFunc: func(t *models.Task) error {
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusSkipped, result.Status)
+	assert.NotNil(t, result.CompletedAt)
+}
+
+func TestSkipTask_Success_PausedTask(t *testing.T) {
+	// Arrange — skip a paused task assigned to the user
+	taskID := "job-abc.3"
+	userID := uuid.New()
+	pausedAt := time.Now().Add(-5 * time.Minute)
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusPaused,
+		AssignedToID: &userID,
+		PausedAt:     &pausedAt,
+		Title:        "Cut mortises",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == taskID {
+				return task, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		updateFunc: func(t *models.Task) error {
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusSkipped, result.Status)
+}
+
+func TestSkipTask_TaskNotFound(t *testing.T) {
+	// Arrange
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return nil, errors.New("task not found")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask("nonexistent", uuid.New())
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "task not found")
+}
+
+func TestSkipTask_AlreadyTerminal(t *testing.T) {
+	// Arrange — test each terminal status
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	terminalStatuses := []models.TaskStatus{
+		models.TaskStatusDone,
+		models.TaskStatusSkipped,
+		models.TaskStatusCancelled,
+	}
+
+	for _, status := range terminalStatuses {
+		t.Run(string(status), func(t *testing.T) {
+			task := &models.Task{
+				ID:     taskID,
+				Status: status,
+				Title:  "Some task",
+			}
+
+			mockRepo := &MockTaskRepository{
+				getByIDFunc: func(id string) (*models.Task, error) {
+					return task, nil
+				},
+			}
+
+			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+			// Act
+			result, err := svc.SkipTask(taskID, userID)
+
+			// Assert
+			assert.Error(t, err)
+			assert.Nil(t, result)
+			assert.Contains(t, err.Error(), "cannot be skipped")
+			assert.Contains(t, err.Error(), "already terminal")
+		})
+	}
+}
+
+func TestSkipTask_NotAssignedToUser(t *testing.T) {
+	// Arrange — task assigned to someone else
+	taskID := "job-abc.3"
+	assignedUserID := uuid.New()
+	otherUserID := uuid.New()
+
+	task := &models.Task{
+		ID:           taskID,
+		Status:       models.TaskStatusActive,
+		AssignedToID: &assignedUserID,
+		Title:        "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, otherUserID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "not assigned to user")
+	assert.Contains(t, err.Error(), otherUserID.String())
+}
+
+func TestSkipTask_TriggersParentAutoComplete(t *testing.T) {
+	// Arrange — skip the last non-terminal child to trigger parent auto-complete
+	parentID := "job-abc"
+	taskID := "job-abc.2"
+	userID := uuid.New()
+
+	parent := &models.Task{
+		ID:     parentID,
+		Status: models.TaskStatusActive,
+		Title:  "Parent job",
+	}
+
+	task := &models.Task{
+		ID:       taskID,
+		Status:   models.TaskStatusOpen,
+		ParentID: &parentID,
+		Title:    "Second step",
+	}
+
+	sibling := models.Task{
+		ID:       "job-abc.1",
+		Status:   models.TaskStatusDone,
+		ParentID: &parentID,
+		Title:    "First step",
+	}
+
+	updatedIDs := map[string]bool{}
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			switch id {
+			case taskID:
+				return task, nil
+			case parentID:
+				return parent, nil
+			}
+			return nil, errors.New("not found")
+		},
+		getChildrenFunc: func(pid string) ([]models.Task, error) {
+			if pid == parentID {
+				// Return the skipped task (simulating post-update state) and the done sibling
+				skippedTask := *task
+				skippedTask.Status = models.TaskStatusSkipped
+				return []models.Task{skippedTask, sibling}, nil
+			}
+			return nil, nil
+		},
+		updateFunc: func(t *models.Task) error {
+			updatedIDs[t.ID] = true
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusSkipped, result.Status)
+	assert.True(t, updatedIDs[taskID], "task should have been updated")
+	assert.True(t, updatedIDs[parentID], "parent should have been auto-completed")
+}
+
+func TestSkipTask_UpdateFails(t *testing.T) {
+	// Arrange
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	task := &models.Task{
+		ID:     taskID,
+		Status: models.TaskStatusOpen,
+		Title:  "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+		updateFunc: func(t *models.Task) error {
+			return errors.New("database error")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.SkipTask(taskID, userID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Contains(t, err.Error(), "database error")
+}
+
 // --- CompleteTask Tests ---
 
 func TestCompleteTask_Success(t *testing.T) {
