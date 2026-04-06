@@ -1,0 +1,231 @@
+# Dining Chair — batch-of-6 workflow
+#
+# Based on the station flow from specs/job-flow.md (lines 188-193):
+#   rough mill -> joinery -> assembly -> finishing -> final assembly
+#
+# This recipe is designed to be poured once per batch. The loop on the
+# "chair" step expands into 6 parallel sub-trees (chair-1 through chair-6),
+# each flowing through the full station sequence. Final assembly fans in
+# from all 6 chairs for batch finishing and inspection.
+#
+# Import:  nori recipe create --from-toml seeds/chair.toml
+# Pour:    nori recipe pour dining-chair --var batch_size=6
+
+formula = "Dining Chair"
+
+[recipe]
+name = "dining-chair"
+description = "Batch dining chair build — rough mill through final assembly"
+version = 1
+type = "workflow"
+
+[vars]
+wood_species = "Walnut"
+batch_size = { description = "Number of chairs in the batch", type = "int", default = "6" }
+seat_style = { description = "Seat construction", enum = ["solid", "woven", "upholstered"], default = "solid" }
+finish_type = { description = "Finish to apply", enum = ["oil", "lacquer", "poly"], default = "oil" }
+
+# ── Rough milling ──────────────────────────────────────────────────────
+
+[[steps]]
+id = "mill"
+title = "Rough mill — {{wood_species}}"
+station = "mill"
+description = "Mill all blanks to rough dimension + 1/8\" oversize for the full batch."
+
+  [[steps.children]]
+  id = "face-joint"
+  title = "Face joint all boards"
+  station = "mill"
+  description = "Reference face on the jointer. Mark with chalk triangle."
+
+  [[steps.children]]
+  id = "thickness"
+  title = "Thickness plane to final dimension"
+  station = "mill"
+  needs = ["face-joint"]
+  description = "Plane to 7/8\" for legs, 3/4\" for rails and slats."
+
+  [[steps.children]]
+  id = "rip"
+  title = "Rip to width on table saw"
+  station = "mill"
+  needs = ["thickness"]
+  description = "Rip legs to 1-3/4\" square. Rails to 2-1/2\" wide."
+
+  [[steps.children]]
+  id = "crosscut"
+  title = "Crosscut to rough length"
+  station = "mill"
+  needs = ["rip"]
+  description = "Leave 1\" extra on each end. Cut all parts for the full batch."
+
+# ── Per-chair processing (loop expands to batch_size iterations) ───────
+
+[[steps]]
+id = "chair"
+title = "Chair {{i}} — {{wood_species}}"
+needs = ["mill"]
+description = "Per-chair joinery, dry fit, and sub-assembly."
+
+  [steps.loop]
+  count = "{{batch_size}}"
+
+  [[steps.children]]
+  id = "layout"
+  title = "Layout and mark joinery — chair {{i}}"
+  station = "joinery"
+  description = "Transfer measurements from story stick. Mark mortise locations on legs, tenon shoulders on rails."
+
+  [[steps.children]]
+  id = "mortises"
+  title = "Cut mortises — chair {{i}}"
+  station = "joinery"
+  needs = ["layout"]
+  description = "Use hollow-chisel mortiser or router. 3/8\" wide, 1-1/2\" deep. Test depth with gauge."
+
+  [[steps.children]]
+  id = "tenons"
+  title = "Cut tenons — chair {{i}}"
+  station = "joinery"
+  needs = ["layout"]
+  description = "Table saw with dado stack or tenoning jig. Sneak up on fit — test each tenon in its mortise."
+
+  [[steps.children]]
+  id = "dry-fit"
+  title = "Dry fit — chair {{i}}"
+  station = "joinery"
+  needs = ["mortises", "tenons"]
+  description = "Assemble without glue. Check for square, twist, and rack. Adjust as needed."
+
+  [[steps.children]]
+  id = "qc-joinery"
+  title = "QC: Joinery inspection — chair {{i}}"
+  needs = ["dry-fit"]
+  type = "gate"
+  description = "Verify all joints are tight, square, and free of gaps."
+
+    [steps.children.gate]
+    type = "human"
+    timeout = "24h"
+
+  [[steps.children]]
+  id = "glue-up"
+  title = "Glue up sub-assemblies — chair {{i}}"
+  station = "assembly"
+  needs = ["qc-joinery"]
+  description = "Glue side frames first, then join front and back rails. Use cauls to distribute clamping pressure."
+
+    [steps.children.gate]
+    type = "timer"
+    id = "cure-time"
+    timeout = "4h"
+
+  [[steps.children]]
+  id = "seat"
+  title = "Fit seat — {{seat_style}} — chair {{i}}"
+  station = "assembly"
+  needs = ["glue-up"]
+  description = "Attach the seat to the frame. Method depends on seat_style variable."
+  condition = "{{seat_style}} == solid"
+
+  [[steps.children]]
+  id = "sand"
+  title = "Sand to 220 — chair {{i}}"
+  station = "finish"
+  needs = ["seat", "glue-up"]
+  description = "Progressive sanding: 80 → 120 → 180 → 220. Ease all edges. Remove layout marks."
+
+# ── Batch finishing (fans in from all chairs) ──────────────────────────
+
+[[steps]]
+id = "batch-finish"
+title = "Batch finish — {{finish_type}}"
+station = "finish"
+needs = ["chair"]
+description = "Apply finish to all chairs as a batch for consistent color."
+
+  [[steps.children]]
+  id = "prep"
+  title = "Final surface prep"
+  station = "finish"
+  description = "Blow off dust, tack cloth, raise grain with water, re-sand 220."
+
+  [[steps.children]]
+  id = "coat-1"
+  title = "Apply first coat — {{finish_type}}"
+  station = "finish"
+  needs = ["prep"]
+  description = "Flood coat for oil, thin coat for film finishes. Follow product directions."
+
+    [steps.children.gate]
+    type = "timer"
+    id = "dry-1"
+    timeout = "8h"
+
+  [[steps.children]]
+  id = "sand-between"
+  title = "Sand between coats — 320 grit"
+  station = "finish"
+  needs = ["coat-1"]
+  description = "Light scuff sand. Remove nibs and dust bumps only."
+
+  [[steps.children]]
+  id = "coat-2"
+  title = "Apply final coat — {{finish_type}}"
+  station = "finish"
+  needs = ["sand-between"]
+  description = "Final coat. Maintain wet edge. Watch for drips."
+
+    [steps.children.gate]
+    type = "timer"
+    id = "dry-2"
+    timeout = "24h"
+
+# ── Final inspection ───────────────────────────────────────────────────
+
+[[steps]]
+id = "final-inspect"
+title = "Final inspection — batch of {{batch_size}}"
+needs = ["batch-finish"]
+type = "gate"
+description = "Check all chairs for finish defects, wobble, joint integrity. Match set for consistency."
+
+  [steps.gate]
+  type = "human"
+
+# ── BOM ────────────────────────────────────────────────────────────────
+
+[bom]
+  [[bom.items]]
+  name = "{{wood_species}} 4/4"
+  quantity = 30
+  unit = "board_feet"
+  step = "mill"
+  notes = "For rails, slats, and seat blanks"
+
+  [[bom.items]]
+  name = "{{wood_species}} 8/4"
+  quantity = 18
+  unit = "board_feet"
+  step = "mill"
+  notes = "For legs — need 1-3/4\" square finished"
+
+  [[bom.items]]
+  name = "Wood glue"
+  quantity = 16
+  unit = "oz"
+  step = "chair"
+  notes = "Titebond III for open-time on complex glue-ups"
+
+  [[bom.items]]
+  name = "{{finish_type}} finish"
+  quantity = 1
+  unit = "quart"
+  step = "batch-finish"
+
+  [[bom.items]]
+  name = "Sandpaper assortment (80-320)"
+  quantity = 1
+  unit = "pack"
+  step = "chair"

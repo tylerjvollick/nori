@@ -1,0 +1,225 @@
+# End-Grain Cutting Board
+#
+# A simpler recipe — good starter project for learning the Nori workflow.
+# Flows through: mill -> glue-up -> flatten -> finish.
+# No loops or complex dependencies; straightforward linear-ish flow
+# with one fan-out for parallel edge and face work.
+#
+# Import:  nori recipe create --from-toml seeds/cutting-board.toml
+# Pour:    nori recipe pour cutting-board --var wood_species=Maple
+
+formula = "Cutting Board"
+
+[recipe]
+name = "cutting-board"
+description = "End-grain cutting board — mill, glue, flatten, finish"
+version = 1
+type = "workflow"
+
+[vars]
+wood_species = { description = "Primary wood species", default = "Maple" }
+accent_species = { description = "Accent wood (leave blank for none)", default = "" }
+board_length = { description = "Finished length in inches", default = "18" }
+board_width = { description = "Finished width in inches", default = "12" }
+board_thickness = { description = "Finished thickness in inches", default = "1.5" }
+
+# ── Stock preparation ──────────────────────────────────────────────────
+
+[[steps]]
+id = "mill"
+title = "Mill stock — {{wood_species}}"
+station = "mill"
+description = "Prepare blanks for the cutting board. Need strips at least 2\" wide and 13\" long."
+
+  [[steps.children]]
+  id = "face-joint"
+  title = "Face joint"
+  station = "mill"
+  description = "Flatten one face on the jointer. This is the reference face for planing."
+
+  [[steps.children]]
+  id = "plane"
+  title = "Plane to 2\" thickness"
+  station = "mill"
+  needs = ["face-joint"]
+  description = "Plane to 2\" — this becomes the cutting surface after cross-cutting and re-gluing."
+
+  [[steps.children]]
+  id = "rip"
+  title = "Rip strips to 1-3/4\" wide"
+  station = "mill"
+  needs = ["plane"]
+  description = "Rip on the table saw. Keep offcuts for accent strips if using mixed species."
+
+  [[steps.children]]
+  id = "crosscut"
+  title = "Crosscut strips to {{board_width}} + 1\""
+  station = "mill"
+  needs = ["rip"]
+  description = "Cut strips to rough width of the finished board plus 1\" for trimming."
+
+# ── First glue-up (edge grain) ─────────────────────────────────────────
+
+[[steps]]
+id = "edge-glue"
+title = "Edge-grain glue-up"
+station = "assembly"
+needs = ["mill"]
+description = "Arrange strips for pattern. Alternate growth rings. Glue and clamp. Use cauls for flat panel."
+
+  [steps.gate]
+  type = "timer"
+  id = "edge-cure"
+  timeout = "2h"
+
+# ── Cross-cut and re-glue (end grain) ──────────────────────────────────
+
+[[steps]]
+id = "crosscut-panel"
+title = "Cross-cut panel into strips"
+station = "mill"
+needs = ["edge-glue"]
+description = "Cross-cut the edge-grain panel into 1-3/4\" strips. These strips now show end grain on the face."
+
+[[steps]]
+id = "endgrain-glue"
+title = "End-grain glue-up"
+station = "assembly"
+needs = ["crosscut-panel"]
+description = "Rotate every other strip 180 degrees for the checkerboard pattern. Glue and clamp carefully — end grain is tricky. Use slow-set epoxy or Titebond III for open time."
+
+  [steps.gate]
+  type = "timer"
+  id = "endgrain-cure"
+  timeout = "4h"
+
+# ── Flatten and shape ──────────────────────────────────────────────────
+
+[[steps]]
+id = "flatten"
+title = "Flatten to {{board_thickness}}\""
+station = "mill"
+needs = ["endgrain-glue"]
+description = "Use a drum sander or router sled to flatten both faces. DO NOT run end grain through the planer — it will explode. Final thickness: {{board_thickness}}\"."
+
+[[steps]]
+id = "shape"
+title = "Trim and shape edges"
+station = "mill"
+needs = ["flatten"]
+description = "Trim to final dimensions ({{board_length}}\" x {{board_width}}\"). Round over edges with 1/4\" roundover bit. Sand edges to 220."
+
+  [[steps.children]]
+  id = "trim"
+  title = "Trim to {{board_length}}\" x {{board_width}}\""
+  station = "mill"
+  description = "Square up on the table saw or use a crosscut sled."
+
+  [[steps.children]]
+  id = "roundover"
+  title = "Route edge profile"
+  station = "mill"
+  needs = ["trim"]
+  description = "1/4\" roundover on all edges, top and bottom. Sand router marks."
+
+  [[steps.children]]
+  id = "sand-edges"
+  title = "Sand edges to 220"
+  station = "mill"
+  needs = ["roundover"]
+  description = "Progressive sanding on edges: 120 → 180 → 220."
+
+# ── Finish ─────────────────────────────────────────────────────────────
+
+[[steps]]
+id = "sand-faces"
+title = "Sand faces to 220"
+station = "finish"
+needs = ["shape"]
+description = "Progressive sanding on both faces: 120 → 180 → 220. Blow off dust between grits."
+
+[[steps]]
+id = "finish"
+title = "Apply food-safe finish"
+station = "finish"
+needs = ["sand-faces"]
+description = "Apply mineral oil liberally. Let soak 20 minutes, wipe off excess. Repeat 3 times. Follow with beeswax/mineral oil blend."
+
+  [[steps.children]]
+  id = "oil-1"
+  title = "First oil coat"
+  station = "finish"
+  description = "Flood surface with mineral oil. Let soak 20 minutes."
+
+  [[steps.children]]
+  id = "oil-2"
+  title = "Second oil coat"
+  station = "finish"
+  needs = ["oil-1"]
+  description = "Re-apply mineral oil to any dry spots. Let soak 15 minutes. Wipe off excess."
+
+  [[steps.children]]
+  id = "oil-3"
+  title = "Third oil coat"
+  station = "finish"
+  needs = ["oil-2"]
+  description = "Final oil coat. Board should look saturated. Wipe completely dry."
+
+  [[steps.children]]
+  id = "wax"
+  title = "Apply board butter (beeswax/oil blend)"
+  station = "finish"
+  needs = ["oil-3"]
+  description = "Rub in board butter. Buff with a clean cloth. Let sit overnight."
+
+    [steps.children.gate]
+    type = "timer"
+    id = "wax-cure"
+    timeout = "12h"
+
+# ── Final QC ───────────────────────────────────────────────────────────
+
+[[steps]]
+id = "qc"
+title = "Final inspection"
+needs = ["finish"]
+type = "gate"
+description = "Check for: flat surface, smooth edges, no glue squeeze-out, even finish, no voids or cracks."
+
+  [steps.gate]
+  type = "human"
+
+# ── BOM ────────────────────────────────────────────────────────────────
+
+[bom]
+  [[bom.items]]
+  name = "{{wood_species}} 8/4"
+  quantity = 4
+  unit = "board_feet"
+  step = "mill"
+  notes = "Need 2\" thick stock for end-grain strips"
+
+  [[bom.items]]
+  name = "Wood glue (Titebond III)"
+  quantity = 8
+  unit = "oz"
+  step = "edge-glue"
+  notes = "Waterproof — required for cutting boards"
+
+  [[bom.items]]
+  name = "Mineral oil (food grade)"
+  quantity = 8
+  unit = "oz"
+  step = "finish"
+
+  [[bom.items]]
+  name = "Board butter (beeswax/mineral oil)"
+  quantity = 2
+  unit = "oz"
+  step = "finish"
+
+  [[bom.items]]
+  name = "Sandpaper assortment (120-220)"
+  quantity = 1
+  unit = "pack"
+  step = "sand-faces"
