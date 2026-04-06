@@ -254,6 +254,52 @@ func isTerminalStatus(status models.TaskStatus) bool {
 		status == models.TaskStatusCancelled
 }
 
+// AddChildTask creates a new child task under an existing parent task.
+// It generates a hierarchical ID by appending the next sequence number to the
+// parent's ID (e.g., "job-abc.1", "job-abc.2"). This supports first-time
+// capture mode where operators add steps during execution.
+func (s *TaskService) AddChildTask(parentID string, title string, description *string, userID uuid.UUID) (*models.Task, error) {
+	if title == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+
+	// Validate parent exists.
+	parent, err := s.taskRepo.GetByID(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("parent task %q not found: %w", parentID, err)
+	}
+
+	// Get existing children to determine the next sequence number.
+	children, err := s.taskRepo.GetChildren(parentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get children of task %q: %w", parentID, err)
+	}
+
+	nextSeq := len(children) + 1
+	childID := fmt.Sprintf("%s.%d", parentID, nextSeq)
+
+	now := time.Now()
+	child := &models.Task{
+		ID:          childID,
+		SpaceID:     parent.SpaceID,
+		ParentID:    &parentID,
+		CreatedByID: userID,
+		Type:        models.TaskTypeTask,
+		Status:      models.TaskStatusOpen,
+		Title:       title,
+		Description: description,
+		Priority:    parent.Priority,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := s.taskRepo.Create(child); err != nil {
+		return nil, fmt.Errorf("failed to create child task: %w", err)
+	}
+
+	return child, nil
+}
+
 // PauseTask pauses an active task. Only the assigned user can pause it.
 // Returns an error if the task is not in "active" status or is not assigned to the user.
 func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, error) {
