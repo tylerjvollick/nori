@@ -34,6 +34,7 @@ services:
       NORI_ADMIN_EMAIL: ${NORI_ADMIN_EMAIL:-admin@nori.dev}
       NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
       NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-Nori Dev}
+      NORI_SKIP_PASSWORD_CHANGE: ${NORI_SKIP_PASSWORD_CHANGE:-false}
     depends_on:
       database:
         condition: service_healthy

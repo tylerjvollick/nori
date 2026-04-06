@@ -361,16 +361,30 @@ NORI_SKIP_PASSWORD_CHANGE=true
 	return os.WriteFile("docker/.env", []byte(content), 0600)
 }
 
-// dockerComposeUp runs docker compose up -d --build.
+// dockerComposeUp builds images without cache and starts containers.
+// A separate build step with --no-cache is required because the server
+// and migrate services share a Dockerfile and Docker may serve stale
+// COPY layers from the build cache even when source files have changed.
 func dockerComposeUp() error {
-	cmd := execCommand("docker", "compose",
+	composeArgs := []string{
+		"compose",
 		"-f", "docker/docker-compose.dev.yml",
 		"--env-file", "docker/.env",
-		"up", "-d", "--build",
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	}
+
+	// Step 1: build with --no-cache so code changes are always picked up.
+	buildCmd := execCommand("docker", append(composeArgs, "build", "--no-cache")...)
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("docker compose build failed: %w", err)
+	}
+
+	// Step 2: start containers using the freshly-built images.
+	upCmd := execCommand("docker", append(composeArgs, "up", "-d")...)
+	upCmd.Stdout = os.Stdout
+	upCmd.Stderr = os.Stderr
+	return upCmd.Run()
 }
 
 // waitForHealthy polls the server's /health endpoint until it returns OK or the timeout is reached.

@@ -28,6 +28,7 @@ type AccountCreator interface {
 // UserUpdater updates user fields
 type UserUpdater interface {
 	UpdateDefaultAccountID(userID uuid.UUID, accountID uuid.UUID) error
+	ClearMustChangePassword(userID uuid.UUID) error
 }
 
 // UserAccountCreator creates user-account relationships
@@ -39,6 +40,7 @@ type UserAccountCreator interface {
 type SeedService struct {
 	accountCounter     AccountCounter
 	userCreator        UserCreator
+	userUpdater        UserUpdater
 	accountCreator     AccountCreator
 	userAccountCreator UserAccountCreator
 	cfg                *config.Config
@@ -48,6 +50,7 @@ type SeedService struct {
 func NewSeedService(
 	accountCounter AccountCounter,
 	userCreator UserCreator,
+	userUpdater UserUpdater,
 	accountCreator AccountCreator,
 	userAccountCreator UserAccountCreator,
 	cfg *config.Config,
@@ -55,6 +58,7 @@ func NewSeedService(
 	return &SeedService{
 		accountCounter:     accountCounter,
 		userCreator:        userCreator,
+		userUpdater:        userUpdater,
 		accountCreator:     accountCreator,
 		userAccountCreator: userAccountCreator,
 		cfg:                cfg,
@@ -103,6 +107,15 @@ func (s *SeedService) SeedIfNeeded() error {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
+	// GORM skips bool zero-values during Create, so the DB default (true)
+	// wins even when we set MustChangePassword=false. Explicitly clear it
+	// when SkipPasswordChange is enabled.
+	if s.cfg.SkipPasswordChange {
+		if err := s.userUpdater.ClearMustChangePassword(adminUser.ID); err != nil {
+			return fmt.Errorf("failed to clear must-change-password flag: %w", err)
+		}
+	}
+
 	log.Printf("Seed: created admin user %s", adminUser.Email)
 
 	// 2. Create the account
@@ -120,7 +133,12 @@ func (s *SeedService) SeedIfNeeded() error {
 
 	log.Printf("Seed: created account %q", s.cfg.AccountName)
 
-	// 3. Create UserAccount join record with admin role
+	// 3. Point the admin user's DefaultAccountID to the new account
+	if err := s.userUpdater.UpdateDefaultAccountID(adminUser.ID, account.ID); err != nil {
+		return fmt.Errorf("failed to set admin default account: %w", err)
+	}
+
+	// 4. Create UserAccount join record with admin role
 	_, err = s.userAccountCreator.CreateWithRole(adminUser.ID, account.ID, models.RoleAdmin)
 	if err != nil {
 		return fmt.Errorf("failed to create user-account relationship: %w", err)

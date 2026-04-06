@@ -54,7 +54,7 @@ func New(cfg *config.Config) *App {
 	}
 
 	// First-boot seed
-	seedService := services.NewSeedService(accountRepo, userRepo, accountRepo, userAccountRepo, cfg)
+	seedService := services.NewSeedService(accountRepo, userRepo, userRepo, accountRepo, userAccountRepo, cfg)
 	if err := seedService.SeedIfNeeded(); err != nil {
 		log.Fatal("Failed to seed database: " + err.Error())
 	}

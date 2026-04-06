@@ -45,6 +45,30 @@ func (m *mockUserAccountCreator) CreateWithRole(userID uuid.UUID, accountID uuid
 	return m.createWithRoleFunc(userID, accountID, role)
 }
 
+type mockUserUpdater struct {
+	updateDefaultAccountIDFunc  func(uuid.UUID, uuid.UUID) error
+	clearMustChangePasswordFunc func(uuid.UUID) error
+}
+
+func (m *mockUserUpdater) UpdateDefaultAccountID(userID uuid.UUID, accountID uuid.UUID) error {
+	if m.updateDefaultAccountIDFunc != nil {
+		return m.updateDefaultAccountIDFunc(userID, accountID)
+	}
+	return nil
+}
+
+func (m *mockUserUpdater) ClearMustChangePassword(userID uuid.UUID) error {
+	if m.clearMustChangePasswordFunc != nil {
+		return m.clearMustChangePasswordFunc(userID)
+	}
+	return nil
+}
+
+// noopUserUpdater is a convenience mock that does nothing.
+func noopUserUpdater() *mockUserUpdater {
+	return &mockUserUpdater{}
+}
+
 func newTestSeedConfig() *config.Config {
 	return &config.Config{
 		JWTSecret:     "test-secret",
@@ -60,7 +84,7 @@ func TestSeedIfNeeded_SkipsWhenAccountExists(t *testing.T) {
 		countFunc: func() (int64, error) { return 1, nil },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, newTestSeedConfig())
+	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -75,7 +99,7 @@ func TestSeedIfNeeded_SkipsWhenMultipleAccountsExist(t *testing.T) {
 		countFunc: func() (int64, error) { return 5, nil },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, newTestSeedConfig())
+	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -90,7 +114,7 @@ func TestSeedIfNeeded_ErrorCheckingAccountCount(t *testing.T) {
 		countFunc: func() (int64, error) { return 0, errors.New("database connection failed") },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, newTestSeedConfig())
+	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -142,7 +166,7 @@ func TestSeedIfNeeded_CreatesAdminUserAccountAndRelationship(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -203,7 +227,7 @@ func TestSeedIfNeeded_DoesNotCreateSpaces(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -224,7 +248,7 @@ func TestSeedIfNeeded_ErrorCreatingUser(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, nil, nil, newTestSeedConfig())
+	svc := NewSeedService(counter, userCreator, nil, nil, nil, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -250,7 +274,7 @@ func TestSeedIfNeeded_ErrorCreatingAccount(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, nil, newTestSeedConfig())
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, nil, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -280,7 +304,7 @@ func TestSeedIfNeeded_ErrorCreatingUserAccountRelationship(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, newTestSeedConfig())
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -321,7 +345,7 @@ func TestSeedIfNeeded_IsIdempotent(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, newTestSeedConfig())
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
 
 	// Act: call twice
 	err1 := svc.SeedIfNeeded()
@@ -361,7 +385,7 @@ func TestSeedIfNeeded_UserHasNoDefaultAccountID(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -400,7 +424,7 @@ func TestSeedIfNeeded_UserHasNoFirstOrLastName(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -443,7 +467,7 @@ func TestSeedIfNeeded_AccountReferencesUser(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -480,7 +504,7 @@ func TestSeedIfNeeded_AccountPlanIsTrial(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -518,7 +542,7 @@ func TestSeedIfNeeded_SkipPasswordChange(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()
@@ -556,7 +580,7 @@ func TestSeedIfNeeded_DefaultRequiresPasswordChange(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, accountCreator, userAccountCreator, cfg)
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
 	// Act
 	err := svc.SeedIfNeeded()

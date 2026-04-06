@@ -18,9 +18,4 @@ CREATE INDEX idx_station_space_id ON station(space_id);
 -- Index on space_id + display_order for ordered listing
 CREATE INDEX idx_station_space_id_display_order ON station(space_id, display_order);
 
--- Add FK constraint on sop_step.station_id → station.id (deferred from task 1.3)
-ALTER TABLE sop_step
-    ADD CONSTRAINT fk_sop_step_station
-    FOREIGN KEY (station_id)
-    REFERENCES station(id)
-    ON DELETE SET NULL;
+

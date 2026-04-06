@@ -82,6 +82,13 @@ func (r *UserRepository) UpdatePassword(userID uuid.UUID, hashedPassword string)
 		Update("password", hashedPassword).Error
 }
 
+// UpdateDefaultAccountID sets the user's default account.
+func (r *UserRepository) UpdateDefaultAccountID(userID uuid.UUID, accountID uuid.UUID) error {
+	return r.db.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("default_account_id", accountID).Error
+}
+
 // ClearMustChangePassword clears the MustChangePassword flag for a user
 func (r *UserRepository) ClearMustChangePassword(userID uuid.UUID) error {
 	return r.db.Model(&models.User{}).

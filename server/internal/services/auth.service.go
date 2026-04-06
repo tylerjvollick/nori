@@ -210,11 +210,19 @@ func (s *AuthService) CreateLoginResponse(user models.User, activeSpaceID *uuid.
 		AccessToken:        accessToken,
 		UserID:             user.ID,
 		UserEmail:          user.Email,
-		FirstName:          *user.FirstName,
-		LastName:           *user.LastName,
+		FirstName:          derefStr(user.FirstName),
+		LastName:           derefStr(user.LastName),
 		MustChangePassword: user.MustChangePassword,
 		ActiveSpaceID:      spaceID,
 	}, nil
+}
+
+// derefStr safely dereferences a *string, returning "" if nil.
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (s *AuthService) CreateUser(firstName, lastName, email, password string, createDefaultAccount bool) (*models.User, error) {
