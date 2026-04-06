@@ -19,7 +19,10 @@
 		ChevronRight,
 		Ellipsis,
 		LogOut,
-		User as UserIcon
+		User as UserIcon,
+		Settings,
+		Users,
+		Key
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import type { ComponentProps } from 'svelte';
@@ -79,6 +82,9 @@
 		goto('/login');
 	}
 
+	// Admin role check
+	let isAdmin = $derived(pageUser?.role === 'admin');
+
 	// Navigation structure
 	const navMain = [
 		{
@@ -99,6 +105,24 @@
 			title: 'Equipment',
 			url: '#',
 			icon: Wrench
+		}
+	];
+
+	const navAdmin = [
+		{
+			title: 'Users',
+			url: '/admin/users',
+			icon: Users
+		},
+		{
+			title: 'API Keys',
+			url: '/admin/api-keys',
+			icon: Key
+		},
+		{
+			title: 'Spaces',
+			url: '/admin/spaces',
+			icon: LayoutGrid
 		}
 	];
 </script>
@@ -254,6 +278,36 @@
 				{/each}
 			</Sidebar.Menu>
 		</Sidebar.Group>
+
+		<!-- Admin Section (only visible to admins) -->
+		{#if isAdmin}
+			<Sidebar.Separator />
+
+			<Sidebar.Group class="group-data-[collapsible=icon]:hidden">
+				<Sidebar.GroupLabel>
+					<Settings class="size-3 mr-1" />
+					Admin
+				</Sidebar.GroupLabel>
+				<Sidebar.Menu>
+					{#each navAdmin as item (item.title)}
+						<Sidebar.MenuItem>
+							<Sidebar.MenuButton
+								isActive={isActive(item.url)}
+								onclick={() => goto(item.url)}
+								tooltipContent={item.title}
+							>
+								{#snippet child({ props })}
+									<a href={item.url} {...props}>
+										<item.icon />
+										<span>{item.title}</span>
+									</a>
+								{/snippet}
+							</Sidebar.MenuButton>
+						</Sidebar.MenuItem>
+					{/each}
+				</Sidebar.Menu>
+			</Sidebar.Group>
+		{/if}
 	</Sidebar.Content>
 
 	<Sidebar.Footer>
