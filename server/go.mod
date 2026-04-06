@@ -3,6 +3,7 @@ module github.com/tylerjvollick/nori
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
@@ -12,7 +13,6 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.10.0
-	github.com/tus/tusd/v2 v2.8.0
 	golang.org/x/crypto v0.37.0
 	golang.org/x/term v0.31.0
 	gorm.io/driver/postgres v1.6.0
@@ -41,7 +41,6 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
-	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
