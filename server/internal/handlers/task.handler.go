@@ -165,6 +165,32 @@ func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
 	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(task))
 }
 
+// getTaskInSpace fetches a task by ID and verifies it belongs to the
+// requester's active space. Returns 404 on mismatch (not 403) to avoid
+// leaking existence of tasks in other spaces.
+func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID string) (*models.Task, error) {
+	if authDTO.ActiveSpaceID == nil {
+		return nil, c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "X-Space-ID header is required",
+		})
+	}
+
+	task, err := h.taskService.GetTaskByID(taskID)
+	if err != nil {
+		return nil, c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": "task not found",
+		})
+	}
+
+	if task.SpaceID != *authDTO.ActiveSpaceID {
+		return nil, c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": "task not found",
+		})
+	}
+
+	return task, nil
+}
+
 // GetTask returns a single task by ID.
 func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
@@ -181,11 +207,9 @@ func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 		})
 	}
 
-	task, err := h.taskService.GetTaskByID(id)
+	task, err := h.getTaskInSpace(c, authDTO, id)
 	if err != nil {
-		return c.Status(http.StatusNotFound).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return err
 	}
 
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
@@ -205,6 +229,11 @@ func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "task ID is required",
 		})
+	}
+
+	// Verify task belongs to the requester's space before updating.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
 	}
 
 	var dto dtos.UpdateTaskRequest
@@ -240,6 +269,11 @@ func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
 		})
 	}
 
+	// Verify task belongs to the requester's space before deleting.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
 	if err := h.taskService.DeleteTask(id); err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -263,6 +297,11 @@ func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "task ID is required",
 		})
+	}
+
+	// Verify task belongs to the requester's space before claiming.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
 	}
 
 	task, err := h.taskService.ClaimTask(id, authDTO.User.ID)
@@ -291,6 +330,11 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 		})
 	}
 
+	// Verify task belongs to the requester's space before completing.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
 	task, err := h.taskService.CompleteTask(id, authDTO.User.ID)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
@@ -315,6 +359,11 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": "task ID is required",
 		})
+	}
+
+	// Verify task belongs to the requester's space before pausing.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
 	}
 
 	task, err := h.taskService.PauseTask(id, authDTO.User.ID)
