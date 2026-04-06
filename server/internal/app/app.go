@@ -76,6 +76,7 @@ func New(cfg *config.Config) *App {
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
 	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
+	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
 	app := fiber.New(fiber.Config{
@@ -109,6 +110,7 @@ func New(cfg *config.Config) *App {
 	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
 	recipeHandler.RegisterRecipeVersionRoutes(app, authMiddleware, requirePasswordChanged)
 	stationHandler.RegisterStationRoutes(app, authMiddleware, requirePasswordChanged)
+	taskDepHandler.RegisterTaskDepRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())

@@ -3,6 +3,7 @@ package repositories
 import (
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/models"
 	"gorm.io/gorm"
 )
@@ -102,6 +103,18 @@ func (r *TaskDepRepository) GetDependents(taskID string) ([]models.TaskDep, erro
 	err := r.db.Where("from_task_id = ?", taskID).
 		Find(&deps).Error
 	return deps, err
+}
+
+// RemoveDepByID deletes a dependency edge by its UUID primary key.
+func (r *TaskDepRepository) RemoveDepByID(id uuid.UUID) error {
+	result := r.db.Where("id = ?", id).Delete(&models.TaskDep{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("dependency %q not found", id)
+	}
+	return nil
 }
 
 // GetAllForTask returns all dependency edges where the given task
