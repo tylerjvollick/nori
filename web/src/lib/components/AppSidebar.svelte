@@ -22,7 +22,8 @@
 		User as UserIcon,
 		Settings,
 		Users,
-		Key
+		Key,
+		ListChecks
 	} from 'lucide-svelte';
 	import { Button } from '$lib/components/ui/button';
 	import type { ComponentProps } from 'svelte';
@@ -87,6 +88,12 @@
 
 	// Navigation structure
 	const navMain = [
+		{
+			title: 'Flow',
+			url: '/flow',
+			icon: ListChecks,
+			isActive: isActive('/flow')
+		},
 		{
 			title: 'SOPs',
 			url: '/sops',
