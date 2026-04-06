@@ -105,6 +105,7 @@ func New(cfg *config.Config) *App {
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
 	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
 	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
+	recipeHandler.RegisterRecipeVersionRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())

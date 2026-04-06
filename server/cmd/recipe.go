@@ -54,6 +54,19 @@ type createVersionResponse struct {
 	Status        string `json:"status"`
 }
 
+// versionListItem mirrors relevant fields from dtos.RecipeVersionResponse for version listing.
+type versionListItem struct {
+	ID            int    `json:"id"`
+	VersionNumber int    `json:"versionNumber"`
+	Status        string `json:"status"`
+}
+
+// versionListResponse mirrors the response from GET /api/v1/recipes/:id/versions.
+type versionListResponse struct {
+	Items []versionListItem `json:"items"`
+	Total int               `json:"total"`
+}
+
 var (
 	pourVarFlags  []string
 	pourOrderFlag string
@@ -62,6 +75,8 @@ var (
 	createFromTOMLFlag string
 	createNameFlag     string
 	createJSONFlag     bool
+
+	publishJSONFlag bool
 )
 
 var recipeCmd = &cobra.Command{
@@ -85,6 +100,14 @@ var recipeCreateCmd = &cobra.Command{
 	RunE:  runRecipeCreate,
 }
 
+var recipePublishCmd = &cobra.Command{
+	Use:   "publish <slug>",
+	Short: "Publish the latest draft version of a recipe",
+	Long:  "Resolve a recipe by slug, find its latest draft version, and publish it.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRecipePublish,
+}
+
 func init() {
 	recipePourCmd.Flags().StringArrayVar(&pourVarFlags, "var", nil, "Variable override in key=value format (repeatable)")
 	recipePourCmd.Flags().StringVar(&pourOrderFlag, "order", "", "Order ID to link to the job")
@@ -95,8 +118,11 @@ func init() {
 	recipeCreateCmd.Flags().BoolVar(&createJSONFlag, "json", false, "Output as JSON")
 	recipeCreateCmd.MarkFlagRequired("from-toml")
 
+	recipePublishCmd.Flags().BoolVar(&publishJSONFlag, "json", false, "Output as JSON")
+
 	recipeCmd.AddCommand(recipePourCmd)
 	recipeCmd.AddCommand(recipeCreateCmd)
+	recipeCmd.AddCommand(recipePublishCmd)
 	rootCmd.AddCommand(recipeCmd)
 }
 
@@ -328,6 +354,106 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Recipe %q created (slug: %s)\n  Version %d published\n", recipe.Name, recipe.Slug, version.VersionNumber)
+	return nil
+}
+
+// publishVersionResponse mirrors relevant fields from dtos.RecipeVersionResponse for publish.
+type publishVersionResponse struct {
+	ID            int    `json:"id"`
+	VersionNumber int    `json:"versionNumber"`
+	Status        string `json:"status"`
+}
+
+func runRecipePublish(cmd *cobra.Command, args []string) error {
+	slug := args[0]
+
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return err
+	}
+
+	client := newClientWithSpace(creds)
+
+	// 1. Resolve slug to recipe ID.
+	recipeID, err := resolveRecipeSlug(client, slug)
+	if err != nil {
+		return err
+	}
+
+	// 2. List versions to find the latest draft.
+	versionsPath := fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID)
+	resp, err := client.Get(versionsPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("failed to list versions: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var versions versionListResponse
+	if err := cli.ReadJSON(resp, &versions); err != nil {
+		return fmt.Errorf("failed to parse versions response: %w", err)
+	}
+
+	// Find the latest draft version (versions are ordered by version_number DESC).
+	var draft *versionListItem
+	for i := range versions.Items {
+		if versions.Items[i].Status == "draft" {
+			draft = &versions.Items[i]
+			break
+		}
+	}
+
+	if draft == nil {
+		return fmt.Errorf("recipe %q has no draft version to publish", slug)
+	}
+
+	// 3. Publish via the flat recipe-versions endpoint.
+	publishPath := fmt.Sprintf("/api/v1/recipe-versions/%d/publish", draft.ID)
+	resp, err = client.Post(publishPath, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("publish failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var published publishVersionResponse
+	if err := cli.ReadJSON(resp, &published); err != nil {
+		return fmt.Errorf("failed to parse publish response: %w", err)
+	}
+
+	if publishJSONFlag {
+		output := map[string]interface{}{
+			"recipeSlug":    slug,
+			"versionId":     published.ID,
+			"versionNumber": published.VersionNumber,
+			"status":        published.Status,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(output)
+	}
+
+	fmt.Printf("Recipe %q version %d published\n", slug, published.VersionNumber)
 	return nil
 }
 

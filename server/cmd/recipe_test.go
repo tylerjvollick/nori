@@ -736,3 +736,270 @@ func TestRunRecipeCreate_PublishFails(t *testing.T) {
 
 	createFromTOMLFlag = ""
 }
+
+// --- Recipe Publish Tests ---
+
+func TestRecipePublishSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range recipeCmd.Commands() {
+		if cmd.Name() == "publish" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "publish subcommand should be registered on recipe")
+}
+
+func TestRecipePublishHasJSONFlag(t *testing.T) {
+	flag := recipePublishCmd.Flags().Lookup("json")
+	require.NotNil(t, flag, "--json flag should be defined")
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestRecipePublishRequiresArg(t *testing.T) {
+	err := recipePublishCmd.Args(recipePublishCmd, []string{})
+	assert.Error(t, err, "should require exactly one argument")
+}
+
+func TestRunRecipePublish_Success(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			assert.Equal(t, "walnut-dining-table", r.URL.Query().Get("slug"))
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(recipeListResponse{
+				Items: []recipeListItem{
+					{ID: recipeID, Name: "Walnut Dining Table", Slug: "walnut-dining-table"},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(versionListResponse{
+				Items: []versionListItem{
+					{ID: 3, VersionNumber: 3, Status: "draft"},
+					{ID: 2, VersionNumber: 2, Status: "published"},
+					{ID: 1, VersionNumber: 1, Status: "archived"},
+				},
+				Total: 3,
+			})
+
+		case r.URL.Path == "/api/v1/recipe-versions/3/publish" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(publishVersionResponse{
+				ID:            3,
+				VersionNumber: 3,
+				Status:        "published",
+			})
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.NoError(t, err)
+}
+
+func TestRunRecipePublish_JSONOutput(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(recipeListResponse{
+				Items: []recipeListItem{
+					{ID: recipeID, Name: "Walnut Dining Table", Slug: "walnut-dining-table"},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(versionListResponse{
+				Items: []versionListItem{
+					{ID: 2, VersionNumber: 2, Status: "draft"},
+					{ID: 1, VersionNumber: 1, Status: "published"},
+				},
+				Total: 2,
+			})
+
+		case r.URL.Path == "/api/v1/recipe-versions/2/publish" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(publishVersionResponse{
+				ID:            2,
+				VersionNumber: 2,
+				Status:        "published",
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	publishJSONFlag = true
+
+	// Capture stdout.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.NoError(t, err)
+
+	w.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	os.Stdout = oldStdout
+
+	var output map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	assert.Equal(t, "walnut-dining-table", output["recipeSlug"])
+	assert.Equal(t, float64(2), output["versionId"])
+	assert.Equal(t, float64(2), output["versionNumber"])
+	assert.Equal(t, "published", output["status"])
+
+	publishJSONFlag = false
+}
+
+func TestRunRecipePublish_NoDraftVersion(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(recipeListResponse{
+				Items: []recipeListItem{
+					{ID: recipeID, Name: "Walnut Dining Table", Slug: "walnut-dining-table"},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(versionListResponse{
+				Items: []versionListItem{
+					{ID: 1, VersionNumber: 1, Status: "published"},
+				},
+				Total: 1,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no draft version")
+}
+
+func TestRunRecipePublish_RecipeNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipeListResponse{
+			Items: []recipeListItem{},
+			Total: 0,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"nonexistent"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestRunRecipePublish_NoCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not logged in")
+}
+
+func TestRunRecipePublish_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(errorResponse{Error: "invalid credentials"})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+
+	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
+	defer cli.SetIsInteractiveFunc(origFunc)
+
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication expired or invalid")
+}
+
+func TestRunRecipePublish_PublishServerError(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(recipeListResponse{
+				Items: []recipeListItem{
+					{ID: recipeID, Name: "Walnut Dining Table", Slug: "walnut-dining-table"},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(versionListResponse{
+				Items: []versionListItem{
+					{ID: 2, VersionNumber: 2, Status: "draft"},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == "/api/v1/recipe-versions/2/publish" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	publishJSONFlag = false
+
+	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "publish failed")
+}

@@ -58,6 +58,13 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 	group.Post("/:id/versions/:vid/publish", h.PublishVersion)
 }
 
+// RegisterRecipeVersionRoutes registers the flat recipe-version API routes.
+func (h *RecipeHandler) RegisterRecipeVersionRoutes(app *fiber.App, middlewares ...fiber.Handler) {
+	group := app.Group("/api/v1/recipe-versions", middlewares...)
+
+	group.Post("/:id/publish", h.PublishVersionFlat)
+}
+
 // ListRecipes returns a paginated list of recipes for the active space.
 func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
@@ -485,6 +492,52 @@ func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "version not found",
 		})
+	}
+
+	if err := h.recipeRepo.PublishVersion(versionID); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Re-fetch the version to get the updated status and publishedAt.
+	updated, err := h.recipeRepo.GetVersionByID(versionID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(updated))
+}
+
+// PublishVersionFlat publishes a recipe version by its ID alone, without
+// requiring the recipe ID in the URL path. Used by the flat
+// POST /api/v1/recipe-versions/:id/publish route.
+func (h *RecipeHandler) PublishVersionFlat(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	versionID, err := strconv.Atoi(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid version ID",
+		})
+	}
+
+	// Look up the version to find its parent recipe.
+	version, err := h.recipeRepo.GetVersionByID(versionID)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": "version not found",
+		})
+	}
+
+	// Verify the recipe belongs to the requester's space.
+	if _, err := h.getRecipeInSpace(c, authDTO, version.RecipeID); err != nil {
+		return err
 	}
 
 	if err := h.recipeRepo.PublishVersion(versionID); err != nil {
