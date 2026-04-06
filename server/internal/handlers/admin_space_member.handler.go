@@ -5,7 +5,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 )
 
@@ -53,11 +52,9 @@ type AddSpaceMemberRequest struct {
 
 // AddSpaceMember handles POST /admin/spaces/:id/members
 func (h *AdminSpaceMemberHandler) AddSpaceMember(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse space ID from path parameter
@@ -131,11 +128,9 @@ func (h *AdminSpaceMemberHandler) AddSpaceMember(c *fiber.Ctx) error {
 
 // RemoveSpaceMember handles DELETE /admin/spaces/:id/members/:userId
 func (h *AdminSpaceMemberHandler) RemoveSpaceMember(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse space ID from path parameter
@@ -183,11 +178,9 @@ func (h *AdminSpaceMemberHandler) RemoveSpaceMember(c *fiber.Ctx) error {
 
 // GetSpaceMembers handles GET /admin/spaces/:id/members
 func (h *AdminSpaceMemberHandler) GetSpaceMembers(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse space ID from path parameter

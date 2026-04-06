@@ -6,7 +6,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/services"
 )
@@ -47,11 +46,9 @@ type UpdateUserRequest struct {
 
 // CreateUser handles POST /admin/users
 func (h *AdminUserHandler) CreateUser(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	var req CreateUserRequest
@@ -127,11 +124,9 @@ func (h *AdminUserHandler) CreateUser(c *fiber.Ctx) error {
 
 // ListUsers handles GET /admin/users
 func (h *AdminUserHandler) ListUsers(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	users, err := h.adminUserService.ListUsers(authDTO.AccountID)
@@ -151,11 +146,9 @@ func (h *AdminUserHandler) ListUsers(c *fiber.Ctx) error {
 
 // UpdateUser handles PUT /admin/users/:id
 func (h *AdminUserHandler) UpdateUser(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	_, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse user ID from path parameter
@@ -206,11 +199,9 @@ func (h *AdminUserHandler) UpdateUser(c *fiber.Ctx) error {
 
 // DeleteUser handles DELETE /admin/users/:id
 func (h *AdminUserHandler) DeleteUser(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	_, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse user ID from path parameter

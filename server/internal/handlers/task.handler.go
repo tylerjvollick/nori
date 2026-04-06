@@ -56,11 +56,9 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 
 // ListTasks returns a paginated list of tasks for the active space.
 func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	if authDTO.ActiveSpaceID == nil {
@@ -129,11 +127,9 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 
 // CreateTask creates a new task in the active space.
 func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	if authDTO.ActiveSpaceID == nil {
@@ -193,11 +189,9 @@ func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID
 
 // GetTask returns a single task by ID.
 func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -217,11 +211,9 @@ func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 
 // UpdateTask updates an existing task.
 func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -255,11 +247,9 @@ func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
 
 // DeleteTask deletes a task by ID.
 func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -285,11 +275,9 @@ func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
 
 // ClaimTask assigns the authenticated user to the task and sets it to active.
 func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -316,11 +304,9 @@ func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
 
 // CompleteTask marks the task as done. Only the assigned user can complete it.
 func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -347,11 +333,9 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 
 // PauseTask pauses an active task. Only the assigned user can pause it.
 func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -378,11 +362,9 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 
 // GetReadyTasks returns unblocked tasks for the active space, sorted by priority.
 func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	if authDTO.ActiveSpaceID == nil {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 )
 
@@ -59,11 +58,9 @@ type CreateAPIKeyResponse struct {
 
 // CreateAPIKey handles POST /admin/api-keys
 func (h *AdminAPIKeyHandler) CreateAPIKey(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	var req CreateAPIKeyRequest
@@ -113,11 +110,9 @@ func (h *AdminAPIKeyHandler) CreateAPIKey(c *fiber.Ctx) error {
 
 // ListAPIKeys handles GET /admin/api-keys
 func (h *AdminAPIKeyHandler) ListAPIKeys(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	apiKeys, err := h.apiKeyRepo.GetByAccount(authDTO.AccountID)
@@ -132,11 +127,9 @@ func (h *AdminAPIKeyHandler) ListAPIKeys(c *fiber.Ctx) error {
 
 // DeleteAPIKey handles DELETE /admin/api-keys/:id
 func (h *AdminAPIKeyHandler) DeleteAPIKey(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "authentication required",
-		})
+	_, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	// Parse API key ID from path parameter

@@ -58,11 +58,9 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 
 // ListRecipes returns a paginated list of recipes for the active space.
 func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	if authDTO.ActiveSpaceID == nil {
@@ -126,11 +124,9 @@ func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
 
 // CreateRecipe creates a new recipe in the active space.
 func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	if authDTO.ActiveSpaceID == nil {
@@ -203,11 +199,9 @@ func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, re
 
 // GetRecipe returns a single recipe by ID.
 func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -227,11 +221,9 @@ func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 
 // UpdateRecipe updates an existing recipe.
 func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -280,11 +272,9 @@ func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
 
 // DeleteRecipe soft-deletes a recipe by ID.
 func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -310,11 +300,9 @@ func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
 
 // ListVersions returns all versions for a recipe.
 func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	recipeID, err := uuid.Parse(c.Params("id"))
@@ -349,11 +337,9 @@ func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
 
 // CreateVersion creates a new version for a recipe.
 func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	recipeID, err := uuid.Parse(c.Params("id"))
@@ -418,11 +404,9 @@ func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
 
 // PourRecipe pours a recipe into a task graph via the formula engine.
 func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
-	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-	if authDTO == nil {
-		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
-			"error": "unauthorized",
-		})
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
 	recipeID, err := uuid.Parse(c.Params("id"))
