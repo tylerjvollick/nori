@@ -1003,3 +1003,456 @@ func TestRunRecipePublish_PublishServerError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "publish failed")
 }
+
+// --- Recipe List Tests ---
+
+func TestRecipeListSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range recipeCmd.Commands() {
+		if cmd.Name() == "list" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "list subcommand should be registered on recipe")
+}
+
+func TestRecipeListHasJSONFlag(t *testing.T) {
+	flag := recipeListCmd.Flags().Lookup("json")
+	require.NotNil(t, flag, "--json flag should be defined")
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestRecipeListHasActiveFlag(t *testing.T) {
+	flag := recipeListCmd.Flags().Lookup("active")
+	require.NotNil(t, flag, "--active flag should be defined")
+	assert.Equal(t, "", flag.DefValue)
+}
+
+func TestRunRecipeList_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/recipes", r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipeListResponse{
+			Items: []recipeListItem{
+				{ID: "id-1", Name: "Walnut Dining Table", Slug: "walnut-dining-table", IsActive: true},
+				{ID: "id-2", Name: "Cherry Side Table", Slug: "cherry-side-table", IsActive: true},
+			},
+			Total: 2,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	listJSONFlag = false
+	listActiveFlag = ""
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.NoError(t, err)
+}
+
+func TestRunRecipeList_WithActiveFilter(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.Query().Get("isActive")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipeListResponse{
+			Items: []recipeListItem{
+				{ID: "id-1", Name: "Walnut Dining Table", Slug: "walnut-dining-table", IsActive: true},
+			},
+			Total: 1,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	listJSONFlag = false
+	listActiveFlag = "true"
+	defer func() { listActiveFlag = "" }()
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "true", receivedQuery)
+}
+
+func TestRunRecipeList_EmptyList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipeListResponse{
+			Items: []recipeListItem{},
+			Total: 0,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	listJSONFlag = false
+	listActiveFlag = ""
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.NoError(t, err)
+}
+
+func TestRunRecipeList_JSONOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(recipeListResponse{
+			Items: []recipeListItem{
+				{ID: "id-1", Name: "Walnut Dining Table", Slug: "walnut-dining-table", IsActive: true},
+			},
+			Total: 1,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	listJSONFlag = true
+	listActiveFlag = ""
+	defer func() { listJSONFlag = false }()
+
+	// Capture stdout.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.NoError(t, err)
+
+	w.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	os.Stdout = oldStdout
+
+	var output []map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	require.Len(t, output, 1)
+	assert.Equal(t, "walnut-dining-table", output[0]["slug"])
+	assert.Equal(t, "Walnut Dining Table", output[0]["name"])
+	assert.Equal(t, true, output[0]["isActive"])
+}
+
+func TestRunRecipeList_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(errorResponse{Error: "invalid credentials"})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+
+	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
+	defer cli.SetIsInteractiveFunc(origFunc)
+
+	listJSONFlag = false
+	listActiveFlag = ""
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication expired or invalid")
+}
+
+func TestRunRecipeList_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	listJSONFlag = false
+	listActiveFlag = ""
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database error")
+}
+
+func TestRunRecipeList_NoCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	listJSONFlag = false
+	listActiveFlag = ""
+
+	err := runRecipeList(recipeListCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not logged in")
+}
+
+// --- Recipe Show Tests ---
+
+func TestRecipeShowSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range recipeCmd.Commands() {
+		if cmd.Name() == "show" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "show subcommand should be registered on recipe")
+}
+
+func TestRecipeShowHasJSONFlag(t *testing.T) {
+	flag := recipeShowCmd.Flags().Lookup("json")
+	require.NotNil(t, flag, "--json flag should be defined")
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestRecipeShowRequiresArg(t *testing.T) {
+	err := recipeShowCmd.Args(recipeShowCmd, []string{})
+	assert.Error(t, err, "should require exactly one argument")
+}
+
+func TestRunRecipeShow_Success(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			assert.Equal(t, "walnut-dining-table", r.URL.Query().Get("slug"))
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowDetail `json:"items"`
+				Total int64              `json:"total"`
+			}{
+				Items: []recipeShowDetail{
+					{
+						ID:       recipeID,
+						Name:     "Walnut Dining Table",
+						Slug:     "walnut-dining-table",
+						IsActive: true,
+					},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			changeSummary := "Initial import"
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowVersion `json:"items"`
+				Total int                 `json:"total"`
+			}{
+				Items: []recipeShowVersion{
+					{
+						ID:            1,
+						VersionNumber: 1,
+						Status:        "published",
+						Content: `formula = "walnut-dining-table"
+
+[[steps]]
+id = "cut"
+title = "Cut lumber"
+
+[[steps]]
+id = "sand"
+title = "Sand surfaces"
+`,
+						ChangeSummary: &changeSummary,
+					},
+				},
+				Total: 1,
+			})
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	showJSONFlag = false
+
+	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, requestCount, "should make two requests: recipe + versions")
+}
+
+func TestRunRecipeShow_JSONOutput(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowDetail `json:"items"`
+				Total int64              `json:"total"`
+			}{
+				Items: []recipeShowDetail{
+					{
+						ID:       recipeID,
+						Name:     "Walnut Dining Table",
+						Slug:     "walnut-dining-table",
+						IsActive: true,
+					},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowVersion `json:"items"`
+				Total int                 `json:"total"`
+			}{
+				Items: []recipeShowVersion{
+					{
+						ID:            1,
+						VersionNumber: 1,
+						Status:        "published",
+						Content: `formula = "walnut-dining-table"
+
+[[steps]]
+id = "cut"
+title = "Cut lumber"
+`,
+					},
+				},
+				Total: 1,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	showJSONFlag = true
+	defer func() { showJSONFlag = false }()
+
+	// Capture stdout.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
+	require.NoError(t, err)
+
+	w.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	os.Stdout = oldStdout
+
+	var output map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	assert.Equal(t, "walnut-dining-table", output["slug"])
+	assert.Equal(t, "Walnut Dining Table", output["name"])
+	assert.Equal(t, true, output["isActive"])
+
+	// Verify steps were extracted.
+	steps, ok := output["steps"].([]interface{})
+	require.True(t, ok, "steps should be an array")
+	require.Len(t, steps, 1)
+	step := steps[0].(map[string]interface{})
+	assert.Equal(t, "cut", step["id"])
+	assert.Equal(t, "Cut lumber", step["title"])
+}
+
+func TestRunRecipeShow_RecipeNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Items []recipeShowDetail `json:"items"`
+			Total int64              `json:"total"`
+		}{
+			Items: []recipeShowDetail{},
+			Total: 0,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	showJSONFlag = false
+
+	err := runRecipeShow(recipeShowCmd, []string{"nonexistent"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestRunRecipeShow_NoPublishedVersion(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowDetail `json:"items"`
+				Total int64              `json:"total"`
+			}{
+				Items: []recipeShowDetail{
+					{
+						ID:       recipeID,
+						Name:     "Walnut Dining Table",
+						Slug:     "walnut-dining-table",
+						IsActive: true,
+					},
+				},
+				Total: 1,
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(struct {
+				Items []recipeShowVersion `json:"items"`
+				Total int                 `json:"total"`
+			}{
+				Items: []recipeShowVersion{
+					{ID: 1, VersionNumber: 1, Status: "draft", Content: "some content"},
+				},
+				Total: 1,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	showJSONFlag = false
+
+	// Should succeed — just shows "No published version."
+	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
+	require.NoError(t, err)
+}
+
+func TestRunRecipeShow_NoCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	showJSONFlag = false
+
+	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not logged in")
+}
+
+func TestRunRecipeShow_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(errorResponse{Error: "invalid credentials"})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+
+	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
+	defer cli.SetIsInteractiveFunc(origFunc)
+
+	showJSONFlag = false
+
+	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication expired or invalid")
+}
