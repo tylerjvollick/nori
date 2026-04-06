@@ -1408,7 +1408,7 @@ depends_on = ["sand"]
 `
 }
 
-func TestPourRecipe_PerPieceChain_FanInDependencies(t *testing.T) {
+func TestPourRecipe_PerPieceChain_OneToOneDependencies(t *testing.T) {
 	svc, recipeID, spaceID, userID := setupRecipeService(perPieceChainTOML())
 
 	vars := map[string]string{"order_qty": "3"}
@@ -1430,10 +1430,29 @@ func TestPourRecipe_PerPieceChain_FanInDependencies(t *testing.T) {
 		t.Errorf("expected 6 child tasks, got %d", childCount)
 	}
 
-	// Fan-in: each finish task depends on ALL sand tasks → 3 * 3 = 9 edges.
+	// 1:1 wiring: same ticket count (3 sand, 3 finish) → positional.
+	// finish[0] depends on sand[0], finish[1] on sand[1], finish[2] on sand[2].
+	// = 3 edges total.
 	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
-	if len(depRepo.deps) != 9 {
-		t.Errorf("expected 9 dependency edges (3 finish × 3 sand), got %d", len(depRepo.deps))
+	if len(depRepo.deps) != 3 {
+		t.Errorf("expected 3 dependency edges (1:1 positional), got %d", len(depRepo.deps))
+	}
+
+	// Verify each finish task depends on the corresponding sand task.
+	for n := 1; n <= 3; n++ {
+		sandID := fmt.Sprintf("%s.%d", rootTask.ID, n)
+		finishID := fmt.Sprintf("%s.%d", rootTask.ID, n+3)
+
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == finishID && dep.ToTaskID == sandID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected dependency %s → %s (finish %d → sand %d)", finishID, sandID, n, n)
+		}
 	}
 
 	// Verify titles use {{n}} substitution.
@@ -1538,5 +1557,340 @@ depends_on = ["cut"]
 	}
 	if childCount != 2 {
 		t.Errorf("expected 2 child tasks, got %d", childCount)
+	}
+}
+
+// --- Dependency Wiring Pattern Tests (US-005) ---
+
+// fanOutTOML: resaw (batch_size=6, 1 ticket) → glue (batch_size=1, 6 tickets).
+// Fan-out: fewer upstream → more downstream.
+func fanOutTOML() string {
+	return `
+formula = "fan-out-test"
+description = "Fan-out wiring test"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "resaw"
+title = "Resaw veneers"
+type = "task"
+batch_size = 6
+
+[[steps]]
+id = "glue"
+title = "Glue lamination {{n}} of {{batch_count}}"
+type = "task"
+batch_size = 1
+depends_on = ["resaw"]
+`
+}
+
+func TestDependencyWiring_FanOut(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(fanOutTOML())
+
+	vars := map[string]string{"order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+
+	// resaw: 1 ticket (.1), glue: 6 tickets (.2 through .7).
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 7 {
+		t.Errorf("expected 7 child tasks (1 resaw + 6 glue), got %d", childCount)
+	}
+
+	// Fan-out: 1 upstream, 6 downstream → 6 edges (each glue depends on the 1 resaw).
+	if len(depRepo.deps) != 6 {
+		t.Errorf("expected 6 dependency edges (fan-out), got %d", len(depRepo.deps))
+	}
+
+	resawTaskID := rootTask.ID + ".1"
+	for _, dep := range depRepo.deps {
+		if dep.ToTaskID != resawTaskID {
+			t.Errorf("expected all deps to point to resaw task %q, got ToTaskID %q", resawTaskID, dep.ToTaskID)
+		}
+	}
+}
+
+// fanInTOML: install-seat (batch_size=1, 6 tickets) → done (batch_size=6, 1 ticket).
+// Fan-in: more upstream → fewer downstream.
+func fanInTOML() string {
+	return `
+formula = "fan-in-test"
+description = "Fan-in wiring test"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "install-seat"
+title = "Install seat {{n}} of {{batch_count}}"
+type = "task"
+batch_size = 1
+
+[[steps]]
+id = "done"
+title = "All seats installed"
+type = "milestone"
+batch_size = 6
+depends_on = ["install-seat"]
+`
+}
+
+func TestDependencyWiring_FanIn(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(fanInTOML())
+
+	vars := map[string]string{"order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+
+	// install-seat: 6 tickets (.1-.6), done: 1 ticket (.7).
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 7 {
+		t.Errorf("expected 7 child tasks (6 install + 1 done), got %d", childCount)
+	}
+
+	// Fan-in: 6 upstream, 1 downstream → 6 edges (done depends on all 6 install tasks).
+	if len(depRepo.deps) != 6 {
+		t.Errorf("expected 6 dependency edges (fan-in), got %d", len(depRepo.deps))
+	}
+
+	doneTaskID := rootTask.ID + ".7"
+	for _, dep := range depRepo.deps {
+		if dep.FromTaskID != doneTaskID {
+			t.Errorf("expected all deps from done task %q, got FromTaskID %q", doneTaskID, dep.FromTaskID)
+		}
+	}
+
+	// Verify all 6 install tasks are referenced as upstream deps.
+	upstreamIDs := make(map[string]bool)
+	for _, dep := range depRepo.deps {
+		upstreamIDs[dep.ToTaskID] = true
+	}
+	for n := 1; n <= 6; n++ {
+		installID := fmt.Sprintf("%s.%d", rootTask.ID, n)
+		if !upstreamIDs[installID] {
+			t.Errorf("expected install task %q in upstream deps", installID)
+		}
+	}
+}
+
+// oneToOneTOML: sand (batch_size=2, 3 tickets) → finish (batch_size=2, 3 tickets).
+// 1:1 wiring: same ticket count.
+func oneToOneTOML() string {
+	return `
+formula = "one-to-one-test"
+description = "1:1 wiring test"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "sand"
+title = "Sand batch {{n}}"
+type = "task"
+batch_size = 2
+
+[[steps]]
+id = "finish"
+title = "Finish batch {{n}}"
+type = "task"
+batch_size = 2
+depends_on = ["sand"]
+`
+}
+
+func TestDependencyWiring_OneToOne(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(oneToOneTOML())
+
+	vars := map[string]string{"order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+
+	// sand: 3 tickets (.1, .2, .3), finish: 3 tickets (.4, .5, .6).
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 6 {
+		t.Errorf("expected 6 child tasks (3 sand + 3 finish), got %d", childCount)
+	}
+
+	// 1:1: same ticket count → 3 positional edges.
+	if len(depRepo.deps) != 3 {
+		t.Fatalf("expected 3 dependency edges (1:1 positional), got %d", len(depRepo.deps))
+	}
+
+	// Verify positional wiring: finish[i] depends on sand[i].
+	for n := 0; n < 3; n++ {
+		sandID := fmt.Sprintf("%s.%d", rootTask.ID, n+1)
+		finishID := fmt.Sprintf("%s.%d", rootTask.ID, n+4)
+
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == finishID && dep.ToTaskID == sandID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected positional dependency %s → %s (finish %d → sand %d)", finishID, sandID, n+1, n+1)
+		}
+	}
+}
+
+// mixedConvergenceTOML: glue-up depends on dry-fit (1 ticket, fan-out) AND
+// shape-back (6 tickets, 1:1). Tests mixed-dependency convergence.
+func mixedConvergenceTOML() string {
+	return `
+formula = "mixed-convergence-test"
+description = "Mixed convergence wiring test"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "dry-fit"
+title = "Dry fit assembly"
+type = "task"
+batch_size = 6
+
+[[steps]]
+id = "shape-back"
+title = "Shape back {{n}} of {{batch_count}}"
+type = "task"
+batch_size = 1
+
+[[steps]]
+id = "glue-up"
+title = "Glue up piece {{n}} of {{batch_count}}"
+type = "task"
+batch_size = 1
+depends_on = ["dry-fit", "shape-back"]
+`
+}
+
+func TestDependencyWiring_MixedConvergence(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(mixedConvergenceTOML())
+
+	vars := map[string]string{"order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+
+	// dry-fit: batch_size=6 → 1 ticket (.1)
+	// shape-back: batch_size=1 → 6 tickets (.2-.7)
+	// glue-up: batch_size=1 → 6 tickets (.8-.13)
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 13 {
+		t.Errorf("expected 13 child tasks (1 dry-fit + 6 shape-back + 6 glue-up), got %d", childCount)
+	}
+
+	// Dependency from dry-fit (1 task) → glue-up (6 tasks): fan-out = 6 edges.
+	// Dependency from shape-back (6 tasks) → glue-up (6 tasks): 1:1 = 6 edges.
+	// Total: 12 edges.
+	if len(depRepo.deps) != 12 {
+		t.Fatalf("expected 12 dependency edges (6 fan-out + 6 one-to-one), got %d", len(depRepo.deps))
+	}
+
+	dryFitID := rootTask.ID + ".1"
+
+	// Count deps by upstream type.
+	dryFitDeps := 0
+	shapeBackDeps := 0
+	for _, dep := range depRepo.deps {
+		if dep.ToTaskID == dryFitID {
+			dryFitDeps++
+		} else {
+			shapeBackDeps++
+		}
+	}
+
+	// Fan-out from dry-fit: 6 glue-up tasks each depend on the 1 dry-fit task.
+	if dryFitDeps != 6 {
+		t.Errorf("expected 6 fan-out edges from dry-fit, got %d", dryFitDeps)
+	}
+
+	// 1:1 from shape-back: 6 glue-up tasks each depend on their corresponding shape-back task.
+	if shapeBackDeps != 6 {
+		t.Errorf("expected 6 one-to-one edges from shape-back, got %d", shapeBackDeps)
+	}
+
+	// Verify positional shape-back wiring: glue-up[i] depends on shape-back[i].
+	for n := 0; n < 6; n++ {
+		shapeBackID := fmt.Sprintf("%s.%d", rootTask.ID, n+2) // .2-.7
+		glueUpID := fmt.Sprintf("%s.%d", rootTask.ID, n+8)    // .8-.13
+
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == glueUpID && dep.ToTaskID == shapeBackID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected positional dependency %s → %s (glue-up %d → shape-back %d)", glueUpID, shapeBackID, n+1, n+1)
+		}
+	}
+
+	// Verify all glue-up tasks also depend on dry-fit (fan-out).
+	for n := 0; n < 6; n++ {
+		glueUpID := fmt.Sprintf("%s.%d", rootTask.ID, n+8)
+
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == glueUpID && dep.ToTaskID == dryFitID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected fan-out dependency %s → %s (glue-up %d → dry-fit)", glueUpID, dryFitID, n+1)
+		}
 	}
 }

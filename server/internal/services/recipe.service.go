@@ -324,10 +324,22 @@ func createChildTasks(
 // createDependencyEdges creates TaskDep edges from formula step dependencies.
 // It processes both DependsOn and Needs fields (which are semantically equivalent).
 //
-// Because batch-aware steps can create multiple tasks per step, dependencies
-// use fan-in: each task created for the dependent step depends on ALL tasks
-// created for the dependency step. This ensures per-piece work can't start
-// until all pieces of the upstream step are complete.
+// Dependency wiring is batch-aware and uses three patterns based on the
+// ticket counts of the upstream (dependency) and downstream (dependent) steps:
+//
+//   - 1:1 (same ticket count): Wire positionally — downstream task[i] depends
+//     on upstream task[i]. Example: sand piece 3 depends on cut piece 3.
+//
+//   - Fan-out (fewer upstream → more downstream): Each downstream task depends
+//     on ALL upstream tasks. Example: 1 resaw ticket → 6 glue tickets: all 6
+//     depend on the 1.
+//
+//   - Fan-in (more upstream → fewer downstream): Each downstream task depends
+//     on ALL upstream tasks. Example: 6 install tickets → 1 done ticket: done
+//     depends on all 6.
+//
+// When a step has multiple dependencies with different ticket counts, each
+// dependency is wired independently using the appropriate pattern.
 func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*formula.Step, stepToTaskIDs map[string][]string) error {
 	for _, step := range steps {
 		taskIDs, ok := stepToTaskIDs[step.ID]
@@ -348,20 +360,8 @@ func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*form
 				continue
 			}
 
-			// Fan-in: every task for this step depends on every task for the dep step.
-			for _, taskID := range taskIDs {
-				for _, depTaskID := range depTaskIDs {
-					dep := &models.TaskDep{
-						ID:         uuid.New(),
-						FromTaskID: taskID,
-						ToTaskID:   depTaskID,
-						Type:       models.DepTypeBlocks,
-					}
-
-					if err := taskDepRepo.AddDep(dep); err != nil {
-						return fmt.Errorf("adding dependency %s → %s: %w", taskID, depTaskID, err)
-					}
-				}
+			if err := wireDependencies(taskDepRepo, taskIDs, depTaskIDs); err != nil {
+				return err
 			}
 		}
 
@@ -373,6 +373,43 @@ func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*form
 		}
 	}
 
+	return nil
+}
+
+// wireDependencies creates TaskDep edges between downstream and upstream task
+// lists using the appropriate wiring pattern:
+//   - 1:1 when counts match (positional wiring)
+//   - Cross-product (fan-in/fan-out) when counts differ
+func wireDependencies(taskDepRepo TaskDepRepositoryInterface, downstreamIDs, upstreamIDs []string) error {
+	if len(downstreamIDs) == len(upstreamIDs) {
+		// 1:1 positional wiring: downstream[i] depends on upstream[i].
+		for i, taskID := range downstreamIDs {
+			dep := &models.TaskDep{
+				ID:         uuid.New(),
+				FromTaskID: taskID,
+				ToTaskID:   upstreamIDs[i],
+				Type:       models.DepTypeBlocks,
+			}
+			if err := taskDepRepo.AddDep(dep); err != nil {
+				return fmt.Errorf("adding dependency %s → %s: %w", taskID, upstreamIDs[i], err)
+			}
+		}
+	} else {
+		// Fan-out or fan-in: every downstream task depends on every upstream task.
+		for _, taskID := range downstreamIDs {
+			for _, depTaskID := range upstreamIDs {
+				dep := &models.TaskDep{
+					ID:         uuid.New(),
+					FromTaskID: taskID,
+					ToTaskID:   depTaskID,
+					Type:       models.DepTypeBlocks,
+				}
+				if err := taskDepRepo.AddDep(dep); err != nil {
+					return fmt.Errorf("adding dependency %s → %s: %w", taskID, depTaskID, err)
+				}
+			}
+		}
+	}
 	return nil
 }
 
