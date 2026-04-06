@@ -62,11 +62,12 @@ func New(cfg *config.Config) *App {
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, nil)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	taskService := services.NewTaskService(taskRepo, taskDepRepo)
+	readyWorkService := services.NewReadyWorkService(database.DB)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
 	spaceHandler := handlers.NewSpaceHandler(spaceService, spaceMemberRepo)
-	taskHandler := handlers.NewTaskHandler(taskService)
+	taskHandler := handlers.NewTaskHandler(taskService, readyWorkService)
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)

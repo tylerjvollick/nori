@@ -18,27 +18,40 @@ type TaskServiceInterface interface {
 	ListTasks(filter repositories.TaskFilter) ([]models.Task, int64, error)
 	UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*models.Task, error)
 	DeleteTask(id string) error
+	ClaimTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	CompleteTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
+}
+
+// ReadyWorkServiceInterface defines the methods needed for ready-work queries.
+type ReadyWorkServiceInterface interface {
+	GetReadyTasks(spaceID uuid.UUID) ([]models.Task, error)
 }
 
 // TaskHandler handles HTTP requests for tasks.
 type TaskHandler struct {
-	taskService TaskServiceInterface
+	taskService      TaskServiceInterface
+	readyWorkService ReadyWorkServiceInterface
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(taskService TaskServiceInterface) *TaskHandler {
-	return &TaskHandler{taskService: taskService}
+func NewTaskHandler(taskService TaskServiceInterface, readyWorkService ReadyWorkServiceInterface) *TaskHandler {
+	return &TaskHandler{taskService: taskService, readyWorkService: readyWorkService}
 }
 
 // RegisterTaskRoutes registers task API routes on the Fiber app.
 func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Handler) {
 	group := app.Group("/api/v1/tasks", middlewares...)
 
+	group.Get("/ready", h.GetReadyTasks)
 	group.Get("", h.ListTasks)
 	group.Post("", h.CreateTask)
 	group.Get("/:id", h.GetTask)
 	group.Put("/:id", h.UpdateTask)
 	group.Delete("/:id", h.DeleteTask)
+	group.Post("/:id/claim", h.ClaimTask)
+	group.Post("/:id/complete", h.CompleteTask)
+	group.Post("/:id/pause", h.PauseTask)
 }
 
 // ListTasks returns a paginated list of tasks for the active space.
@@ -234,4 +247,115 @@ func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusNoContent).Send(nil)
+}
+
+// ClaimTask assigns the authenticated user to the task and sets it to active.
+func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	task, err := h.taskService.ClaimTask(id, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// CompleteTask marks the task as done. Only the assigned user can complete it.
+func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	task, err := h.taskService.CompleteTask(id, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// PauseTask pauses an active task. Only the assigned user can pause it.
+func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	task, err := h.taskService.PauseTask(id, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusConflict).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// GetReadyTasks returns unblocked tasks for the active space, sorted by priority.
+func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	if authDTO.ActiveSpaceID == nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "X-Space-ID header is required",
+		})
+	}
+
+	tasks, err := h.readyWorkService.GetReadyTasks(*authDTO.ActiveSpaceID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	items := make([]dtos.TaskResponse, len(tasks))
+	for i := range tasks {
+		items[i] = dtos.TaskResponseFromModel(&tasks[i])
+	}
+
+	return c.Status(http.StatusOK).JSON(fiber.Map{
+		"items": items,
+		"total": len(items),
+	})
 }
