@@ -22,9 +22,9 @@ dev-web:
 dev-db:
 	$(DC_DEV) up -d database --remove-orphans || make dev-db-down
 
-# Migration commands
+# Migration commands (using embedded nori binary)
 migrate-up:
-	migrate -path ./server/migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" up
+	cd server && go run . migrate up
 
 migrate-down:
 	migrate -path ./server/migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" down 1

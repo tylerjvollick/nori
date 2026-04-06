@@ -52,6 +52,7 @@ Specs listed in priority order. Work top-down.
 
 | # | Spec | Description | Keywords | Done |
 |---|------|-------------|----------|------|
+| 0 | [architecture.md](architecture.md) | System architecture: components, communication, deployment | architecture, system, docker, CLI, server, web, database, deployment, components, diagram | :white_check_mark: |
 | 1 | [data-model.md](data-model.md) | Task, Recipe, and supporting entity data model | schema, database, entities, relations, postgresql, gorm, models, task, recipe | :white_check_mark: |
 | 2 | [auth-and-tenancy.md](auth-and-tenancy.md) | Multi-tenant spaces, user roles, authentication | auth, login, spaces, roles, permissions, tenancy, accounts, users | :white_check_mark: |
 | 3 | [stations.md](stations.md) | Configurable shop stations with WIP limits | stations, WIP, capacity, buffer, shop floor, layout, workstations | |

@@ -4,6 +4,20 @@ name: nori-dev
 # Pass --env-file docker/.env when invoking docker compose.
 
 services:
+  nori-migrate:
+    container_name: nori-migrate
+    build: ../server
+    command: ["./nori", "migrate", "up"]
+    environment:
+      DB_HOST: database
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-nori}
+      DB_PORT: 5432
+    depends_on:
+      database:
+        condition: service_healthy
+
   nori-server:
     container_name: nori-server
     build: ../server
@@ -23,6 +37,8 @@ services:
     depends_on:
       database:
         condition: service_healthy
+      nori-migrate:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     volumes:
