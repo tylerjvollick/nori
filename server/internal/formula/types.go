@@ -209,6 +209,11 @@ type Step struct {
 	// Priority is the issue priority (0-4).
 	Priority *int `json:"priority,omitempty"`
 
+	// BatchSize is the number of pieces each ticket covers.
+	// Pointer so 0 vs unset is distinguishable; nil means inherit from parent.
+	// Must be > 0 if set.
+	BatchSize *int `json:"batch_size,omitempty" toml:"batch_size,omitempty"`
+
 	// Labels are applied to the created issue.
 	Labels []string `json:"labels,omitempty"`
 
@@ -675,6 +680,11 @@ func (f *Formula) Validate() error {
 			errs = append(errs, fmt.Sprintf("%s (%s): priority must be 0-4", prefix, step.ID))
 		}
 
+		// Validate batch_size range
+		if step.BatchSize != nil && *step.BatchSize <= 0 {
+			errs = append(errs, fmt.Sprintf("%s (%s): batch_size must be > 0", prefix, step.ID))
+		}
+
 		// Collect child IDs (for dependency validation)
 		collectChildIDs(step.Children, stepIDLocations, &errs, prefix)
 	}
@@ -767,6 +777,11 @@ func collectChildIDs(children []*Step, idLocations map[string]string, errs *[]st
 		// Validate priority range for children
 		if child.Priority != nil && (*child.Priority < 0 || *child.Priority > 4) {
 			*errs = append(*errs, fmt.Sprintf("%s (%s): priority must be 0-4", childPrefix, child.ID))
+		}
+
+		// Validate batch_size range for children
+		if child.BatchSize != nil && *child.BatchSize <= 0 {
+			*errs = append(*errs, fmt.Sprintf("%s (%s): batch_size must be > 0", childPrefix, child.ID))
 		}
 
 		collectChildIDs(child.Children, idLocations, errs, childPrefix)
