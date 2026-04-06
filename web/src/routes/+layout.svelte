@@ -30,10 +30,10 @@
 		theme = value;
 	});
 
-	// Check if we're on login or change-password page (no app shell needed)
+	// Check if we're on login, change-password, or onboarding page (no app shell needed)
 	let isAuthPage = $derived(() => {
 		const pathname: string = $page.url.pathname;
-		return pathname === '/login' || pathname === '/change-password';
+		return pathname === '/login' || pathname === '/change-password' || pathname === '/onboarding';
 	});
 
 	onMount(() => {

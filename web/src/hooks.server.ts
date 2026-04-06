@@ -9,6 +9,9 @@ const PUBLIC_ROUTES = ['/login'];
 /** Routes accessible even when mustChangePassword is true. */
 const PASSWORD_EXEMPT_ROUTES = ['/login', '/change-password'];
 
+/** Routes accessible even when the user has no spaces (onboarding flow). */
+const NO_SPACES_EXEMPT_ROUTES = ['/login', '/change-password', '/onboarding'];
+
 export const handle: Handle = async ({ event, resolve }) => {
 	const { pathname } = event.url;
 
@@ -43,6 +46,14 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// Must change password → redirect to /change-password
 	if (user.mustChangePassword && !PASSWORD_EXEMPT_ROUTES.some((route) => pathname === route)) {
 		throw redirect(302, '/change-password');
+	}
+
+	// No accessible spaces → redirect to onboarding
+	if (
+		(!user.accessibleSpaces || user.accessibleSpaces.length === 0) &&
+		!NO_SPACES_EXEMPT_ROUTES.some((route) => pathname === route)
+	) {
+		throw redirect(302, '/onboarding');
 	}
 
 	event.locals.user = user;
