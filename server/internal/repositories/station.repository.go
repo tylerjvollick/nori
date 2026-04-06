@@ -64,6 +64,30 @@ func (r *StationRepository) Reorder(spaceID uuid.UUID, ids []uuid.UUID) error {
 	})
 }
 
+// WIPCount holds the WIP count for a single station.
+type WIPCount struct {
+	StationID uuid.UUID
+	Count     int
+}
+
+// GetWIPCounts returns the number of active or paused tasks at each station in a space.
+func (r *StationRepository) GetWIPCounts(spaceID uuid.UUID) (map[uuid.UUID]int, error) {
+	var rows []WIPCount
+	err := r.db.Model(&models.Task{}).
+		Select("station_id, COUNT(*) as count").
+		Where("space_id = ? AND station_id IS NOT NULL AND status IN ?", spaceID, []string{"active", "paused"}).
+		Group("station_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]int, len(rows))
+	for _, row := range rows {
+		result[row.StationID] = row.Count
+	}
+	return result, nil
+}
+
 // GetMaxDisplayOrder returns the highest display_order for stations in a given space.
 func (r *StationRepository) GetMaxDisplayOrder(spaceID uuid.UUID) (int, error) {
 	var maxOrder int
