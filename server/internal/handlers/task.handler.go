@@ -9,6 +9,7 @@ import (
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
+	"github.com/tylerjvollick/nori/internal/services"
 )
 
 // TaskServiceInterface defines the methods needed by TaskHandler.
@@ -30,7 +31,7 @@ type TaskServiceInterface interface {
 
 // ReadyWorkServiceInterface defines the methods needed for ready-work queries.
 type ReadyWorkServiceInterface interface {
-	GetReadyTasks(spaceID uuid.UUID) ([]models.Task, error)
+	GetReadyTasks(spaceID uuid.UUID, filter *services.ReadyTaskFilter) ([]models.Task, error)
 }
 
 // TaskHandler handles HTTP requests for tasks.
@@ -467,6 +468,9 @@ func (h *TaskHandler) SkipTask(c *fiber.Ctx) error {
 }
 
 // GetReadyTasks returns unblocked tasks for the active space, sorted by priority.
+// Supports optional query parameters:
+//   - ?stationId=uuid — filter by station
+//   - ?assigneeId=uuid — filter by assigned user
 func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -479,7 +483,19 @@ func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 		})
 	}
 
-	tasks, err := h.readyWorkService.GetReadyTasks(*authDTO.ActiveSpaceID)
+	var filter services.ReadyTaskFilter
+	if stationID := c.Query("stationId"); stationID != "" {
+		if id, err := uuid.Parse(stationID); err == nil {
+			filter.StationID = &id
+		}
+	}
+	if assigneeID := c.Query("assigneeId"); assigneeID != "" {
+		if id, err := uuid.Parse(assigneeID); err == nil {
+			filter.AssignedToID = &id
+		}
+	}
+
+	tasks, err := h.readyWorkService.GetReadyTasks(*authDTO.ActiveSpaceID, &filter)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),

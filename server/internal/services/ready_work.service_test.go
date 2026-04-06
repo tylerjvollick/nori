@@ -138,7 +138,7 @@ func TestReadyWorkService_NoTasks(t *testing.T) {
 	db := setupReadyWorkTestDB(t)
 	svc := NewReadyWorkService(db)
 
-	tasks, err := svc.GetReadyTasks(uuid.New())
+	tasks, err := svc.GetReadyTasks(uuid.New(), nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestReadyWorkService_AllOpenNoDeps(t *testing.T) {
 	rwTestTask(t, db, "rw-b", space.ID, user.ID, models.TaskStatusOpen, 1, nil)
 	rwTestTask(t, db, "rw-c", space.ID, user.ID, models.TaskStatusOpen, 1, nil)
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestReadyWorkService_BlockedByUnresolvedDep(t *testing.T) {
 	rwTestTask(t, db, "blocked", space.ID, user.ID, models.TaskStatusOpen, 0, nil)
 	rwTestDep(t, db, "blocked", "blocker")
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestReadyWorkService_ResolvedDepUnblocks(t *testing.T) {
 	rwTestTask(t, db, "unblocked", space.ID, user.ID, models.TaskStatusOpen, 0, nil)
 	rwTestDep(t, db, "unblocked", "done-blocker")
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestReadyWorkService_SkippedDepUnblocks(t *testing.T) {
 	rwTestTask(t, db, "dep-task", space.ID, user.ID, models.TaskStatusOpen, 0, nil)
 	rwTestDep(t, db, "dep-task", "skipped-blocker")
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestReadyWorkService_CancelledDepUnblocks(t *testing.T) {
 	rwTestTask(t, db, "dep-task2", space.ID, user.ID, models.TaskStatusOpen, 0, nil)
 	rwTestDep(t, db, "dep-task2", "cancelled-blocker")
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestReadyWorkService_ChildOfBlockedParentExcluded(t *testing.T) {
 
 	rwTestTask(t, db, "child-task", space.ID, user.ID, models.TaskStatusOpen, 0, &parentID)
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestReadyWorkService_GrandchildOfBlockedExcluded(t *testing.T) {
 
 	rwTestTask(t, db, "gp-grandchild", space.ID, user.ID, models.TaskStatusOpen, 0, &childID)
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestReadyWorkService_MultipleBlockersAllMustResolve(t *testing.T) {
 	rwTestDep(t, db, "multi-c", "multi-a") // resolved (a is done)
 	rwTestDep(t, db, "multi-c", "multi-b") // unresolved (b is open)
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestReadyWorkService_NonBlockingDepsIgnored(t *testing.T) {
 		t.Fatalf("Failed to create dep: %v", err)
 	}
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestReadyWorkService_OnlyOpenTasksReturned(t *testing.T) {
 	rwTestTask(t, db, "status-done", space.ID, user.ID, models.TaskStatusDone, 0, nil)
 	rwTestTask(t, db, "status-paused", space.ID, user.ID, models.TaskStatusPaused, 0, nil)
 
-	tasks, err := svc.GetReadyTasks(space.ID)
+	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestReadyWorkService_SpaceIsolation(t *testing.T) {
 	rwTestTask(t, db, "space1-task", space1.ID, user.ID, models.TaskStatusOpen, 0, nil)
 	rwTestTask(t, db, "space2-task", space2.ID, user.ID, models.TaskStatusOpen, 0, nil)
 
-	tasks, err := svc.GetReadyTasks(space1.ID)
+	tasks, err := svc.GetReadyTasks(space1.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestReadyWorkService_SortOrder(t *testing.T) {
 		}
 	}
 
-	result, err := svc.GetReadyTasks(space.ID)
+	result, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestReadyWorkService_ChainedDependencies(t *testing.T) {
 	rwTestDep(t, db, "chain-b", "chain-a") // B blocked by A
 	rwTestDep(t, db, "chain-c", "chain-b") // C blocked by B
 
-	result, err := svc.GetReadyTasks(space.ID)
+	result, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestReadyWorkService_WaitsForDepAlsoBlocks(t *testing.T) {
 		t.Fatalf("Failed to create dep: %v", err)
 	}
 
-	result, err := svc.GetReadyTasks(space.ID)
+	result, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}

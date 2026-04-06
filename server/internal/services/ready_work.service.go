@@ -25,22 +25,37 @@ var terminalStatuses = []models.TaskStatus{
 	models.TaskStatusCancelled,
 }
 
+// ReadyTaskFilter holds optional filters for the ready-work query.
+type ReadyTaskFilter struct {
+	StationID    *uuid.UUID
+	AssignedToID *uuid.UUID
+}
+
 // GetReadyTasks returns open tasks in the given space that are not blocked
 // by unresolved dependencies and whose parents are also not blocked.
 //
+// Optional filters narrow the initial candidate set before dependency checking.
+//
 // Algorithm:
-//  1. Find all open tasks in the space.
+//  1. Find all open tasks in the space (optionally filtered by station/assignee).
 //  2. Compute the blocked set: tasks that have unresolved "blocks" deps
 //     (i.e., a TaskDep where Type="blocks" and the ToTask status is not terminal).
 //  3. Exclude children of blocked parents (recursively — if a parent is blocked,
 //     all its descendants are also blocked).
 //  4. Return the remaining open tasks sorted by Priority ASC, CreatedAt ASC.
-func (s *ReadyWorkService) GetReadyTasks(spaceID uuid.UUID) ([]models.Task, error) {
-	// Step 1: Find all open tasks in the space.
+func (s *ReadyWorkService) GetReadyTasks(spaceID uuid.UUID, filter *ReadyTaskFilter) ([]models.Task, error) {
+	// Step 1: Find all open tasks in the space, applying optional filters.
 	var allOpen []models.Task
-	if err := s.db.
-		Where("space_id = ? AND status = ?", spaceID, models.TaskStatusOpen).
-		Find(&allOpen).Error; err != nil {
+	query := s.db.Where("space_id = ? AND status = ?", spaceID, models.TaskStatusOpen)
+	if filter != nil {
+		if filter.StationID != nil {
+			query = query.Where("station_id = ?", *filter.StationID)
+		}
+		if filter.AssignedToID != nil {
+			query = query.Where("assigned_to_id = ?", *filter.AssignedToID)
+		}
+	}
+	if err := query.Find(&allOpen).Error; err != nil {
 		return nil, err
 	}
 
