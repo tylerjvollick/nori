@@ -14,13 +14,14 @@ import (
 
 // MockTaskRepository is a mock implementation of TaskRepositoryInterface.
 type MockTaskRepository struct {
-	createFunc      func(*models.Task) error
-	getByIDFunc     func(string) (*models.Task, error)
-	listFunc        func(repositories.TaskFilter) ([]models.Task, int64, error)
-	updateFunc      func(*models.Task) error
-	deleteFunc      func(string) error
-	getChildrenFunc func(string) ([]models.Task, error)
-	getRootFunc     func(string) (*models.Task, error)
+	createFunc         func(*models.Task) error
+	getByIDFunc        func(string) (*models.Task, error)
+	listFunc           func(repositories.TaskFilter) ([]models.Task, int64, error)
+	updateFunc         func(*models.Task) error
+	deleteFunc         func(string) error
+	getChildrenFunc    func(string) ([]models.Task, error)
+	getRootFunc        func(string) (*models.Task, error)
+	getDescendantsFunc func(string) ([]models.Task, error)
 }
 
 func (m *MockTaskRepository) Create(task *models.Task) error {
@@ -70,6 +71,13 @@ func (m *MockTaskRepository) GetRoot(taskID string) (*models.Task, error) {
 		return m.getRootFunc(taskID)
 	}
 	return nil, errors.New("not found")
+}
+
+func (m *MockTaskRepository) GetDescendants(idPrefix string) ([]models.Task, error) {
+	if m.getDescendantsFunc != nil {
+		return m.getDescendantsFunc(idPrefix)
+	}
+	return nil, nil
 }
 
 // MockTaskDepRepository is a mock implementation of TaskDepRepositoryInterface.

@@ -125,6 +125,16 @@ func (m *mockTaskRepo) GetRoot(taskID string) (*models.Task, error) {
 	return t, nil
 }
 
+func (m *mockTaskRepo) GetDescendants(idPrefix string) ([]models.Task, error) {
+	var result []models.Task
+	for _, t := range m.tasks {
+		if t.ID == idPrefix || (len(t.ID) > len(idPrefix) && t.ID[:len(idPrefix)+1] == idPrefix+".") {
+			result = append(result, *t)
+		}
+	}
+	return result, nil
+}
+
 type mockTaskDepRepo struct {
 	deps []models.TaskDep
 }

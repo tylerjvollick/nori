@@ -55,6 +55,7 @@ type TaskResponse struct {
 	Status          models.TaskStatus `json:"status"`
 	Title           string            `json:"title"`
 	Description     *string           `json:"description,omitempty"`
+	Quantity        int               `json:"quantity"`
 	Priority        int               `json:"priority"`
 	DisplayOrder    int               `json:"displayOrder"`
 	DueDate         *time.Time        `json:"dueDate,omitempty"`
@@ -76,6 +77,46 @@ type TaskListResponse struct {
 	Limit  int            `json:"limit"`
 }
 
+// TaskTreeResponse extends TaskResponse with a nested children array for
+// the recursive task tree endpoint.
+type TaskTreeResponse struct {
+	TaskResponse
+	Children []TaskTreeResponse `json:"children"`
+}
+
+// BuildTaskTree takes a root task and all its descendants (flat list) and
+// assembles them into a nested TaskTreeResponse. The descendants slice should
+// include the root task itself. This is O(n) where n = len(descendants).
+func BuildTaskTree(root *models.Task, descendants []models.Task) TaskTreeResponse {
+	// Build a map of parentID -> children
+	childrenMap := make(map[string][]models.Task)
+	for i := range descendants {
+		t := &descendants[i]
+		if t.ParentID != nil {
+			childrenMap[*t.ParentID] = append(childrenMap[*t.ParentID], *t)
+		}
+	}
+
+	// Recursively build the tree from the root
+	return buildTreeNode(root, childrenMap)
+}
+
+// buildTreeNode recursively converts a task and its descendants into a
+// TaskTreeResponse using the precomputed children map.
+func buildTreeNode(task *models.Task, childrenMap map[string][]models.Task) TaskTreeResponse {
+	node := TaskTreeResponse{
+		TaskResponse: TaskResponseFromModel(task),
+		Children:     []TaskTreeResponse{}, // always non-nil for consistent JSON
+	}
+
+	children := childrenMap[task.ID]
+	for i := range children {
+		node.Children = append(node.Children, buildTreeNode(&children[i], childrenMap))
+	}
+
+	return node
+}
+
 // TaskResponseFromModel converts a models.Task to a TaskResponse DTO.
 func TaskResponseFromModel(t *models.Task) TaskResponse {
 	return TaskResponse{
@@ -92,6 +133,7 @@ func TaskResponseFromModel(t *models.Task) TaskResponse {
 		Status:          t.Status,
 		Title:           t.Title,
 		Description:     t.Description,
+		Quantity:        t.Quantity,
 		Priority:        t.Priority,
 		DisplayOrder:    t.DisplayOrder,
 		DueDate:         t.DueDate,

@@ -15,6 +15,7 @@ import (
 type TaskServiceInterface interface {
 	CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *dtos.CreateTaskRequest) (*models.Task, error)
 	GetTaskByID(id string) (*models.Task, error)
+	GetTaskTree(id string) (*models.Task, []models.Task, error)
 	ListTasks(filter repositories.TaskFilter) ([]models.Task, int64, error)
 	UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*models.Task, error)
 	DeleteTask(id string) error
@@ -51,6 +52,7 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Get("", h.ListTasks)
 	group.Post("", h.CreateTask)
 	group.Get("/:id", h.GetTask)
+	group.Get("/:id/tree", h.GetTaskTree)
 	group.Put("/:id", h.UpdateTask)
 	group.Delete("/:id", h.DeleteTask)
 	group.Post("/:id/claim", h.ClaimTask)
@@ -219,6 +221,40 @@ func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// GetTaskTree returns a task and all its descendants as a nested tree structure.
+// Uses a single database query to fetch all descendants, then assembles the tree
+// in memory — O(n) where n = total descendants.
+func (h *TaskHandler) GetTaskTree(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	// Verify root task belongs to the requester's space.
+	root, err := h.getTaskInSpace(c, authDTO, id)
+	if err != nil {
+		return err
+	}
+
+	// Fetch root + all descendants in a single query.
+	_, descendants, err := h.taskService.GetTaskTree(id)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	tree := dtos.BuildTaskTree(root, descendants)
+	return c.Status(http.StatusOK).JSON(tree)
 }
 
 // UpdateTask updates an existing task.

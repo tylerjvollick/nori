@@ -140,3 +140,15 @@ func (r *TaskRepository) GetRoot(taskID string) (*models.Task, error) {
 
 	return nil, fmt.Errorf("parent chain exceeds maximum depth of %d from task %q", maxDepth, taskID)
 }
+
+// GetDescendants returns all tasks whose ID starts with the given prefix.
+// This leverages the hierarchical ID scheme (e.g., "nori-abc.1.2") to fetch
+// an entire subtree in a single query. The result includes the root task itself
+// if its ID matches the prefix.
+func (r *TaskRepository) GetDescendants(idPrefix string) ([]models.Task, error) {
+	var tasks []models.Task
+	err := r.db.Where("id = ? OR id LIKE ?", idPrefix, idPrefix+".%").
+		Order("display_order ASC, created_at ASC").
+		Find(&tasks).Error
+	return tasks, err
+}

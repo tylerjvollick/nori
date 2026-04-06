@@ -20,6 +20,7 @@ type TaskRepositoryInterface interface {
 	Delete(id string) error
 	GetChildren(parentID string) ([]models.Task, error)
 	GetRoot(taskID string) (*models.Task, error)
+	GetDescendants(idPrefix string) ([]models.Task, error)
 }
 
 // TaskDepRepositoryInterface defines the methods needed from a task dep repository.
@@ -74,6 +75,24 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 // GetTaskByID retrieves a task by its ID.
 func (s *TaskService) GetTaskByID(id string) (*models.Task, error) {
 	return s.taskRepo.GetByID(id)
+}
+
+// GetTaskTree retrieves a task and all its descendants in a single query,
+// then assembles them into a nested tree structure.
+func (s *TaskService) GetTaskTree(id string) (*models.Task, []models.Task, error) {
+	// Fetch the root task first to verify it exists.
+	root, err := s.taskRepo.GetByID(id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Fetch all descendants (including root) with a single LIKE query.
+	descendants, err := s.taskRepo.GetDescendants(id)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fetch descendants of task %q: %w", id, err)
+	}
+
+	return root, descendants, nil
 }
 
 // ListTasks returns tasks matching the given filter.
