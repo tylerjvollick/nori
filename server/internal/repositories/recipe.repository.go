@@ -135,8 +135,8 @@ func (r *RecipeRepository) ListVersions(recipeID uuid.UUID) ([]models.RecipeVers
 }
 
 // PublishVersion sets the version status to "published", records the published
-// timestamp, and updates the parent Recipe's CurrentVersionID — all within a
-// single transaction.
+// timestamp, archives the previously published version (if any), and updates
+// the parent Recipe's CurrentVersionID — all within a single transaction.
 func (r *RecipeRepository) PublishVersion(versionID int) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var version models.RecipeVersion
@@ -144,6 +144,16 @@ func (r *RecipeRepository) PublishVersion(versionID int) error {
 			if err == gorm.ErrRecordNotFound {
 				return fmt.Errorf("recipe version not found")
 			}
+			return err
+		}
+
+		// Archive the previously published version, if one exists.
+		if err := tx.Model(&models.RecipeVersion{}).
+			Where("recipe_id = ? AND status = ? AND id != ?",
+				version.RecipeID,
+				models.RecipeVersionStatusPublished,
+				versionID).
+			Update("status", models.RecipeVersionStatusArchived).Error; err != nil {
 			return err
 		}
 
