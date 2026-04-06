@@ -23,6 +23,8 @@ type TaskServiceInterface interface {
 	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	SkipTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	AddChildTask(parentID string, dto *dtos.AddChildTaskRequest, userID uuid.UUID) (*models.Task, error)
+	AddNote(taskID string, text string) (*models.Task, error)
 }
 
 // ReadyWorkServiceInterface defines the methods needed for ready-work queries.
@@ -56,6 +58,8 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Post("/:id/pause", h.PauseTask)
 	group.Post("/:id/resume", h.ResumeTask)
 	group.Post("/:id/skip", h.SkipTask)
+	group.Post("/:id/children", h.AddChildTask)
+	group.Post("/:id/notes", h.AddNote)
 }
 
 // ListTasks returns a paginated list of tasks for the active space.
@@ -455,4 +459,88 @@ func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 		"items": items,
 		"total": len(items),
 	})
+}
+
+// AddChildTask creates a new child task under the specified parent task.
+func (h *TaskHandler) AddChildTask(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	// Verify parent task belongs to the requester's space.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
+	var dto dtos.AddChildTaskRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if dto.Title == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "title is required",
+		})
+	}
+
+	task, err := h.taskService.AddChildTask(id, &dto, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(task))
+}
+
+// AddNote appends a deviation note to the specified task.
+func (h *TaskHandler) AddNote(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	// Verify task belongs to the requester's space.
+	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+		return err
+	}
+
+	var dto dtos.AddNoteRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if dto.Text == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "text is required",
+		})
+	}
+
+	task, err := h.taskService.AddNote(id, dto.Text)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }

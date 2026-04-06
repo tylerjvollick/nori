@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 )
@@ -1791,7 +1792,7 @@ func TestAddChildTask_Success_FirstChild(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Cut mortises", &desc, userID)
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Cut mortises", Description: &desc}, userID)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1853,7 +1854,7 @@ func TestAddChildTask_Success_SequentialIDs(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Step 4", nil, userID)
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Step 4"}, userID)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1899,7 +1900,7 @@ func TestAddChildTask_Success_NestedHierarchy(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Sub-step 2", nil, userID)
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Sub-step 2"}, userID)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1937,7 +1938,7 @@ func TestAddChildTask_Success_NilDescription(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Quick step", nil, userID)
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Quick step"}, userID)
 
 	// Assert
 	assert.NoError(t, err)
@@ -1949,7 +1950,7 @@ func TestAddChildTask_EmptyTitle(t *testing.T) {
 	svc := newTestTaskService(&MockTaskRepository{}, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask("job-abc", "", nil, uuid.New())
+	result, err := svc.AddChildTask("job-abc", &dtos.AddChildTaskRequest{Title: ""}, uuid.New())
 
 	// Assert
 	assert.Error(t, err)
@@ -1967,7 +1968,7 @@ func TestAddChildTask_ParentNotFound(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask("nonexistent", "Some step", nil, uuid.New())
+	result, err := svc.AddChildTask("nonexistent", &dtos.AddChildTaskRequest{Title: "Some step"}, uuid.New())
 
 	// Assert
 	assert.Error(t, err)
@@ -2000,7 +2001,7 @@ func TestAddChildTask_GetChildrenFails(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Some step", nil, uuid.New())
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Some step"}, uuid.New())
 
 	// Assert
 	assert.Error(t, err)
@@ -2035,7 +2036,7 @@ func TestAddChildTask_CreateFails(t *testing.T) {
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
 	// Act
-	result, err := svc.AddChildTask(parentID, "Some step", nil, uuid.New())
+	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Some step"}, uuid.New())
 
 	// Assert
 	assert.Error(t, err)

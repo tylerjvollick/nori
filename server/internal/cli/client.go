@@ -90,6 +90,11 @@ func (c *Client) Get(path string) (*http.Response, error) {
 	return c.doRequest(http.MethodGet, path, nil)
 }
 
+// Put sends a PUT request with JSON body and returns the response.
+func (c *Client) Put(path string, body interface{}) (*http.Response, error) {
+	return c.doRequest(http.MethodPut, path, body)
+}
+
 // ReadJSON reads and unmarshals a JSON response body. Caller is responsible for
 // closing the response body after this call.
 func ReadJSON(resp *http.Response, target interface{}) error {

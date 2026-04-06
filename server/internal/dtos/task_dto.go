@@ -26,6 +26,20 @@ type UpdateTaskRequest struct {
 	Status      *models.TaskStatus `json:"status,omitempty"`
 }
 
+// AddChildTaskRequest represents the request body for adding a child task.
+type AddChildTaskRequest struct {
+	Title       string          `json:"title"`
+	Description *string         `json:"description,omitempty"`
+	Type        models.TaskType `json:"type,omitempty"`
+	StationID   *uuid.UUID      `json:"stationId,omitempty"`
+	AfterID     *string         `json:"afterId,omitempty"` // Task ID to add a dependency on
+}
+
+// AddNoteRequest represents the request body for adding a deviation note.
+type AddNoteRequest struct {
+	Text string `json:"text"`
+}
+
 // TaskResponse represents a single task in API responses.
 type TaskResponse struct {
 	ID              string            `json:"id"`

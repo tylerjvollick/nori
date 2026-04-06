@@ -259,8 +259,8 @@ func isTerminalStatus(status models.TaskStatus) bool {
 // It generates a hierarchical ID by appending the next sequence number to the
 // parent's ID (e.g., "job-abc.1", "job-abc.2"). This supports first-time
 // capture mode where operators add steps during execution.
-func (s *TaskService) AddChildTask(parentID string, title string, description *string, userID uuid.UUID) (*models.Task, error) {
-	if title == "" {
+func (s *TaskService) AddChildTask(parentID string, dto *dtos.AddChildTaskRequest, userID uuid.UUID) (*models.Task, error) {
+	if dto.Title == "" {
 		return nil, fmt.Errorf("title is required")
 	}
 
@@ -279,16 +279,22 @@ func (s *TaskService) AddChildTask(parentID string, title string, description *s
 	nextSeq := len(children) + 1
 	childID := fmt.Sprintf("%s.%d", parentID, nextSeq)
 
+	taskType := models.TaskTypeTask
+	if dto.Type != "" {
+		taskType = dto.Type
+	}
+
 	now := time.Now()
 	child := &models.Task{
 		ID:          childID,
 		SpaceID:     parent.SpaceID,
 		ParentID:    &parentID,
 		CreatedByID: userID,
-		Type:        models.TaskTypeTask,
+		Type:        taskType,
 		Status:      models.TaskStatusOpen,
-		Title:       title,
-		Description: description,
+		Title:       dto.Title,
+		Description: dto.Description,
+		StationID:   dto.StationID,
 		Priority:    parent.Priority,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -298,7 +304,52 @@ func (s *TaskService) AddChildTask(parentID string, title string, description *s
 		return nil, fmt.Errorf("failed to create child task: %w", err)
 	}
 
+	// If an after dependency was specified, add a "blocks" dependency.
+	if dto.AfterID != nil && *dto.AfterID != "" {
+		// Validate the dependency target exists.
+		if _, err := s.taskRepo.GetByID(*dto.AfterID); err != nil {
+			return nil, fmt.Errorf("dependency target task %q not found: %w", *dto.AfterID, err)
+		}
+
+		dep := &models.TaskDep{
+			FromTaskID: childID,
+			ToTaskID:   *dto.AfterID,
+			Type:       models.DepTypeBlocks,
+			CreatedAt:  now,
+		}
+		if err := s.taskDepRepo.AddDep(dep); err != nil {
+			return nil, fmt.Errorf("child task created but dependency creation failed: %w", err)
+		}
+	}
+
 	return child, nil
+}
+
+// AddNote appends a deviation note to an existing task. If the task already
+// has notes, the new text is appended with a newline separator.
+func (s *TaskService) AddNote(taskID string, text string) (*models.Task, error) {
+	if text == "" {
+		return nil, fmt.Errorf("note text is required")
+	}
+
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("task %q not found: %w", taskID, err)
+	}
+
+	if task.DeviationNotes != nil && *task.DeviationNotes != "" {
+		combined := *task.DeviationNotes + "\n" + text
+		task.DeviationNotes = &combined
+	} else {
+		task.DeviationNotes = &text
+	}
+	task.UpdatedAt = time.Now()
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, err
+	}
+
+	return task, nil
 }
 
 // ResumeTask resumes a paused task back to active status. Only the assigned user can resume it.
