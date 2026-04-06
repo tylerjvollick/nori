@@ -152,7 +152,39 @@ func (p *Parser) ParseTOML(data []byte) (*Formula, error) {
 		formula.Type = TypeWorkflow
 	}
 
+	// Normalize: when a step has a loop with an empty body but has children,
+	// move the children into loop.body. This allows TOML authors to write:
+	//   [[steps]]
+	//   id = "chair"
+	//   [steps.loop]
+	//   count = 6
+	//   [[steps.children]]
+	//   ...
+	// instead of requiring the more awkward [[steps.loop.body]] syntax.
+	normalizeLoopBodies(formula.Steps)
+
 	return &formula, nil
+}
+
+// normalizeLoopBodies moves step.Children into step.Loop.Body when a step
+// has a loop with an empty body. This allows TOML authors to use the natural
+// [[steps.children]] syntax instead of [[steps.loop.body]].
+// Applied recursively to handle nested loops.
+func normalizeLoopBodies(steps []*Step) {
+	for _, step := range steps {
+		if step.Loop != nil && len(step.Loop.Body) == 0 && len(step.Children) > 0 {
+			step.Loop.Body = step.Children
+			step.Children = nil
+		}
+		// Recurse into children (for non-loop steps that may contain loops deeper)
+		if len(step.Children) > 0 {
+			normalizeLoopBodies(step.Children)
+		}
+		// Recurse into loop body (for nested loops)
+		if step.Loop != nil && len(step.Loop.Body) > 0 {
+			normalizeLoopBodies(step.Loop.Body)
+		}
+	}
 }
 
 // Resolve fully resolves a formula, processing extends and expansions.
@@ -341,6 +373,13 @@ func mergeComposeRules(base, overlay *ComposeRules) *ComposeRules {
 // varPattern matches {{variable}} placeholders.
 var varPattern = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}`)
 
+// tomlQuotedVarPattern matches TOML strings that are purely a single variable
+// reference: "{{varname}}". Used by SubstituteTOML to unquote integer values.
+var tomlQuotedVarPattern = regexp.MustCompile(`"(\{\{[a-zA-Z_][a-zA-Z0-9_]*\}\})"`)
+
+// intPattern matches a pure integer string (optional leading minus).
+var intPattern = regexp.MustCompile(`^-?[0-9]+$`)
+
 // ExtractVariables finds all {{variable}} references in a formula.
 func ExtractVariables(formula *Formula) []string {
 	seen := make(map[string]bool)
@@ -389,6 +428,33 @@ func Substitute(s string, vars map[string]string) string {
 		}
 		return match // Keep unresolved placeholders
 	})
+}
+
+// SubstituteTOML replaces {{variable}} placeholders in raw TOML content,
+// handling TOML type coercion. When a TOML string value is purely a single
+// variable reference (e.g., count = "{{batch_size}}") and the resolved value
+// is a pure integer, the quotes are stripped so TOML parses it as an integer
+// (e.g., count = 6). This allows recipe authors to use template variables in
+// fields that expect integers (like loop count).
+func SubstituteTOML(content string, vars map[string]string) string {
+	// First pass: unquote pure-variable TOML strings that resolve to integers.
+	// "{{batch_size}}" -> 6  (when batch_size = "6")
+	result := tomlQuotedVarPattern.ReplaceAllStringFunc(content, func(match string) string {
+		// match is e.g., "{{batch_size}}" — extract the inner {{varname}}
+		inner := match[1 : len(match)-1] // strip surrounding quotes
+		varName := inner[2 : len(inner)-2]
+		if val, ok := vars[varName]; ok && intPattern.MatchString(val) {
+			return val // unquoted integer
+		}
+		// Not an integer or unknown var — substitute inside the quotes
+		substituted := Substitute(inner, vars)
+		return `"` + substituted + `"`
+	})
+
+	// Second pass: substitute remaining {{vars}} in all other string contexts.
+	result = Substitute(result, vars)
+
+	return result
 }
 
 // ValidateVars checks that all required variables are provided
@@ -448,6 +514,36 @@ func ValidateVars(formula *Formula, values map[string]string) error {
 }
 
 // ApplyDefaults returns a new map with default values filled in.
+// PreParseVars extracts variable definitions from raw TOML content and merges
+// them with user-provided overrides. This performs a lightweight parse of just
+// the [vars] section — it does NOT parse steps or other fields — so it can be
+// called before SubstituteTOML to build the variable map needed for TOML-level
+// substitution (e.g., converting count = "{{batch_size}}" to count = 6).
+func PreParseVars(tomlContent []byte, userVars map[string]string) map[string]string {
+	// Lightweight struct that only decodes the vars section.
+	var partial struct {
+		Vars map[string]*VarDef `toml:"vars"`
+	}
+	// Ignore errors — if the TOML is malformed, we return what we can.
+	_ = toml.Unmarshal(tomlContent, &partial)
+
+	result := make(map[string]string)
+
+	// Apply defaults from the TOML [vars] section.
+	for name, def := range partial.Vars {
+		if def != nil && def.Default != nil {
+			result[name] = *def.Default
+		}
+	}
+
+	// User overrides take precedence.
+	for k, v := range userVars {
+		result[k] = v
+	}
+
+	return result
+}
+
 func ApplyDefaults(formula *Formula, values map[string]string) map[string]string {
 	result := make(map[string]string)
 

@@ -14,3 +14,7 @@ specs/*-implementation.md
 
 # Docker environment (contains secrets)
 docker/.env
+
+# Build artifacts
+/nori
+server/nori

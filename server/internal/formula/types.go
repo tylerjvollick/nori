@@ -29,6 +29,7 @@ package formula
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -289,6 +290,14 @@ type LoopSpec struct {
 	// When set, the loop body is expanded Count times.
 	Count int `json:"count,omitempty"`
 
+	// CountExpr holds a template expression for count (e.g., "{{batch_size}}").
+	// When present, it is resolved at pour time via variable substitution
+	// before loop expansion. This allows TOML recipes to use:
+	//   count = "{{batch_size}}"
+	// TOML cannot mix int and string types, so the parser stores string
+	// values here and int values in Count.
+	CountExpr string `json:"-" toml:"-"`
+
 	// Until is a condition that ends the loop.
 	// Format matches condition evaluator syntax (e.g., "step.status == 'complete'").
 	Until string `json:"until,omitempty"`
@@ -310,8 +319,88 @@ type LoopSpec struct {
 	// Example: var: "move_num" with range: "1..7" exposes {move_num}=1,2,...,7
 	Var string `json:"var,omitempty"`
 
+	// Parallel indicates iterations should run concurrently (no inter-iteration deps).
+	// When false (default), iteration N+1 depends on iteration N (serial chaining).
+	// When true, all iterations are independent and can start immediately.
+	// Use parallel = true for batch production (e.g., 6 chairs built concurrently).
+	Parallel bool `json:"parallel,omitempty"`
+
 	// Body contains the steps to repeat.
 	Body []*Step `json:"body"`
+}
+
+// UnmarshalTOML implements toml.Unmarshaler for LoopSpec.
+// This allows the count field to be either an integer or a template string:
+//
+//	[steps.loop]
+//	count = 6                  # integer literal
+//	count = "{{batch_size}}"   # template variable (resolved at pour time)
+func (l *LoopSpec) UnmarshalTOML(data interface{}) error {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("type mismatch for LoopSpec: expected table but found %T", data)
+	}
+
+	// Handle count: int64 or string
+	if v, ok := m["count"]; ok {
+		switch val := v.(type) {
+		case int64:
+			l.Count = int(val)
+		case string:
+			l.CountExpr = val
+		default:
+			return fmt.Errorf("loop.count: expected integer or string, got %T", v)
+		}
+	}
+
+	// Handle until
+	if v, ok := m["until"].(string); ok {
+		l.Until = v
+	}
+
+	// Handle max
+	if v, ok := m["max"].(int64); ok {
+		l.Max = int(v)
+	}
+
+	// Handle range
+	if v, ok := m["range"].(string); ok {
+		l.Range = v
+	}
+
+	// Handle var
+	if v, ok := m["var"].(string); ok {
+		l.Var = v
+	}
+
+	// Handle parallel
+	if v, ok := m["parallel"].(bool); ok {
+		l.Parallel = v
+	}
+
+	// Note: body is handled by normalizeLoopBodies in parser.go —
+	// TOML authors use [[steps.children]] instead of [[steps.loop.body]].
+
+	return nil
+}
+
+// ResolveCount resolves a template expression in CountExpr using the given
+// variable map. If CountExpr is set and Count is 0, the expression is
+// substituted and parsed as an integer. Returns an error if the result
+// is not a valid integer.
+func (l *LoopSpec) ResolveCount(vars map[string]string) error {
+	if l.CountExpr == "" || l.Count > 0 {
+		return nil
+	}
+
+	resolved := Substitute(l.CountExpr, vars)
+	n, err := strconv.Atoi(resolved)
+	if err != nil {
+		return fmt.Errorf("loop count %q resolved to %q which is not a valid integer", l.CountExpr, resolved)
+	}
+	l.Count = n
+	l.CountExpr = "" // Consumed
+	return nil
 }
 
 // OnCompleteSpec defines actions triggered when a step completes.

@@ -15,6 +15,28 @@ import (
 	"strings"
 )
 
+// ResolveLoopCounts recursively resolves template expressions in loop count
+// fields using the given variable map. Must be called before ApplyControlFlow.
+func ResolveLoopCounts(steps []*Step, vars map[string]string) error {
+	for _, step := range steps {
+		if step.Loop != nil {
+			if err := step.Loop.ResolveCount(vars); err != nil {
+				return fmt.Errorf("step %q: %w", step.ID, err)
+			}
+			// Recurse into loop body
+			if err := ResolveLoopCounts(step.Loop.Body, vars); err != nil {
+				return err
+			}
+		}
+		if len(step.Children) > 0 {
+			if err := ResolveLoopCounts(step.Children, vars); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // ApplyLoops expands loop bodies in a formula's steps.
 // Fixed-count loops expand the body N times with indexed step IDs.
 // Conditional loops expand once and add a "loop:until" label for runtime evaluation.
@@ -120,7 +142,9 @@ func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 	if step.Loop.Count > 0 {
 		// Fixed-count loop: expand body N times
 		for i := 1; i <= step.Loop.Count; i++ {
-			iterSteps, err := expandLoopIteration(step, i, nil)
+			// Built-in loop variable: i = 1-based iteration index
+			loopVars := map[string]string{"i": fmt.Sprintf("%d", i)}
+			iterSteps, err := expandLoopIteration(step, i, loopVars)
 			if err != nil {
 				return nil, err
 			}
@@ -136,7 +160,7 @@ func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 
 		// THEN chain iterations on the expanded result
 		// This must happen AFTER recursive expansion so we chain the final steps
-		if step.Loop.Count > 1 {
+		if step.Loop.Count > 1 && !step.Loop.Parallel {
 			result = chainExpandedIterations(result, step.ID, step.Loop.Count)
 		}
 	} else if step.Loop.Range != "" {
@@ -158,7 +182,7 @@ func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 		for val := rangeSpec.Start; val <= rangeSpec.End; val++ {
 			iterNum++
 			// Build iteration vars: include the loop variable if specified
-			iterVars := make(map[string]string)
+			iterVars := map[string]string{"i": fmt.Sprintf("%d", iterNum)}
 			if step.Loop.Var != "" {
 				iterVars[step.Loop.Var] = fmt.Sprintf("%d", val)
 			}
@@ -176,7 +200,7 @@ func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 		}
 
 		// THEN chain iterations on the expanded result
-		if count > 1 {
+		if count > 1 && !step.Loop.Parallel {
 			result = chainExpandedIterations(result, step.ID, count)
 		}
 	} else {
@@ -278,12 +302,15 @@ func expandLoopIteration(step *Step, iteration int, iterVars map[string]string) 
 	return result, nil
 }
 
-// substituteLoopVars replaces {varname} placeholders with values from vars map.
+// substituteLoopVars replaces loop variable placeholders with values from vars map.
+// Handles both {{varname}} (formula-style) and {varname} (loop-style) patterns.
+// Double-brace is checked first to avoid partial matches.
 func substituteLoopVars(s string, vars map[string]string) string {
 	if vars == nil || s == "" {
 		return s
 	}
 	for k, v := range vars {
+		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
 		s = strings.ReplaceAll(s, "{"+k+"}", v)
 	}
 	return s
@@ -604,11 +631,13 @@ func cloneLoopSpec(loop *LoopSpec) *LoopSpec {
 		return nil
 	}
 	clone := &LoopSpec{
-		Count: loop.Count,
-		Until: loop.Until,
-		Max:   loop.Max,
-		Range: loop.Range,
-		Var:   loop.Var,
+		Count:     loop.Count,
+		CountExpr: loop.CountExpr,
+		Until:     loop.Until,
+		Max:       loop.Max,
+		Range:     loop.Range,
+		Var:       loop.Var,
+		Parallel:  loop.Parallel,
 	}
 	if len(loop.Body) > 0 {
 		clone.Body = make([]*Step, len(loop.Body))

@@ -57,7 +57,7 @@ func NewAuthMiddleware(
 
 		// Check if this is an API key (starts with "nori_")
 		if strings.HasPrefix(token, "nori_") {
-			authDTO, err = authenticateWithAPIKey(token, apiKeyRepo)
+			authDTO, err = authenticateWithAPIKey(token, apiKeyRepo, userRepo, spaceMemberRepo)
 		} else {
 			authDTO, err = authenticateWithJWT(token, userRepo, jwtSecret)
 		}
@@ -170,8 +170,14 @@ func hashAPIKey(rawKey string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// authenticateWithAPIKey validates an API key and returns the authDTO
-func authenticateWithAPIKey(rawKey string, apiKeyRepo APIKeyRepositoryInterface) (*dtos.AuthDTO, error) {
+// authenticateWithAPIKey validates an API key and returns the authDTO.
+// It loads the user who created the key so that role checks (admin, etc.) work.
+func authenticateWithAPIKey(
+	rawKey string,
+	apiKeyRepo APIKeyRepositoryInterface,
+	userRepo UserRepositoryInterface,
+	spaceMemberRepo SpaceMemberRepositoryInterface,
+) (*dtos.AuthDTO, error) {
 	// Hash the key for lookup
 	keyHash := hashAPIKey(rawKey)
 
@@ -196,11 +202,21 @@ func authenticateWithAPIKey(rawKey string, apiKeyRepo APIKeyRepositoryInterface)
 		log.Printf("Failed to update API key last used timestamp: %v", err)
 	}
 
-	// Return authDTO with account ID and empty user
-	// API keys authenticate at the account level, not user level
+	// Load the user who created the API key so role-based checks (admin, etc.) work.
+	user, err := userRepo.GetUserByID(apiKey.CreatedByID)
+	if err != nil {
+		return nil, errors.New("failed to load API key owner")
+	}
+
+	// Resolve active space: first space the user has access to.
+	var activeSpaceID *uuid.UUID
+	if spaces, err := spaceMemberRepo.GetByUser(user.ID); err == nil && len(spaces) > 0 {
+		activeSpaceID = &spaces[0].ID
+	}
+
 	return &dtos.AuthDTO{
-		User:          models.User{}, // Empty user for API key auth
+		User:          *user,
 		AccountID:     apiKey.AccountID,
-		ActiveSpaceID: nil, // API keys don't have a default space
+		ActiveSpaceID: activeSpaceID,
 	}, nil
 }

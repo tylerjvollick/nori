@@ -100,8 +100,13 @@ func (s *RecipeService) PourRecipe(
 	}
 
 	// 4. Process steps through the formula pipeline:
-	//    conditions → control flow → variable substitution
+	//    resolve loop counts → conditions → control flow → variable substitution
 	steps := f.Steps
+
+	// Resolve template expressions in loop count fields (e.g., "{{batch_size}}" → 6).
+	if err := formula.ResolveLoopCounts(steps, allVars); err != nil {
+		return nil, fmt.Errorf("resolving loop counts: %w", err)
+	}
 
 	// Filter steps by condition (compile-time step filtering based on vars).
 	steps, err = formula.FilterStepsByCondition(steps, allVars)

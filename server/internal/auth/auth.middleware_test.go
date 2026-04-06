@@ -245,6 +245,8 @@ func TestAuthMiddleware_JWT_Cookie(t *testing.T) {
 func TestAuthMiddleware_APIKey(t *testing.T) {
 	app := fiber.New()
 	accountID := uuid.New()
+	userID := uuid.New()
+	spaceID := uuid.New()
 	apiKeyID := uuid.New()
 	rawKey := "nori_1234567890abcdef"
 	keyHash := hashAPIKey(rawKey)
@@ -256,22 +258,42 @@ func TestAuthMiddleware_APIKey(t *testing.T) {
 
 	// Setup API key mock
 	apiKey := &models.APIKey{
-		ID:        apiKeyID,
-		AccountID: accountID,
-		Name:      "Test Key",
-		KeyHash:   keyHash,
-		IsActive:  true,
-		ExpiresAt: nil,
+		ID:          apiKeyID,
+		AccountID:   accountID,
+		Name:        "Test Key",
+		KeyHash:     keyHash,
+		IsActive:    true,
+		ExpiresAt:   nil,
+		CreatedByID: userID,
 	}
 	mockAPIKeyRepo.On("GetByKeyHash", keyHash).Return(apiKey, nil)
 	mockAPIKeyRepo.On("UpdateLastUsed", apiKeyID).Return(nil)
+
+	// Setup user mock for API key owner lookup
+	adminRole := models.RoleAdmin
+	user := &models.User{
+		ID:               userID,
+		Email:            "admin@test.com",
+		Role:             &adminRole,
+		DefaultAccountID: &accountID,
+	}
+	mockUserRepo.On("GetUserByID", userID).Return(user, nil)
+
+	// Setup space member mock
+	mockSpaceMemberRepo.On("GetByUser", userID).Return([]models.Space{
+		{ID: spaceID, Name: "Test Space"},
+	}, nil)
 
 	// Setup route
 	app.Use(NewAuthMiddleware(mockUserRepo, mockAPIKeyRepo, mockSpaceMemberRepo, jwtSecret))
 	app.Get("/test", func(c *fiber.Ctx) error {
 		authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
 		assert.Equal(t, accountID, authDTO.AccountID)
-		assert.Nil(t, authDTO.ActiveSpaceID)
+		assert.Equal(t, userID, authDTO.User.ID)
+		assert.NotNil(t, authDTO.User.Role)
+		assert.Equal(t, models.RoleAdmin, *authDTO.User.Role)
+		assert.NotNil(t, authDTO.ActiveSpaceID)
+		assert.Equal(t, spaceID, *authDTO.ActiveSpaceID)
 		return c.SendStatus(fiber.StatusOK)
 	})
 
@@ -284,6 +306,8 @@ func TestAuthMiddleware_APIKey(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	mockAPIKeyRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
+	mockSpaceMemberRepo.AssertExpectations(t)
 }
 
 func TestAuthMiddleware_SpaceIDFromHeader(t *testing.T) {

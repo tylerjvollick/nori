@@ -1,12 +1,25 @@
-# Dining Chair — batch-of-6 workflow
+# Upholstered Dining Chair — batch workflow
 #
-# Based on the station flow from specs/job-flow.md (lines 188-193):
-#   rough mill -> joinery -> assembly -> finishing -> final assembly
+# batch_size (default 6) controls the order quantity.
+# Each step inherits batch_size from the recipe unless overridden.
 #
-# This recipe is designed to be poured once per batch. The loop on the
-# "chair" step expands into 6 parallel sub-trees (chair-1 through chair-6),
-# each flowing through the full station sequence. Final assembly fans in
-# from all 6 chairs for batch finishing and inspection.
+# A step with batch_size = 6 creates 1 ticket ("process all 6").
+# A step with batch_size = 1 creates 6 tickets ("one per piece").
+# batch_size inherits down the dependency chain (needs).
+#
+# Dependency wiring between different batch sizes:
+#   fan-out (6→1): all per-piece tickets depend on the single batch ticket
+#   1:1     (1→1): ticket N depends on ticket N
+#   fan-in  (1→6): single batch ticket depends on all per-piece tickets
+#
+# Four parallel streams converge at glue-up:
+#   1. Legs:  rough stock → mill → shape → mortises → hand shape  (batch)
+#   2. Rails: rough stock → mill → shape → tenons → hand shape    (batch)
+#   3. Back:  resaw veneers (batch) → lamination → shape           (per-piece)
+#   4. Seat:  cut → foam → fabric → upholster                     (batch)
+#
+# Convergence:
+#   dry fit (per-piece) → glue up → spray finish → install seat → done
 #
 # Import:  nori recipe create --from-toml seeds/chair.toml
 # Pour:    nori recipe pour dining-chair --var batch_size=6
@@ -15,217 +28,237 @@ formula = "Dining Chair"
 
 [recipe]
 name = "dining-chair"
-description = "Batch dining chair build — rough mill through final assembly"
-version = 1
+description = "Batch upholstered dining chair — four-stream build with upholstered seats"
+version = 2
 type = "workflow"
 
 [vars]
 wood_species = "Walnut"
 batch_size = { description = "Number of chairs in the batch", type = "int", default = "6" }
-seat_style = { description = "Seat construction", enum = ["solid", "woven", "upholstered"], default = "solid" }
-finish_type = { description = "Finish to apply", enum = ["oil", "lacquer", "poly"], default = "oil" }
 
-# ── Rough milling ──────────────────────────────────────────────────────
+# ── STREAM 1: Legs (all batch — 1 ticket per step) ───────────────
 
 [[steps]]
-id = "mill"
-title = "Rough mill — {{wood_species}}"
-station = "mill"
-description = "Mill all blanks to rough dimension + 1/8\" oversize for the full batch."
-
-  [[steps.children]]
-  id = "face-joint"
-  title = "Face joint all boards"
-  station = "mill"
-  description = "Reference face on the jointer. Mark with chalk triangle."
-
-  [[steps.children]]
-  id = "thickness"
-  title = "Thickness plane to final dimension"
-  station = "mill"
-  needs = ["face-joint"]
-  description = "Plane to 7/8\" for legs, 3/4\" for rails and slats."
-
-  [[steps.children]]
-  id = "rip"
-  title = "Rip to width on table saw"
-  station = "mill"
-  needs = ["thickness"]
-  description = "Rip legs to 1-3/4\" square. Rails to 2-1/2\" wide."
-
-  [[steps.children]]
-  id = "crosscut"
-  title = "Crosscut to rough length"
-  station = "mill"
-  needs = ["rip"]
-  description = "Leave 1\" extra on each end. Cut all parts for the full batch."
-
-# ── Per-chair processing (loop expands to batch_size iterations) ───────
+id = "leg-rough-cut"
+title = "Rough cut leg stock"
+station = "miter-saw"
+description = "Crosscut leg blanks to rough length from 8/4 stock."
 
 [[steps]]
-id = "chair"
-title = "Chair {{i}} — {{wood_species}}"
-needs = ["mill"]
-description = "Per-chair joinery, dry fit, and sub-assembly."
-
-  [steps.loop]
-  count = "{{batch_size}}"
-
-  [[steps.children]]
-  id = "layout"
-  title = "Layout and mark joinery — chair {{i}}"
-  station = "joinery"
-  description = "Transfer measurements from story stick. Mark mortise locations on legs, tenon shoulders on rails."
-
-  [[steps.children]]
-  id = "mortises"
-  title = "Cut mortises — chair {{i}}"
-  station = "joinery"
-  needs = ["layout"]
-  description = "Use hollow-chisel mortiser or router. 3/8\" wide, 1-1/2\" deep. Test depth with gauge."
-
-  [[steps.children]]
-  id = "tenons"
-  title = "Cut tenons — chair {{i}}"
-  station = "joinery"
-  needs = ["layout"]
-  description = "Table saw with dado stack or tenoning jig. Sneak up on fit — test each tenon in its mortise."
-
-  [[steps.children]]
-  id = "dry-fit"
-  title = "Dry fit — chair {{i}}"
-  station = "joinery"
-  needs = ["mortises", "tenons"]
-  description = "Assemble without glue. Check for square, twist, and rack. Adjust as needed."
-
-  [[steps.children]]
-  id = "qc-joinery"
-  title = "QC: Joinery inspection — chair {{i}}"
-  needs = ["dry-fit"]
-  type = "gate"
-  description = "Verify all joints are tight, square, and free of gaps."
-
-    [steps.children.gate]
-    type = "human"
-    timeout = "24h"
-
-  [[steps.children]]
-  id = "glue-up"
-  title = "Glue up sub-assemblies — chair {{i}}"
-  station = "assembly"
-  needs = ["qc-joinery"]
-  description = "Glue side frames first, then join front and back rails. Use cauls to distribute clamping pressure."
-
-    [steps.children.gate]
-    type = "timer"
-    id = "cure-time"
-    timeout = "4h"
-
-  [[steps.children]]
-  id = "seat"
-  title = "Fit seat — {{seat_style}} — chair {{i}}"
-  station = "assembly"
-  needs = ["glue-up"]
-  description = "Attach the seat to the frame. Method depends on seat_style variable."
-  condition = "{{seat_style}} == solid"
-
-  [[steps.children]]
-  id = "sand"
-  title = "Sand to 220 — chair {{i}}"
-  station = "finish"
-  needs = ["seat", "glue-up"]
-  description = "Progressive sanding: 80 → 120 → 180 → 220. Ease all edges. Remove layout marks."
-
-# ── Batch finishing (fans in from all chairs) ──────────────────────────
+id = "leg-joint-face"
+title = "Joint 1 face on legs"
+station = "jointer"
+needs = ["leg-rough-cut"]
+description = "Reference face on the jointer. Mark with chalk triangle."
 
 [[steps]]
-id = "batch-finish"
-title = "Batch finish — {{finish_type}}"
-station = "finish"
-needs = ["chair"]
-description = "Apply finish to all chairs as a batch for consistent color."
-
-  [[steps.children]]
-  id = "prep"
-  title = "Final surface prep"
-  station = "finish"
-  description = "Blow off dust, tack cloth, raise grain with water, re-sand 220."
-
-  [[steps.children]]
-  id = "coat-1"
-  title = "Apply first coat — {{finish_type}}"
-  station = "finish"
-  needs = ["prep"]
-  description = "Flood coat for oil, thin coat for film finishes. Follow product directions."
-
-    [steps.children.gate]
-    type = "timer"
-    id = "dry-1"
-    timeout = "8h"
-
-  [[steps.children]]
-  id = "sand-between"
-  title = "Sand between coats — 320 grit"
-  station = "finish"
-  needs = ["coat-1"]
-  description = "Light scuff sand. Remove nibs and dust bumps only."
-
-  [[steps.children]]
-  id = "coat-2"
-  title = "Apply final coat — {{finish_type}}"
-  station = "finish"
-  needs = ["sand-between"]
-  description = "Final coat. Maintain wet edge. Watch for drips."
-
-    [steps.children.gate]
-    type = "timer"
-    id = "dry-2"
-    timeout = "24h"
-
-# ── Final inspection ───────────────────────────────────────────────────
+id = "leg-thickness"
+title = "Thickness plane legs"
+station = "thickness-planer"
+needs = ["leg-joint-face"]
+description = "Plane to 1-3/4\" square."
 
 [[steps]]
-id = "final-inspect"
-title = "Final inspection — batch of {{batch_size}}"
-needs = ["batch-finish"]
-type = "gate"
-description = "Check all chairs for finish defects, wobble, joint integrity. Match set for consistency."
+id = "leg-rough-shape"
+title = "Rough cut out leg shape"
+station = "band-saw"
+needs = ["leg-thickness"]
+description = "Band-saw the rough leg profile from the template."
+
+[[steps]]
+id = "leg-shape-profile"
+title = "Shape leg profile"
+station = "router-table"
+needs = ["leg-rough-shape"]
+description = "Route the final leg profile using the shaping template."
+
+[[steps]]
+id = "leg-face-mortises"
+title = "Leg face mortises"
+station = "assembly-table"
+needs = ["leg-shape-profile"]
+description = "Cut face mortises using the face mortising jig on the assembly table."
+
+[[steps]]
+id = "leg-edge-mortises"
+title = "Leg edge mortises"
+station = "assembly-table"
+needs = ["leg-shape-profile"]
+description = "Cut edge mortises using the edge mortising jig on the assembly table."
+
+[[steps]]
+id = "hand-shape-legs"
+title = "Hand shape legs"
+station = "roubo-workbench"
+needs = ["leg-face-mortises", "leg-edge-mortises"]
+description = "Final hand shaping of legs with spokeshave, rasp, and scraper."
+
+# ── STREAM 2: Rails (all batch — 1 ticket per step) ──────────────
+
+[[steps]]
+id = "rail-rough-cut"
+title = "Rough cut rail stock"
+station = "miter-saw"
+description = "Crosscut rail blanks to rough length."
+
+[[steps]]
+id = "rail-joint-face-edge"
+title = "Jointer 1 face and 1 edge on rails"
+station = "jointer"
+needs = ["rail-rough-cut"]
+description = "Joint one face and one edge for reference surfaces."
+
+[[steps]]
+id = "rail-thickness"
+title = "Thickness plane rails"
+station = "thickness-planer"
+needs = ["rail-joint-face-edge"]
+description = "Plane rails to 3/4\" thickness."
+
+[[steps]]
+id = "rail-rip-width"
+title = "Rip rails to width"
+station = "table-saw"
+needs = ["rail-thickness"]
+description = "Rip rails to final width on the table saw."
+
+[[steps]]
+id = "rail-compound-miters"
+title = "Rail compound miters"
+station = "table-saw"
+needs = ["rail-rip-width"]
+description = "Cut compound miters on rail ends."
+
+[[steps]]
+id = "rail-tenons"
+title = "Rail tenons"
+station = "panto-router"
+needs = ["rail-compound-miters"]
+description = "Cut tenons on the panto router. Sneak up on fit."
+
+[[steps]]
+id = "hand-shape-rails"
+title = "Hand shape rails"
+station = "roubo-workbench"
+needs = ["rail-tenons"]
+description = "Final hand shaping of rails with spokeshave and scraper."
+
+# ── Dry fit (legs + rails converge, per-piece) ───────────────────
+
+[[steps]]
+id = "dry-fit"
+title = "Dry fit legs + rails"
+batch_size = 1
+needs = ["hand-shape-legs", "hand-shape-rails"]
+description = "Assemble without glue. Check for square, twist, and rack. Adjust joints as needed."
+
+# ── STREAM 3: Chair back ─────────────────────────────────────────
+
+[[steps]]
+id = "resaw-veneers"
+title = "Resaw veneers"
+station = "band-saw"
+description = "Resaw veneer layers on the bandsaw, then joint and thickness-plane to final dimension."
+
+# Lamination forces per-piece — vacuum press handles one at a time.
+# batch_size = 1 inherits downstream through shape-back.
+
+[[steps]]
+id = "glue-lamination"
+title = "Glue lamination"
+station = "assembly-table"
+batch_size = 1
+needs = ["resaw-veneers"]
+description = "Glue up the bent lamination in the vacuum press on the assembly table."
+
+[[steps]]
+id = "true-up-edge"
+title = "True up one edge of glue lamination"
+station = "jointer"
+needs = ["glue-lamination"]
+description = "Joint one edge of the lamination for a reference surface."
+
+[[steps]]
+id = "rip-back-parallel"
+title = "Rip back parallel"
+station = "table-saw"
+needs = ["true-up-edge"]
+description = "Rip the back to final width, parallel to the jointed edge."
+
+[[steps]]
+id = "cut-back-miters"
+title = "Cut chair back compound miters"
+station = "table-saw"
+needs = ["rip-back-parallel"]
+description = "Cut compound miters on the chair back ends."
+
+[[steps]]
+id = "shape-back"
+title = "Shape chair back"
+station = "roubo-workbench"
+needs = ["cut-back-miters"]
+description = "Final shaping of the chair back with spokeshave and scraper."
+
+# ── Assembly (dry-fit + back converge, per-piece) ────────────────
+
+[[steps]]
+id = "glue-up"
+title = "Glue up chair assembly"
+station = "assembly-table"
+batch_size = 1
+needs = ["dry-fit", "shape-back"]
+description = "Full chair glue-up. Glue side frames first, then join front/back rails and back. Use cauls for even clamping pressure."
 
   [steps.gate]
-  type = "human"
+  type = "timer"
+  id = "cure-time"
+  timeout = "4h"
 
-# ── BOM ────────────────────────────────────────────────────────────────
+[[steps]]
+id = "spray-finish"
+title = "Spray finish"
+station = "spray-booth"
+needs = ["glue-up"]
+description = "Spray finish on the assembled chair frame."
 
-[bom]
-  [[bom.items]]
-  name = "{{wood_species}} 4/4"
-  quantity = 30
-  unit = "board_feet"
-  step = "mill"
-  notes = "For rails, slats, and seat blanks"
+# ── STREAM 4: Seat (all batch — 1 ticket per step) ──────────────
 
-  [[bom.items]]
-  name = "{{wood_species}} 8/4"
-  quantity = 18
-  unit = "board_feet"
-  step = "mill"
-  notes = "For legs — need 1-3/4\" square finished"
+[[steps]]
+id = "cut-seat-blank"
+title = "Cut out seat blanks"
+station = "table-saw"
+description = "Cut the plywood seat blanks to shape on the table saw."
 
-  [[bom.items]]
-  name = "Wood glue"
-  quantity = 16
-  unit = "oz"
-  step = "chair"
-  notes = "Titebond III for open-time on complex glue-ups"
+[[steps]]
+id = "cut-foam"
+title = "Cut out seat foam"
+needs = ["cut-seat-blank"]
+description = "Cut foam to match the seat blank shape."
 
-  [[bom.items]]
-  name = "{{finish_type}} finish"
-  quantity = 1
-  unit = "quart"
-  step = "batch-finish"
+[[steps]]
+id = "cut-fabric"
+title = "Cut out upholstery fabric"
+needs = ["cut-foam"]
+description = "Cut fabric with allowance for wrapping and stapling."
 
-  [[bom.items]]
-  name = "Sandpaper assortment (80-320)"
-  quantity = 1
-  unit = "pack"
-  step = "chair"
+[[steps]]
+id = "upholster-seat"
+title = "Upholster seats"
+needs = ["cut-fabric"]
+description = "Wrap foam and fabric around the seat blanks, staple underneath."
+
+# ── Final convergence (per-piece) ────────────────────────────────
+
+[[steps]]
+id = "install-seat"
+title = "Install chair seat"
+batch_size = 1
+needs = ["upholster-seat", "spray-finish"]
+description = "Mount the upholstered seat to the finished chair frame."
+
+[[steps]]
+id = "done"
+title = "{{batch_size}} Chairs complete"
+needs = ["install-seat"]
+type = "milestone"
+description = "All chairs assembled, finished, and seats installed. Ready for delivery."
