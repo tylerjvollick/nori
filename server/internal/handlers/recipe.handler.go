@@ -24,6 +24,7 @@ type RecipeRepoInterface interface {
 	CreateVersion(version *models.RecipeVersion) error
 	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
+	PublishVersion(versionID int) error
 }
 
 // RecipePourServiceInterface defines the pour method from RecipeService.
@@ -54,6 +55,7 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 	group.Get("/:id/versions", h.ListVersions)
 	group.Post("/:id/versions", h.CreateVersion)
 	group.Post("/:id/pour", h.PourRecipe)
+	group.Post("/:id/versions/:vid/publish", h.PublishVersion)
 }
 
 // ListRecipes returns a paginated list of recipes for the active space.
@@ -442,6 +444,64 @@ func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(rootTask))
+}
+
+// PublishVersion publishes a specific version of a recipe, archiving any
+// previously published version and setting this as the current version.
+func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	recipeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	// Verify the recipe exists and belongs to the requester's space.
+	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+		return err
+	}
+
+	versionID, err := strconv.Atoi(c.Params("vid"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid version ID",
+		})
+	}
+
+	// Verify the version belongs to this recipe.
+	version, err := h.recipeRepo.GetVersionByID(versionID)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": "version not found",
+		})
+	}
+
+	if version.RecipeID != recipeID {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": "version not found",
+		})
+	}
+
+	if err := h.recipeRepo.PublishVersion(versionID); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Re-fetch the version to get the updated status and publishedAt.
+	updated, err := h.recipeRepo.GetVersionByID(versionID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(updated))
 }
 
 // slugify converts a string into a URL-friendly slug.

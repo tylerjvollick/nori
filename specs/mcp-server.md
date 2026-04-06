@@ -68,15 +68,6 @@ MCP is the standard protocol for this. It means:
 Tools are functions the LLM can call to perform actions:
 
 ```
-nori_checkin
-  - station: string (required)
-  - task_id: string (optional)
-  - notes: string (optional)
-  → Checks the user in at a station, optionally for a specific task
-
-nori_checkout
-  → Checks the user out from their current station
-
 nori_task_claim
   - task_id: string (required)
   → Claims a task and starts the timer
@@ -170,12 +161,11 @@ The MCP server authenticates via the same mechanism as the REST API:
 
 ### Example Conversations
 
-**Hands-dirty scenario (voice via OpenCode):**
-> "Hey, check me in at joinery and claim the next ready task."
-> → LLM reads `nori://ready`, calls `nori_checkin(station="joinery")`,
->    then `nori_task_claim(task_id="shop-a4b2.3")`
-> → "You're checked in at Joinery. Claimed task shop-a4b2.3: Cut mortises
->    for the Walnut Dining Table. Estimated time: 30 minutes."
+**Hands-dirty scenario (voice via embedded chat):**
+> "Hey, claim the next ready task for me."
+> → LLM reads `nori://ready`, calls `nori_task_claim(task_id="shop-a4b2.3")`
+> → "Claimed task shop-a4b2.3: Cut mortises for the Walnut Dining Table.
+>    Station: Joinery. Estimated time: 30 minutes."
 
 **End of day review:**
 > "What did I work on today?"

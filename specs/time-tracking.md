@@ -2,8 +2,7 @@
 
 ## Who
 
-- **Operators**: Clock in/out at stations, have time logged automatically
-  during job execution.
+- **Operators**: Have time logged automatically during task execution.
 - **Managers / owners**: Review time data, identify slow steps, analyze
   station utilization.
 - **The system**: Aggregates time data for bottleneck analytics.
@@ -11,7 +10,7 @@
 ## What
 
 A source-agnostic time event store. Every time-relevant action in Nori
-(starting a task, checking in at a station, pausing work) creates a TimeEvent.
+(claiming a task, completing a task, pausing work) creates a TimeEvent.
 Events can come from multiple sources: the web UI, the CLI, a tablet tap-in,
 or future camera/sensor systems. The data model is the same regardless of
 source.
@@ -20,7 +19,7 @@ source.
 
 - Backend: TimeEvent model, time API endpoints
 - Frontend: Time log viewer, daily/weekly summaries
-- CLI: `nori checkin`, `nori checkout`
+- CLI: Time is captured automatically via `nori task claim/complete/pause`
 - Data model: see data-model.md
 
 ## Why
@@ -65,7 +64,7 @@ TimeEvent
 |--------|-------------|----------------|
 | `system` | Auto-generated when a task starts/completes in the web UI | Zero — happens automatically |
 | `web` | Manual time entry in the web UI (corrections, forgot to log) | Low |
-| `cli` | `nori checkin joinery` from a terminal | Low |
+| `cli` | `nori task claim` / `nori task complete` from a terminal | Low |
 | `tap` | Tap a button on a tablet/phone mounted at a station | Very low |
 | `sensor` | Camera/presence detection auto-logs (see passive-observation.md) | Zero |
 | `api` | External system posts a time event via API | Zero |
@@ -87,19 +86,22 @@ Next claimed    → TimeEvent(type=check_in, task=abc.4, station=Joinery, source
 This means: if an operator is using the task execution UI, time tracking is
 100% automatic. No extra action needed.
 
-### Station Check-In (without a specific job)
+### Non-Job Time
 
 Not all time in the shop is tied to a specific job. An operator might be
-at the joinery station doing general work, setup, or cleanup. The CLI and
-tap interfaces support station-only check-ins:
+at the joinery station doing general work, setup, or cleanup. This time is
+captured via tap interfaces (tablet at the station) or manual time entries:
 
 ```
-nori checkin joinery          → TimeEvent(type=check_in, station=Joinery, source=cli)
-nori checkout                 → TimeEvent(type=check_out, station=Joinery, source=cli)
+Tap in at station tablet      → TimeEvent(type=check_in, station=Joinery, source=tap)
+Tap out                       → TimeEvent(type=check_out, station=Joinery, source=tap)
+Manual entry after the fact   → TimeEvent(type=check_in/check_out, source=manual)
 ```
 
 These events contribute to station utilization metrics even without job-level
-granularity.
+granularity. The key insight: task-level time is captured automatically from
+task transitions; station-level non-job time is captured from physical
+interfaces (tablets, sensors) or manual entry — never from CLI commands.
 
 ### Time Corrections
 
@@ -123,7 +125,8 @@ While TimeEvents are the raw data, computed aggregates are cached for
 performance:
 - `Task.ActualTimeSeconds` — sum of active time from events for that task
 - Job total time — sum across all child tasks
-- Station utilization per day/week — sum of check-in to check-out durations
+- Station utilization per day/week — derived from task time at that station
+  plus non-job time events (tap/sensor/manual)
 
 These are recomputed from events on demand or on a schedule, not stored as
 the source of truth.
@@ -144,8 +147,8 @@ GET    /api/stations/:stationId/utilization          — Station utilization ove
   events) or should we allow editing? (Append-only is better for trust and
   analytics, but harder for simple corrections like "I fat-fingered the
   check-in time.")
-- Do we need a concept of "shift" or "work day"? (e.g., auto-checkout at
-  end of day if someone forgets.) This prevents runaway timers.
+- Do we need a concept of "shift" or "work day"? (e.g., auto-complete a
+  paused task at end of day if someone forgets.) This prevents runaway timers.
 - Should time data be visible to all Space members, or should operators only
   see their own time? (Transparency is better for a healthy shop culture, but
   some owners might want privacy.)

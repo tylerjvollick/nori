@@ -44,8 +44,8 @@ The Theory of Constraints five focusing steps:
 ### Key Metrics
 
 **Station-Level:**
-- **Utilization**: % of available hours a station is occupied (check-in to
-  check-out time / total available hours)
+- **Utilization**: % of available hours a station is occupied (sum of task
+  time at station + non-job time events / total available hours)
 - **WIP Depth**: Average number of active tasks at this station over time
 - **Queue Time**: Average time a task spends waiting in a station's buffer
   before being worked on

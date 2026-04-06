@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -306,4 +309,430 @@ func TestRunRecipePour_Unauthorized(t *testing.T) {
 	err := runRecipePour(recipePourCmd, []string{"walnut-dining-table"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "authentication expired or invalid")
+}
+
+// --- Recipe Create Tests ---
+
+func TestRecipeCreateSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range recipeCmd.Commands() {
+		if cmd.Name() == "create" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "create subcommand should be registered on recipe")
+}
+
+func TestRecipeCreateHasFromTOMLFlag(t *testing.T) {
+	flag := recipeCreateCmd.Flags().Lookup("from-toml")
+	require.NotNil(t, flag, "--from-toml flag should be defined")
+}
+
+func TestRecipeCreateHasNameFlag(t *testing.T) {
+	flag := recipeCreateCmd.Flags().Lookup("name")
+	require.NotNil(t, flag, "--name flag should be defined")
+	assert.Equal(t, "", flag.DefValue)
+}
+
+func TestRecipeCreateHasJSONFlag(t *testing.T) {
+	flag := recipeCreateCmd.Flags().Lookup("json")
+	require.NotNil(t, flag, "--json flag should be defined")
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+// writeTOMLFile creates a temp TOML file and returns its path.
+func writeTOMLFile(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recipe.formula.toml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	return path
+}
+
+const sampleTOML = `formula = "walnut-dining-table"
+description = "A walnut dining table recipe"
+version = 1
+type = "workflow"
+
+[[steps]]
+id = "cut"
+title = "Cut lumber"
+`
+
+func TestRunRecipeCreate_Success(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+	versionID := 1
+
+	var capturedCreateBody map[string]interface{}
+	var capturedVersionBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&capturedCreateBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createRecipeResponse{
+				ID:   recipeID,
+				Name: "walnut-dining-table",
+				Slug: "walnut-dining-table",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&capturedVersionBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createVersionResponse{
+				ID:            versionID,
+				VersionNumber: 1,
+				Status:        "draft",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/%d/publish", recipeID, versionID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(createVersionResponse{
+				ID:            versionID,
+				VersionNumber: 1,
+				Status:        "published",
+			})
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.NoError(t, err)
+
+	// Verify recipe name was extracted from TOML.
+	require.NotNil(t, capturedCreateBody)
+	assert.Equal(t, "walnut-dining-table", capturedCreateBody["name"])
+
+	// Verify TOML content was sent as version content.
+	require.NotNil(t, capturedVersionBody)
+	assert.Contains(t, capturedVersionBody["content"], "walnut-dining-table")
+	assert.Equal(t, "Initial import from TOML file", capturedVersionBody["changeSummary"])
+
+	// Reset flags.
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_WithNameOverride(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	var capturedCreateBody map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+			json.NewDecoder(r.Body).Decode(&capturedCreateBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createRecipeResponse{
+				ID:   recipeID,
+				Name: "Custom Name",
+				Slug: "custom-name",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = "Custom Name"
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.NoError(t, err)
+
+	// --name should override the TOML formula field.
+	require.NotNil(t, capturedCreateBody)
+	assert.Equal(t, "Custom Name", capturedCreateBody["name"])
+
+	createFromTOMLFlag = ""
+	createNameFlag = ""
+}
+
+func TestRunRecipeCreate_JSONOutput(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createRecipeResponse{
+				ID:   recipeID,
+				Name: "walnut-dining-table",
+				Slug: "walnut-dining-table",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = true
+
+	// Capture stdout.
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.NoError(t, err)
+
+	w.Close()
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	os.Stdout = oldStdout
+
+	var output map[string]interface{}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	assert.Equal(t, recipeID, output["recipeId"])
+	assert.Equal(t, "walnut-dining-table", output["name"])
+	assert.Equal(t, "walnut-dining-table", output["slug"])
+	assert.Equal(t, float64(1), output["version"])
+	assert.Equal(t, "published", output["status"])
+
+	createFromTOMLFlag = ""
+	createJSONFlag = false
+}
+
+func TestRunRecipeCreate_FileNotFound(t *testing.T) {
+	setupCredentials(t, "http://localhost:9999")
+
+	createFromTOMLFlag = "/nonexistent/path/recipe.toml"
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read TOML file")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_EmptyFile(t *testing.T) {
+	tomlPath := writeTOMLFile(t, "")
+	setupCredentials(t, "http://localhost:9999")
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "TOML file is empty")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_NoRecipeName(t *testing.T) {
+	// TOML without a "formula" key and no --name flag.
+	tomlPath := writeTOMLFile(t, `version = 1
+type = "workflow"
+`)
+
+	setupCredentials(t, "http://localhost:9999")
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not determine recipe name")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_NoCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not logged in")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_Unauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(errorResponse{Error: "invalid credentials"})
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
+	defer cli.SetIsInteractiveFunc(origFunc)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authentication expired or invalid")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(errorResponse{Error: "internal server error"})
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "create recipe failed")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_VersionCreationFails(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createRecipeResponse{
+				ID:   recipeID,
+				Name: "walnut-dining-table",
+				Slug: "walnut-dining-table",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "version creation failed")
+
+	createFromTOMLFlag = ""
+}
+
+func TestRunRecipeCreate_PublishFails(t *testing.T) {
+	recipeID := "550e8400-e29b-41d4-a716-446655440000"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createRecipeResponse{
+				ID:   recipeID,
+				Name: "walnut-dining-table",
+				Slug: "walnut-dining-table",
+			})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
+
+		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(errorResponse{Error: "publish failed"})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tomlPath := writeTOMLFile(t, sampleTOML)
+	setupCredentials(t, server.URL)
+
+	createFromTOMLFlag = tomlPath
+	createNameFlag = ""
+	createJSONFlag = false
+
+	err := runRecipeCreate(recipeCreateCmd, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "publish failed")
+
+	createFromTOMLFlag = ""
 }

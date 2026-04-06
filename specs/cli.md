@@ -81,9 +81,6 @@ nori
   │     ├── rm <source> <target>   — Remove dependency
   │     └── tree <id>              — Show dependency tree
   │
-  ├── checkin <station>            — Clock in at a station
-  ├── checkout                     — Clock out
-  │
   ├── status                       — Health check: server, DB, auth, current space
   │
   ├── station
@@ -99,16 +96,22 @@ nori
 ### Contextual State
 
 The CLI tracks "current" state to minimize typing:
-- **Current station**: Set by `nori checkin`. Cleared by `nori checkout`.
 - **Current job**: Set by `nori job start` or inferred from claimed task.
 - **Current task**: The task with status `active` for the logged-in user.
+
+Station assignment lives on the task, not on the operator. In a small shop,
+workers move between stations constantly — the table saw, workbench, drill
+press, and back within a single task. Tracking time per-station by asking
+workers to "check in" doesn't reflect reality. Instead:
+
+- **Tasks have a station** (set by the recipe or manually)
+- **Time is tracked per task** (claim starts timer, complete stops it)
+- **Station time is derived** from task time grouped by station
+- **Worker time is the sum of their task time**
 
 This enables a minimal-typing workflow:
 
 ```bash
-$ nori checkin joinery
-Checked in at Joinery.
-
 $ nori ready
  1. [shop-a4b2.3] Cut mortises — Walnut Dining Table  (pri:1, due: Apr 15)
  2. [shop-c7d1.2] Cut tenons — Cherry Side Table       (pri:2, due: Apr 20)
@@ -130,10 +133,7 @@ Note added to shop-a4b2.4.
 
 $ nori task complete
 shop-a4b2.4 done (18m 42s).
-No more tasks ready at Joinery. 2 tasks blocked by gate-qc.
-
-$ nori checkout
-Checked out from Joinery. Session: 42m total.
+No more tasks ready. 2 tasks blocked by gate-qc.
 ```
 
 ### Recipe Pouring from CLI
