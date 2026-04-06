@@ -1,11 +1,11 @@
 # Upholstered Dining Chair — batch workflow
 #
 # batch_size (default 6) controls the order quantity.
-# Each step inherits batch_size from the recipe unless overridden.
+# Steps without an explicit batch_size get the recipe default.
 #
 # A step with batch_size = 6 creates 1 ticket ("process all 6").
 # A step with batch_size = 1 creates 6 tickets ("one per piece").
-# batch_size inherits down the dependency chain (needs).
+# Per-piece steps must declare batch_size = 1 explicitly.
 #
 # Dependency wiring between different batch sizes:
 #   fan-out (6→1): all per-piece tickets depend on the single batch ticket
@@ -161,7 +161,7 @@ station = "band-saw"
 description = "Resaw veneer layers on the bandsaw, then joint and thickness-plane to final dimension."
 
 # Lamination forces per-piece — vacuum press handles one at a time.
-# batch_size = 1 inherits downstream through shape-back.
+# Each per-piece step in this stream declares batch_size = 1 explicitly.
 
 [[steps]]
 id = "glue-lamination"
@@ -175,6 +175,7 @@ description = "Glue up the bent lamination in the vacuum press on the assembly t
 id = "true-up-edge"
 title = "True up one edge of glue lamination"
 station = "jointer"
+batch_size = 1
 needs = ["glue-lamination"]
 description = "Joint one edge of the lamination for a reference surface."
 
@@ -182,6 +183,7 @@ description = "Joint one edge of the lamination for a reference surface."
 id = "rip-back-parallel"
 title = "Rip back parallel"
 station = "table-saw"
+batch_size = 1
 needs = ["true-up-edge"]
 description = "Rip the back to final width, parallel to the jointed edge."
 
@@ -189,6 +191,7 @@ description = "Rip the back to final width, parallel to the jointed edge."
 id = "cut-back-miters"
 title = "Cut chair back compound miters"
 station = "table-saw"
+batch_size = 1
 needs = ["rip-back-parallel"]
 description = "Cut compound miters on the chair back ends."
 
@@ -196,6 +199,7 @@ description = "Cut compound miters on the chair back ends."
 id = "shape-back"
 title = "Shape chair back"
 station = "roubo-workbench"
+batch_size = 1
 needs = ["cut-back-miters"]
 description = "Final shaping of the chair back with spokeshave and scraper."
 
@@ -252,14 +256,12 @@ description = "Spray finish on the assembled chair frame."
 [[steps]]
 id = "install-seat"
 title = "Install chair seat"
-batch_size = 1
 needs = ["upholster-seat", "spray-finish"]
 description = "Mount the upholstered seat to the finished chair frame."
 
 [[steps]]
 id = "done"
 title = "{{batch_size}} Chairs complete"
-batch_size = 6
 needs = ["install-seat"]
 type = "milestone"
 description = "All chairs assembled, finished, and seats installed. Ready for delivery."

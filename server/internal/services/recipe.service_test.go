@@ -1955,10 +1955,10 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	// Back stream:
 	//   resaw-veneers (bs=6 → 1 ticket)                          = 1 task
 	//   glue-lamination (bs=1 → 6 tickets)                       = 6 tasks
-	//   true-up-edge (inherits bs=1 → 6 tickets)                 = 6 tasks
-	//   rip-back-parallel (inherits bs=1 → 6 tickets)            = 6 tasks
-	//   cut-back-miters (inherits bs=1 → 6 tickets)              = 6 tasks
-	//   shape-back (inherits bs=1 → 6 tickets)                   = 6 tasks
+	//   true-up-edge (bs=1 explicit → 6 tickets)                 = 6 tasks
+	//   rip-back-parallel (bs=1 explicit → 6 tickets)            = 6 tasks
+	//   cut-back-miters (bs=1 explicit → 6 tickets)              = 6 tasks
+	//   shape-back (bs=1 explicit → 6 tickets)                   = 6 tasks
 	//                                                      subtotal = 31 tasks
 	//
 	// Seat stream (4 steps, all batch_size=6 → 1 ticket each):
@@ -1967,16 +1967,16 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	//
 	// Assembly:
 	//   glue-up (bs=1 → 6 tickets)                               = 6 tasks
-	//   spray-finish (inherits bs=1 → 6 tickets)                 = 6 tasks
-	//                                                      subtotal = 12 tasks
-	//
-	// Final convergence:
-	//   install-seat (bs=1 → 6 tickets)                          = 6 tasks
-	//   done (bs=6 → 1 ticket)                                   = 1 task
+	//   spray-finish (no explicit bs → default 6 → 1 ticket)     = 1 task
 	//                                                      subtotal = 7 tasks
 	//
-	// TOTAL child tasks: 8 + 7 + 6 + 31 + 4 + 12 + 7 = 75
-	expectedChildCount := 75
+	// Final convergence:
+	//   install-seat (no explicit bs → default 6 → 1 ticket)     = 1 task
+	//   done (no explicit bs → default 6 → 1 ticket)             = 1 task
+	//                                                      subtotal = 2 tasks
+	//
+	// TOTAL child tasks: 8 + 7 + 6 + 31 + 4 + 7 + 2 = 65
+	expectedChildCount := 65
 	if childCount != expectedChildCount {
 		t.Errorf("expected %d child tasks, got %d", expectedChildCount, childCount)
 	}
@@ -2045,9 +2045,9 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	// .55 cut-fabric             qty=6
 	// .56 upholster-seat         qty=6
 	// .57-.62 glue-up            qty=1
-	// .63-.68 spray-finish       qty=1
-	// .69-.74 install-seat       qty=1
-	// .75 done                   qty=6
+	// .63 spray-finish           qty=6
+	// .64 install-seat           qty=6
+	// .65 done                   qty=6
 
 	// Helper to get task at a 1-based sequence position.
 	taskAt := func(seq int) childInfo {
@@ -2115,7 +2115,7 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	}
 
 	// Spot-check done milestone (batch, qty=6).
-	done := taskAt(75)
+	done := taskAt(65)
 	if done.quantity != 6 {
 		t.Errorf("done: expected qty 6, got %d", done.quantity)
 	}
@@ -2150,16 +2150,16 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	// Assembly:
 	//   glue-up (6) ← dry-fit (6): 1:1 = 6
 	//   glue-up (6) ← shape-back (6): 1:1 = 6
-	//   spray-finish (6) ← glue-up (6): 1:1 = 6
+	//   spray-finish (1) ← glue-up (6): fan-in = 6
 	//   subtotal = 18 edges
 	//
-	// Install-seat (6) ← upholster-seat (1) + spray-finish (6):
-	//   fan-out: 6 + 1:1: 6 = 12 edges
+	// Install-seat (1) ← upholster-seat (1) + spray-finish (1):
+	//   1:1 = 1 + 1:1 = 1 → 2 edges
 	//
-	// Done (1) ← install-seat (6): fan-in = 6 edges
+	// Done (1) ← install-seat (1): 1:1 = 1 edge
 	//
-	// TOTAL: 8 + 6 + 12 + 30 + 3 + 18 + 12 + 6 = 95 edges
-	expectedEdgeCount := 95
+	// TOTAL: 8 + 6 + 12 + 30 + 3 + 18 + 2 + 1 = 80 edges
+	expectedEdgeCount := 80
 	if len(depRepo.deps) != expectedEdgeCount {
 		t.Errorf("expected %d dependency edges, got %d", expectedEdgeCount, len(depRepo.deps))
 	}
@@ -2236,19 +2236,35 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 		}
 	}
 
-	// 3. Fan-in: done (.75, 1 ticket) ← install-seat (.69-.74, 6 tickets)
-	doneID := taskAt(75).id
-	for i := 69; i <= 74; i++ {
-		installID := taskAt(i).id
+	// 3. Fan-in: spray-finish (.63, 1 ticket) ← glue-up (.57-.62, 6 tickets)
+	sprayFinishID := taskAt(63).id
+	for i := 57; i <= 62; i++ {
+		glueUpID := taskAt(i).id
 		found := false
 		for _, dep := range depRepo.deps {
-			if dep.FromTaskID == doneID && dep.ToTaskID == installID {
+			if dep.FromTaskID == sprayFinishID && dep.ToTaskID == glueUpID {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("fan-in: expected done (%s) → install-seat ticket %d (%s)", doneID, i-68, installID)
+			t.Errorf("fan-in: expected spray-finish (%s) → glue-up ticket %d (%s)", sprayFinishID, i-56, glueUpID)
+		}
+	}
+
+	// 4. Done (.65, 1 ticket) ← install-seat (.64, 1 ticket): 1:1
+	doneID := taskAt(65).id
+	installSeatID := taskAt(64).id
+	{
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == doneID && dep.ToTaskID == installSeatID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("1:1: expected done (%s) → install-seat (%s)", doneID, installSeatID)
 		}
 	}
 
@@ -2277,27 +2293,24 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 		}
 	}
 
-	// 5. install-seat depends on both upholster-seat (1 ticket, fan-out) and spray-finish (6 tickets, 1:1)
+	// 5. install-seat (.64, 1 ticket) depends on both upholster-seat (.56, 1 ticket, 1:1) and spray-finish (.63, 1 ticket, 1:1)
 	upholsterID := taskAt(56).id // upholster-seat, 1 ticket
-	for i := 0; i < 6; i++ {
-		installID := taskAt(69 + i).id
-		sprayFinishID := taskAt(63 + i).id
-
+	{
 		foundUpholster := false
 		foundSpray := false
 		for _, dep := range depRepo.deps {
-			if dep.FromTaskID == installID && dep.ToTaskID == upholsterID {
+			if dep.FromTaskID == installSeatID && dep.ToTaskID == upholsterID {
 				foundUpholster = true
 			}
-			if dep.FromTaskID == installID && dep.ToTaskID == sprayFinishID {
+			if dep.FromTaskID == installSeatID && dep.ToTaskID == sprayFinishID {
 				foundSpray = true
 			}
 		}
 		if !foundUpholster {
-			t.Errorf("install-seat[%d] (%s): expected dep → upholster-seat (%s)", i+1, installID, upholsterID)
+			t.Errorf("install-seat (%s): expected dep → upholster-seat (%s)", installSeatID, upholsterID)
 		}
 		if !foundSpray {
-			t.Errorf("install-seat[%d] (%s): expected dep → spray-finish[%d] (%s)", i+1, installID, i+1, sprayFinishID)
+			t.Errorf("install-seat (%s): expected dep → spray-finish (%s)", installSeatID, sprayFinishID)
 		}
 	}
 }

@@ -29,7 +29,7 @@ func TestResolveBatchSizes(t *testing.T) {
 			},
 		},
 		{
-			name: "no deps uses default",
+			name: "no explicit batch_size uses default",
 			steps: []*Step{
 				{ID: "cut"},
 				{ID: "sand"},
@@ -41,7 +41,7 @@ func TestResolveBatchSizes(t *testing.T) {
 			},
 		},
 		{
-			name: "single dep inheritance via Needs",
+			name: "deps do not inherit - step gets default not dep value",
 			steps: []*Step{
 				{ID: "cut", BatchSize: intPtr(4)},
 				{ID: "sand", Needs: []string{"cut"}},
@@ -49,11 +49,11 @@ func TestResolveBatchSizes(t *testing.T) {
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
 				"cut":  4,
-				"sand": 4,
+				"sand": 1, // no inheritance — gets default
 			},
 		},
 		{
-			name: "single dep inheritance via DependsOn",
+			name: "deps do not inherit via DependsOn either",
 			steps: []*Step{
 				{ID: "cut", BatchSize: intPtr(4)},
 				{ID: "sand", DependsOn: []string{"cut"}},
@@ -61,11 +61,11 @@ func TestResolveBatchSizes(t *testing.T) {
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
 				"cut":  4,
-				"sand": 4,
+				"sand": 1, // no inheritance — gets default
 			},
 		},
 		{
-			name: "multi dep agreement inherits",
+			name: "multi deps - step gets default regardless",
 			steps: []*Step{
 				{ID: "cut", BatchSize: intPtr(6)},
 				{ID: "mill", BatchSize: intPtr(6)},
@@ -75,25 +75,11 @@ func TestResolveBatchSizes(t *testing.T) {
 			wantBatchSizes: map[string]int{
 				"cut":  6,
 				"mill": 6,
-				"sand": 6,
+				"sand": 1, // no inheritance — gets default
 			},
 		},
 		{
-			name: "multi dep disagreement falls back to default",
-			steps: []*Step{
-				{ID: "cut", BatchSize: intPtr(6)},
-				{ID: "mill", BatchSize: intPtr(3)},
-				{ID: "sand", Needs: []string{"cut", "mill"}},
-			},
-			defaultBatchSize: 1,
-			wantBatchSizes: map[string]int{
-				"cut":  6,
-				"mill": 3,
-				"sand": 1,
-			},
-		},
-		{
-			name: "chain inheritance - A -> B -> C",
+			name: "chain - no propagation through deps",
 			steps: []*Step{
 				{ID: "A", BatchSize: intPtr(8)},
 				{ID: "B", Needs: []string{"A"}},
@@ -102,26 +88,12 @@ func TestResolveBatchSizes(t *testing.T) {
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
 				"A": 8,
-				"B": 8,
-				"C": 8,
+				"B": 1, // no inheritance
+				"C": 1, // no inheritance
 			},
 		},
 		{
-			name: "mixed Needs and DependsOn",
-			steps: []*Step{
-				{ID: "cut", BatchSize: intPtr(4)},
-				{ID: "sand", Needs: []string{"cut"}},
-				{ID: "finish", DependsOn: []string{"sand"}},
-			},
-			defaultBatchSize: 1,
-			wantBatchSizes: map[string]int{
-				"cut":    4,
-				"sand":   4,
-				"finish": 4,
-			},
-		},
-		{
-			name: "explicit overrides break inheritance chain",
+			name: "explicit overrides kept in chain",
 			steps: []*Step{
 				{ID: "cut", BatchSize: intPtr(8)},
 				{ID: "sand", Needs: []string{"cut"}, BatchSize: intPtr(2)},
@@ -131,7 +103,7 @@ func TestResolveBatchSizes(t *testing.T) {
 			wantBatchSizes: map[string]int{
 				"cut":    8,
 				"sand":   2,
-				"finish": 2,
+				"finish": 1, // no inheritance — gets default
 			},
 		},
 		{
@@ -149,8 +121,8 @@ func TestResolveBatchSizes(t *testing.T) {
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
 				"parent": 5,
-				"child1": 1, // no deps -> default
-				"child2": 1, // dep on child1 which got default
+				"child1": 1, // no deps, no explicit -> default
+				"child2": 1, // dep on child1 doesn't matter -> default
 			},
 		},
 		{
@@ -166,23 +138,25 @@ func TestResolveBatchSizes(t *testing.T) {
 			},
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
-				"parent": 1, // no deps -> default
-				"child1": 3,
-				"child2": 3, // inherits from child1
+				"parent": 1, // no explicit -> default
+				"child1": 3, // explicit
+				"child2": 1, // no inheritance from child1 -> default
 			},
 		},
 		{
-			name: "dep on unknown step falls back to default",
+			name: "milestone gets default like any other step",
 			steps: []*Step{
-				{ID: "sand", Needs: []string{"nonexistent"}},
+				{ID: "assemble", BatchSize: intPtr(1)},
+				{ID: "done", Type: "milestone", Needs: []string{"assemble"}},
 			},
-			defaultBatchSize: 7,
+			defaultBatchSize: 4,
 			wantBatchSizes: map[string]int{
-				"sand": 7,
+				"assemble": 1,
+				"done":     4, // milestone gets default, not inherited 1
 			},
 		},
 		{
-			name: "diamond dependency with agreement",
+			name: "diamond dependency - all get default",
 			steps: []*Step{
 				{ID: "A", BatchSize: intPtr(4)},
 				{ID: "B", Needs: []string{"A"}},
@@ -192,25 +166,23 @@ func TestResolveBatchSizes(t *testing.T) {
 			defaultBatchSize: 1,
 			wantBatchSizes: map[string]int{
 				"A": 4,
-				"B": 4,
-				"C": 4,
-				"D": 4,
+				"B": 1, // default
+				"C": 1, // default
+				"D": 1, // default
 			},
 		},
 		{
-			name: "diamond dependency with disagreement",
+			name: "real world: per-piece glue-up does not infect spray-finish",
 			steps: []*Step{
-				{ID: "A", BatchSize: intPtr(4)},
-				{ID: "B", Needs: []string{"A"}, BatchSize: intPtr(2)},
-				{ID: "C", Needs: []string{"A"}}, // inherits 4 from A
-				{ID: "D", Needs: []string{"B", "C"}},
+				{ID: "glue-up", BatchSize: intPtr(1)},
+				{ID: "spray-finish", Needs: []string{"glue-up"}},
+				{ID: "install-seat", Needs: []string{"spray-finish"}},
 			},
-			defaultBatchSize: 1,
+			defaultBatchSize: 4,
 			wantBatchSizes: map[string]int{
-				"A": 4,
-				"B": 2,
-				"C": 4,
-				"D": 1, // B=2, C=4 disagree -> default
+				"glue-up":      1,
+				"spray-finish": 4, // gets recipe default, not inherited 1
+				"install-seat": 4, // gets recipe default
 			},
 		},
 	}
