@@ -76,6 +76,9 @@ func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
 	}
 
 	// Parse optional query parameters.
+	if slug := c.Query("slug"); slug != "" {
+		filter.Slug = slug
+	}
 	if categoryID := c.Query("categoryId"); categoryID != "" {
 		if id, err := uuid.Parse(categoryID); err == nil {
 			filter.CategoryID = &id

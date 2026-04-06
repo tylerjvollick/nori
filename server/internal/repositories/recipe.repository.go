@@ -13,6 +13,7 @@ import (
 type RecipeFilter struct {
 	SpaceID    *uuid.UUID
 	CategoryID *uuid.UUID
+	Slug       string
 	IsActive   *bool
 	Offset     int
 	Limit      int
@@ -68,6 +69,9 @@ func (r *RecipeRepository) List(filter RecipeFilter) ([]models.Recipe, int64, er
 	}
 	if filter.CategoryID != nil {
 		query = query.Where("category_id = ?", *filter.CategoryID)
+	}
+	if filter.Slug != "" {
+		query = query.Where("slug = ?", filter.Slug)
 	}
 	if filter.IsActive != nil {
 		query = query.Where("is_active = ?", *filter.IsActive)
