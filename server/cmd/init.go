@@ -17,6 +17,11 @@ import (
 	"github.com/tylerjvollick/nori/internal/cli"
 )
 
+// execCommand is a package-level variable that wraps exec.Command so tests can
+// substitute a fake implementation. Production code calls execCommand(...) instead
+// of exec.Command(...) directly.
+var execCommand = exec.Command
+
 // stationInput holds station configuration gathered during interactive prompts.
 type stationInput struct {
 	Name     string
@@ -245,10 +250,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 // checkDocker verifies that docker and docker compose are available.
 func checkDocker() error {
-	if err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
+	if err := execCommand("docker", "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		return fmt.Errorf("docker is not installed or not running — install Docker and try again")
 	}
-	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
+	if err := execCommand("docker", "compose", "version").Run(); err != nil {
 		return fmt.Errorf("docker compose is not available — install Docker Compose V2 and try again")
 	}
 	return nil
@@ -256,7 +261,7 @@ func checkDocker() error {
 
 // checkExistingContainers looks for running nori-* containers and offers to stop them.
 func checkExistingContainers(reader *bufio.Reader) error {
-	out, err := exec.Command("docker", "ps", "--filter", "name=nori-", "--format", "{{.Names}}").Output()
+	out, err := execCommand("docker", "ps", "--filter", "name=nori-", "--format", "{{.Names}}").Output()
 	if err != nil {
 		return nil // Can't check, proceed anyway
 	}
@@ -280,7 +285,7 @@ func checkExistingContainers(reader *bufio.Reader) error {
 	}
 
 	fmt.Println("Stopping existing containers...")
-	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.dev.yml", "--env-file", "docker/.env", "down")
+	cmd := execCommand("docker", "compose", "-f", "docker/docker-compose.dev.yml", "--env-file", "docker/.env", "down")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	// Ignore error from compose down — containers may not be from this compose file.
@@ -289,7 +294,7 @@ func checkExistingContainers(reader *bufio.Reader) error {
 		for _, name := range strings.Split(names, "\n") {
 			name = strings.TrimSpace(name)
 			if name != "" {
-				exec.Command("docker", "stop", name).Run()
+				execCommand("docker", "stop", name).Run()
 			}
 		}
 	}
@@ -358,7 +363,7 @@ NORI_SKIP_PASSWORD_CHANGE=true
 
 // dockerComposeUp runs docker compose up -d --build.
 func dockerComposeUp() error {
-	cmd := exec.Command("docker", "compose",
+	cmd := execCommand("docker", "compose",
 		"-f", "docker/docker-compose.dev.yml",
 		"--env-file", "docker/.env",
 		"up", "-d", "--build",
