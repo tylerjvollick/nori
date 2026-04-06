@@ -12,6 +12,7 @@ import (
 type TaskFilter struct {
 	SpaceID    *uuid.UUID
 	Status     *models.TaskStatus
+	Type       *models.TaskType
 	StationID  *uuid.UUID
 	AssigneeID *uuid.UUID
 	ParentID   *string // use pointer to distinguish "no filter" from "filter for root tasks (nil parent)"
@@ -58,6 +59,9 @@ func (r *TaskRepository) List(filter TaskFilter) ([]models.Task, int64, error) {
 	}
 	if filter.Status != nil {
 		query = query.Where("status = ?", *filter.Status)
+	}
+	if filter.Type != nil {
+		query = query.Where("type = ?", *filter.Type)
 	}
 	if filter.StationID != nil {
 		query = query.Where("station_id = ?", *filter.StationID)

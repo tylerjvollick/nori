@@ -80,6 +80,10 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 		s := models.TaskStatus(status)
 		filter.Status = &s
 	}
+	if taskType := c.Query("type"); taskType != "" {
+		t := models.TaskType(taskType)
+		filter.Type = &t
+	}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
 			filter.StationID = &id
