@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { spaceStore } from '$lib/stores/space';
 	import { authStore } from '$lib/stores/auth';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
+	import SpaceSelector from '$lib/components/SpaceSelector.svelte';
 	import {
 		LayoutGrid,
 		FileText,
@@ -34,6 +36,9 @@
 	let showCreateDialog = $state(false);
 	let newSpaceName = $state('');
 	let isCreating = $state(false);
+
+	// Server-provided user with accessibleSpaces (always fresh from hooks.server.ts)
+	let pageUser = $derived($page.data.user);
 
 	const sidebar = useSidebar();
 
@@ -100,24 +105,28 @@
 
 <Sidebar.Root {collapsible} {...restProps} bind:ref>
 	<Sidebar.Header>
-		<div class="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center h-(--header-height)">
-			<div class="size-10 bg-sidebar-primary rounded-lg flex items-center justify-center shrink-0">
-				<svg
-					class="size-6 text-sidebar-primary-foreground"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M13 10V3L4 14h7v7l9-11h-7z"
-					/>
-				</svg>
+		{#if pageUser}
+			<SpaceSelector user={pageUser} onCreateSpace={() => (showCreateDialog = true)} />
+		{:else}
+			<div class="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center h-(--header-height)">
+				<div class="size-10 bg-sidebar-primary rounded-lg flex items-center justify-center shrink-0">
+					<svg
+						class="size-6 text-sidebar-primary-foreground"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M13 10V3L4 14h7v7l9-11h-7z"
+						/>
+					</svg>
+				</div>
+				<span class="font-bold text-sidebar-foreground group-data-[collapsible=icon]:hidden">Nori</span>
 			</div>
-			<span class="font-bold text-sidebar-foreground group-data-[collapsible=icon]:hidden">Nori</span>
-		</div>
+		{/if}
 	</Sidebar.Header>
 
 	<Sidebar.Content>
