@@ -74,7 +74,7 @@ func runRecipePour(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := cli.NewClient(creds)
+	client := newClientWithSpace(creds)
 
 	// 1. Resolve slug to recipe ID via GET /api/v1/recipes?slug=<slug>
 	recipeID, err := resolveRecipeSlug(client, slug)

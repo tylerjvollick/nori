@@ -263,3 +263,46 @@ func TestCredentials_ActiveToken(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveAndLoadCredentials_WithSpaceID(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	creds := &Credentials{
+		ServerURL:   "http://localhost:8080",
+		AccessToken: "jwt-token",
+		UserID:      "user-123",
+		UserEmail:   "test@example.com",
+		SpaceID:     "550e8400-e29b-41d4-a716-446655440000",
+	}
+
+	require.NoError(t, SaveCredentials(creds))
+
+	loaded, err := LoadCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded.SpaceID)
+}
+
+func TestSaveAndLoadCredentials_SpaceIDOmittedWhenEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	creds := &Credentials{
+		ServerURL:   "http://localhost:8080",
+		AccessToken: "jwt-token",
+		UserID:      "user-123",
+		UserEmail:   "test@example.com",
+	}
+
+	require.NoError(t, SaveCredentials(creds))
+
+	// Read raw JSON and verify spaceId is omitted
+	path := filepath.Join(tmpDir, ".config", "nori", "credentials")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal(data, &raw))
+	_, exists := raw["spaceId"]
+	assert.False(t, exists, "spaceId should be omitted from JSON when empty")
+}

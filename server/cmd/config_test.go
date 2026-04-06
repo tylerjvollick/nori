@@ -137,6 +137,60 @@ func TestConfigSet_UnknownKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "unknown config key")
 }
 
+func TestConfigSet_Space(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create existing credentials
+	creds := &cli.Credentials{
+		ServerURL:   "http://localhost:8080",
+		AccessToken: "existing-jwt",
+		UserID:      "user-123",
+		UserEmail:   "test@example.com",
+	}
+	require.NoError(t, cli.SaveCredentials(creds))
+
+	err := setSpace("550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+
+	loaded, err := cli.LoadCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded.SpaceID)
+	assert.Equal(t, "existing-jwt", loaded.AccessToken, "JWT should be preserved")
+	assert.Equal(t, "http://localhost:8080", loaded.ServerURL, "server URL should be preserved")
+}
+
+func TestConfigSet_Space_NoExistingCredentials(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	err := setSpace("550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, err)
+
+	// File should exist with space set
+	loaded, err := cli.LoadCredentialsRaw()
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded.SpaceID)
+}
+
+func TestConfigShow_WithSpace(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	creds := &cli.Credentials{
+		ServerURL:   "http://localhost:8080",
+		AccessToken: "jwt-token-12345678",
+		UserID:      "user-123",
+		UserEmail:   "test@example.com",
+		SpaceID:     "550e8400-e29b-41d4-a716-446655440000",
+	}
+	require.NoError(t, cli.SaveCredentials(creds))
+
+	// Should not error
+	err := runConfigShow(nil, nil)
+	require.NoError(t, err)
+}
+
 func TestConfigShow(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

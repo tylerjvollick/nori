@@ -79,7 +79,7 @@ func runTaskAction(taskID, action string) error {
 		return err
 	}
 
-	client := cli.NewClient(creds)
+	client := newClientWithSpace(creds)
 
 	path := fmt.Sprintf("/api/v1/tasks/%s/%s", taskID, action)
 	resp, err := client.Post(path, nil)

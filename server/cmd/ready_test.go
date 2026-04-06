@@ -164,15 +164,83 @@ func TestRunReady_SpaceIDHeader(t *testing.T) {
 		AccessToken: "test-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space-id",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
-	// Create a client with SpaceID to verify the header is sent
+	// NewClient now populates SpaceID from credentials automatically
 	client := cli.NewClient(creds)
-	client.SpaceID = "test-space-id"
 	resp, err := client.Get("/api/v1/tasks/ready")
 	require.NoError(t, err)
 	resp.Body.Close()
 
 	assert.Equal(t, "test-space-id", receivedSpaceID)
+}
+
+func TestRunReady_SpaceIDFromCredentials(t *testing.T) {
+	var receivedSpaceID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedSpaceID = r.Header.Get("X-Space-ID")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(readyResponse{Items: []readyTask{}, Total: 0})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Clear any --space flag state from other tests
+	spaceFlag = ""
+
+	creds := &cli.Credentials{
+		ServerURL:   server.URL,
+		AccessToken: "test-token",
+		UserID:      "user-123",
+		UserEmail:   "test@example.com",
+		SpaceID:     "creds-space-id",
+	}
+	require.NoError(t, cli.SaveCredentials(creds))
+
+	err := runReady(readyCmd, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, "creds-space-id", receivedSpaceID)
+}
+
+func TestResolveSpaceID_FlagOverridesAll(t *testing.T) {
+	creds := &cli.Credentials{
+		SpaceID: "creds-space",
+	}
+
+	// Set flag
+	spaceFlag = "flag-space"
+	t.Setenv("NORI_SPACE", "env-space")
+	defer func() { spaceFlag = "" }()
+
+	result := resolveSpaceID(creds)
+	assert.Equal(t, "flag-space", result)
+}
+
+func TestResolveSpaceID_EnvOverridesCreds(t *testing.T) {
+	creds := &cli.Credentials{
+		SpaceID: "creds-space",
+	}
+
+	spaceFlag = ""
+	t.Setenv("NORI_SPACE", "env-space")
+
+	result := resolveSpaceID(creds)
+	assert.Equal(t, "env-space", result)
+}
+
+func TestResolveSpaceID_FallsThroughToCreds(t *testing.T) {
+	creds := &cli.Credentials{
+		SpaceID: "creds-space",
+	}
+
+	spaceFlag = ""
+	t.Setenv("NORI_SPACE", "")
+
+	result := resolveSpaceID(creds)
+	assert.Equal(t, "creds-space", result)
 }

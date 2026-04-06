@@ -106,11 +106,17 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		UserID:      loginResp.UserID,
 		UserEmail:   loginResp.UserEmail,
 	}
+	if loginResp.ActiveSpaceID != nil {
+		creds.SpaceID = *loginResp.ActiveSpaceID
+	}
 	if err := cli.SaveCredentials(creds); err != nil {
 		return fmt.Errorf("failed to save credentials: %w", err)
 	}
 
 	fmt.Printf("Logged in as %s\n", loginResp.UserEmail)
+	if creds.SpaceID != "" {
+		fmt.Printf("Default space: %s\n", creds.SpaceID)
+	}
 	return nil
 }
 

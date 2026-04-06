@@ -14,6 +14,7 @@ type Credentials struct {
 	APIKey      string `json:"apiKey,omitempty"`
 	UserID      string `json:"userId"`
 	UserEmail   string `json:"userEmail"`
+	SpaceID     string `json:"spaceId,omitempty"`
 }
 
 // AuthMethod returns a human-readable description of the current authentication method.

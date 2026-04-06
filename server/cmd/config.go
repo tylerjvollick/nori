@@ -20,7 +20,8 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a configuration value",
 	Long: `Set a configuration value. Supported keys:
   api-key    Set the API key for authentication (e.g., nori_...)
-  server-url Set the server URL`,
+  server-url Set the server URL
+  space      Set the default space ID`,
 	Args: cobra.ExactArgs(2),
 	RunE: runConfigSet,
 }
@@ -47,8 +48,10 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 		return setAPIKey(value)
 	case "server-url":
 		return setServerURL(value)
+	case "space":
+		return setSpace(value)
 	default:
-		return fmt.Errorf("unknown config key %q — supported keys: api-key, server-url", key)
+		return fmt.Errorf("unknown config key %q — supported keys: api-key, server-url, space", key)
 	}
 }
 
@@ -91,6 +94,22 @@ func setServerURL(serverURL string) error {
 	return nil
 }
 
+func setSpace(spaceID string) error {
+	creds, err := cli.LoadCredentialsRaw()
+	if err != nil {
+		creds = &cli.Credentials{}
+	}
+
+	creds.SpaceID = spaceID
+
+	if err := cli.SaveCredentials(creds); err != nil {
+		return fmt.Errorf("failed to save credentials: %w", err)
+	}
+
+	fmt.Printf("Default space set to %s\n", spaceID)
+	return nil
+}
+
 func runConfigShow(cmd *cobra.Command, args []string) error {
 	creds, err := cli.LoadCredentials()
 	if err != nil {
@@ -102,6 +121,10 @@ func runConfigShow(cmd *cobra.Command, args []string) error {
 
 	if creds.UserEmail != "" {
 		fmt.Printf("User:        %s\n", creds.UserEmail)
+	}
+
+	if creds.SpaceID != "" {
+		fmt.Printf("Space:       %s\n", creds.SpaceID)
 	}
 
 	if creds.APIKey != "" {

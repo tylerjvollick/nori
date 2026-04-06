@@ -22,10 +22,12 @@ type Client struct {
 
 // NewClient creates a new CLI HTTP client from stored credentials.
 // Uses ActiveToken() to prefer API key over JWT.
+// Populates SpaceID from credentials so X-Space-ID is sent on every request.
 func NewClient(creds *Credentials) *Client {
 	return &Client{
 		ServerURL: creds.ServerURL,
 		Token:     creds.ActiveToken(),
+		SpaceID:   creds.SpaceID,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},

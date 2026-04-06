@@ -46,7 +46,7 @@ func runReady(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client := cli.NewClient(creds)
+	client := newClientWithSpace(creds)
 
 	resp, err := client.Get("/api/v1/tasks/ready")
 	if err != nil {

@@ -255,3 +255,50 @@ func TestCredentialsUsedBySubsequentCommands(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 }
+
+// TestLoginFlow_SavesActiveSpaceID verifies that the ActiveSpaceID from the
+// login response is saved to credentials.
+func TestLoginFlow_SavesActiveSpaceID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		spaceID := "550e8400-e29b-41d4-a716-446655440000"
+		json.NewEncoder(w).Encode(loginResponse{
+			AccessToken:        "jwt-token-abc",
+			UserID:             "user-uuid-123",
+			UserEmail:          "test@example.com",
+			MustChangePassword: false,
+			ActiveSpaceID:      &spaceID,
+		})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	client := cli.NewClientWithURL(server.URL)
+	resp, err := client.Post("/auth/login", map[string]string{
+		"email":    "test@example.com",
+		"password": "password123",
+	})
+	require.NoError(t, err)
+
+	var loginResp loginResponse
+	require.NoError(t, cli.ReadJSON(resp, &loginResp))
+	require.NotNil(t, loginResp.ActiveSpaceID)
+
+	// Simulate what runLogin does
+	creds := &cli.Credentials{
+		ServerURL:   server.URL,
+		AccessToken: loginResp.AccessToken,
+		UserID:      loginResp.UserID,
+		UserEmail:   loginResp.UserEmail,
+	}
+	if loginResp.ActiveSpaceID != nil {
+		creds.SpaceID = *loginResp.ActiveSpaceID
+	}
+	require.NoError(t, cli.SaveCredentials(creds))
+
+	loaded, err := cli.LoadCredentials()
+	require.NoError(t, err)
+	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded.SpaceID)
+}

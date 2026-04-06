@@ -73,7 +73,21 @@ func TestNewClient(t *testing.T) {
 	client := NewClient(creds)
 	assert.Equal(t, "http://localhost:8080", client.ServerURL)
 	assert.Equal(t, "my-token", client.Token)
+	assert.Empty(t, client.SpaceID, "SpaceID should be empty when not set in credentials")
 	assert.NotNil(t, client.httpClient)
+}
+
+func TestNewClient_PopulatesSpaceID(t *testing.T) {
+	creds := &Credentials{
+		ServerURL:   "http://localhost:8080",
+		AccessToken: "my-token",
+		UserID:      "user-1",
+		UserEmail:   "test@example.com",
+		SpaceID:     "space-uuid-123",
+	}
+
+	client := NewClient(creds)
+	assert.Equal(t, "space-uuid-123", client.SpaceID)
 }
 
 func TestReadJSON_InvalidJSON(t *testing.T) {
