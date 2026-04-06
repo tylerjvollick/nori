@@ -37,7 +37,7 @@ func (r *RecipeRepository) Create(recipe *models.Recipe) error {
 
 func (r *RecipeRepository) GetByID(id uuid.UUID) (*models.Recipe, error) {
 	var recipe models.Recipe
-	err := r.db.First(&recipe, "id = ?", id).Error
+	err := r.db.Preload("CurrentVersion").First(&recipe, "id = ?", id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("recipe not found")
@@ -49,7 +49,7 @@ func (r *RecipeRepository) GetByID(id uuid.UUID) (*models.Recipe, error) {
 
 func (r *RecipeRepository) GetBySlug(spaceID uuid.UUID, slug string) (*models.Recipe, error) {
 	var recipe models.Recipe
-	err := r.db.Where("space_id = ? AND slug = ?", spaceID, slug).First(&recipe).Error
+	err := r.db.Preload("CurrentVersion").Where("space_id = ? AND slug = ?", spaceID, slug).First(&recipe).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("recipe not found")
@@ -83,7 +83,7 @@ func (r *RecipeRepository) List(filter RecipeFilter) ([]models.Recipe, int64, er
 	}
 
 	var recipes []models.Recipe
-	q := query.Order("name ASC")
+	q := query.Preload("CurrentVersion").Order("name ASC")
 	if filter.Offset > 0 {
 		q = q.Offset(filter.Offset)
 	}
