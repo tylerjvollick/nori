@@ -68,12 +68,15 @@ export class ApiClient {
     });
 
     if (!response.ok) {
-      // Handle 401 Unauthorized — redirect to login
+      // Handle 401 Unauthorized — redirect to login (unless already on an auth page)
       if (response.status === 401) {
         if (browser) {
           localStorage.removeItem('accessToken');
           localStorage.removeItem('activeSpaceId');
-          window.location.href = '/login';
+          const path = window.location.pathname;
+          if (path !== '/login' && path !== '/change-password') {
+            window.location.href = '/login';
+          }
         }
         throw new Error('Unauthorized');
       }
@@ -150,7 +153,10 @@ export class ApiClient {
         if (browser) {
           localStorage.removeItem('accessToken');
           localStorage.removeItem('activeSpaceId');
-          window.location.href = '/login';
+          const path = window.location.pathname;
+          if (path !== '/login' && path !== '/change-password') {
+            window.location.href = '/login';
+          }
         }
         throw new Error('Unauthorized');
       }
