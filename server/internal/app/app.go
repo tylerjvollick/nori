@@ -35,6 +35,7 @@ func New(cfg *config.Config) *App {
 	spaceRepo := repositories.NewSpaceRepository(database.DB)
 	spaceMemberRepo := repositories.NewSpaceMemberRepository(database.DB)
 	taskRepo := repositories.NewTaskRepository(database.DB)
+	taskDepRepo := repositories.NewTaskDepRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -60,7 +61,7 @@ func New(cfg *config.Config) *App {
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, nil)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
-	taskService := services.NewTaskService(taskRepo)
+	taskService := services.NewTaskService(taskRepo, taskDepRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
