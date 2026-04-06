@@ -5,17 +5,18 @@ import (
 	"testing"
 )
 
-func TestApplyLoops_FixedCount(t *testing.T) {
-	// Create a step with a fixed-count loop
+func TestApplyLoops_RangeMultiBody(t *testing.T) {
+	// Create a step with a range loop and multiple body steps
 	steps := []*Step{
 		{
 			ID:    "process",
 			Title: "Process items",
 			Loop: &LoopSpec{
-				Count: 3,
+				Range: "1..3",
+				Var:   "n",
 				Body: []*Step{
-					{ID: "fetch", Title: "Fetch item"},
-					{ID: "transform", Title: "Transform item", Needs: []string{"fetch"}},
+					{ID: "fetch", Title: "Fetch item {n}"},
+					{ID: "transform", Title: "Transform item {n}", Needs: []string{"fetch"}},
 				},
 			},
 		},
@@ -115,19 +116,24 @@ func TestApplyLoops_Validation(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "empty body",
-			loop:    &LoopSpec{Count: 3, Body: nil},
+			name:    "empty body with until",
+			loop:    &LoopSpec{Until: "cond", Max: 3, Body: nil},
 			wantErr: "body is required",
 		},
 		{
-			name:    "both count and until",
-			loop:    &LoopSpec{Count: 3, Until: "cond", Max: 5, Body: []*Step{{ID: "a", Title: "A"}}},
-			wantErr: "cannot have both count and until",
+			name:    "empty body with range",
+			loop:    &LoopSpec{Range: "1..3", Body: nil},
+			wantErr: "body is required",
 		},
 		{
-			name:    "neither count nor until",
+			name:    "neither until nor range",
 			loop:    &LoopSpec{Body: []*Step{{ID: "a", Title: "A"}}},
-			wantErr: "either count or until is required",
+			wantErr: "one of until or range is required",
+		},
+		{
+			name:    "both until and range",
+			loop:    &LoopSpec{Until: "cond", Max: 5, Range: "1..3", Body: []*Step{{ID: "a", Title: "A"}}},
+			wantErr: "only one of until or range can be specified",
 		},
 		{
 			name:    "until without max",
@@ -327,14 +333,14 @@ func TestApplyGates_InvalidCondition(t *testing.T) {
 }
 
 func TestApplyControlFlow_Integration(t *testing.T) {
-	// Test the combined ApplyControlFlow function
+	// Test the combined ApplyControlFlow function using range loops
 	steps := []*Step{
 		{ID: "setup", Title: "Setup"},
 		{
 			ID:    "process",
 			Title: "Process items",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{ID: "item", Title: "Process item"},
 				},
@@ -426,7 +432,7 @@ func TestApplyLoops_ExternalDependencies(t *testing.T) {
 			ID:    "process",
 			Title: "Process items",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{ID: "work", Title: "Do work", Needs: []string{"setup"}}, // External dep
 					{ID: "save", Title: "Save", Needs: []string{"work"}},     // Internal dep
@@ -511,19 +517,19 @@ func TestApplyLoops_NestedChildren(t *testing.T) {
 // gt-zn35j: Tests for nested loop support
 
 func TestApplyLoops_NestedLoops(t *testing.T) {
-	// Create a loop containing another loop
+	// Create a loop containing another loop (both range-based)
 	steps := []*Step{
 		{
 			ID:    "outer",
 			Title: "Outer loop",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{
 						ID:    "inner",
 						Title: "Inner loop",
 						Loop: &LoopSpec{
-							Count: 2,
+							Range: "1..2",
 							Body: []*Step{
 								{ID: "work", Title: "Do work"},
 							},
@@ -573,13 +579,13 @@ func TestApplyLoops_NestedLoopsWithDependencies(t *testing.T) {
 			ID:    "outer",
 			Title: "Outer loop",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{
 						ID:    "inner",
 						Title: "Inner loop",
 						Loop: &LoopSpec{
-							Count: 2,
+							Range: "1..2",
 							Body: []*Step{
 								{ID: "fetch", Title: "Fetch data"},
 								{ID: "process", Title: "Process data", Needs: []string{"fetch"}},
@@ -621,22 +627,22 @@ func TestApplyLoops_NestedLoopsWithDependencies(t *testing.T) {
 }
 
 func TestApplyLoops_ThreeLevelNesting(t *testing.T) {
-	// Three levels of nesting
+	// Three levels of nesting (all range-based)
 	steps := []*Step{
 		{
 			ID: "l1",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{
 						ID: "l2",
 						Loop: &LoopSpec{
-							Count: 2,
+							Range: "1..2",
 							Body: []*Step{
 								{
 									ID: "l3",
 									Loop: &LoopSpec{
-										Count: 2,
+										Range: "1..2",
 										Body: []*Step{
 											{ID: "leaf", Title: "Leaf step"},
 										},
@@ -677,13 +683,13 @@ func TestApplyLoops_NestedLoopsOuterChaining(t *testing.T) {
 			ID:    "outer",
 			Title: "Outer loop",
 			Loop: &LoopSpec{
-				Count: 2,
+				Range: "1..2",
 				Body: []*Step{
 					{
 						ID:    "inner",
 						Title: "Inner loop",
 						Loop: &LoopSpec{
-							Count: 2,
+							Range: "1..2",
 							Body: []*Step{
 								{ID: "work", Title: "Do work"},
 							},
@@ -939,15 +945,6 @@ func TestValidateLoopSpec_Range(t *testing.T) {
 				Body:  []*Step{{ID: "step"}},
 			},
 			wantErr: false,
-		},
-		{
-			name: "invalid - both count and range",
-			loop: &LoopSpec{
-				Count: 5,
-				Range: "1..10",
-				Body:  []*Step{{ID: "step"}},
-			},
-			wantErr: true,
 		},
 		{
 			name: "invalid - both until and range",

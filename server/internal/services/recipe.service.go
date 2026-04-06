@@ -100,13 +100,8 @@ func (s *RecipeService) PourRecipe(
 	}
 
 	// 4. Process steps through the formula pipeline:
-	//    resolve loop counts → conditions → control flow → batch sizes
+	//    conditions → control flow → batch sizes
 	steps := f.Steps
-
-	// Resolve template expressions in loop count fields (e.g., "{{batch_size}}" → 6).
-	if err := formula.ResolveLoopCounts(steps, allVars); err != nil {
-		return nil, fmt.Errorf("resolving loop counts: %w", err)
-	}
 
 	// Filter steps by condition (compile-time step filtering based on vars).
 	steps, err = formula.FilterStepsByCondition(steps, allVars)

@@ -152,39 +152,7 @@ func (p *Parser) ParseTOML(data []byte) (*Formula, error) {
 		formula.Type = TypeWorkflow
 	}
 
-	// Normalize: when a step has a loop with an empty body but has children,
-	// move the children into loop.body. This allows TOML authors to write:
-	//   [[steps]]
-	//   id = "chair"
-	//   [steps.loop]
-	//   count = 6
-	//   [[steps.children]]
-	//   ...
-	// instead of requiring the more awkward [[steps.loop.body]] syntax.
-	normalizeLoopBodies(formula.Steps)
-
 	return &formula, nil
-}
-
-// normalizeLoopBodies moves step.Children into step.Loop.Body when a step
-// has a loop with an empty body. This allows TOML authors to use the natural
-// [[steps.children]] syntax instead of [[steps.loop.body]].
-// Applied recursively to handle nested loops.
-func normalizeLoopBodies(steps []*Step) {
-	for _, step := range steps {
-		if step.Loop != nil && len(step.Loop.Body) == 0 && len(step.Children) > 0 {
-			step.Loop.Body = step.Children
-			step.Children = nil
-		}
-		// Recurse into children (for non-loop steps that may contain loops deeper)
-		if len(step.Children) > 0 {
-			normalizeLoopBodies(step.Children)
-		}
-		// Recurse into loop body (for nested loops)
-		if step.Loop != nil && len(step.Loop.Body) > 0 {
-			normalizeLoopBodies(step.Loop.Body)
-		}
-	}
 }
 
 // Resolve fully resolves a formula, processing extends and expansions.

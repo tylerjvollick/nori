@@ -1,9 +1,12 @@
 // Package formula provides control flow operators for step transformation.
 //
 // Control flow operators enable:
-//   - loop: Repeat a body of steps (fixed count or conditional)
+//   - loop: Repeat a body of steps (conditional or range-based)
 //   - branch: Fork-join parallel execution patterns
 //   - gate: Conditional waits before steps proceed
+//
+// Fixed-count loop expansion has been removed in favor of batch-size-based
+// task creation in the pour pipeline.
 //
 // These operators are applied during formula cooking to transform
 // the step graph before creating the proto bead.
@@ -15,30 +18,8 @@ import (
 	"strings"
 )
 
-// ResolveLoopCounts recursively resolves template expressions in loop count
-// fields using the given variable map. Must be called before ApplyControlFlow.
-func ResolveLoopCounts(steps []*Step, vars map[string]string) error {
-	for _, step := range steps {
-		if step.Loop != nil {
-			if err := step.Loop.ResolveCount(vars); err != nil {
-				return fmt.Errorf("step %q: %w", step.ID, err)
-			}
-			// Recurse into loop body
-			if err := ResolveLoopCounts(step.Loop.Body, vars); err != nil {
-				return err
-			}
-		}
-		if len(step.Children) > 0 {
-			if err := ResolveLoopCounts(step.Children, vars); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 // ApplyLoops expands loop bodies in a formula's steps.
-// Fixed-count loops expand the body N times with indexed step IDs.
+// Range loops expand the body for each value in the range.
 // Conditional loops expand once and add a "loop:until" label for runtime evaluation.
 // Returns a new steps slice with loops expanded.
 func ApplyLoops(steps []*Step) ([]*Step, error) {
@@ -83,9 +64,6 @@ func validateLoopSpec(loop *LoopSpec, stepID string) error {
 
 	// Count the number of loop types specified
 	loopTypes := 0
-	if loop.Count > 0 {
-		loopTypes++
-	}
 	if loop.Until != "" {
 		loopTypes++
 	}
@@ -94,18 +72,14 @@ func validateLoopSpec(loop *LoopSpec, stepID string) error {
 	}
 
 	if loopTypes == 0 {
-		return fmt.Errorf("loop %q: one of count, until, or range is required", stepID)
+		return fmt.Errorf("loop %q: one of until or range is required", stepID)
 	}
 	if loopTypes > 1 {
-		return fmt.Errorf("loop %q: only one of count, until, or range can be specified", stepID)
+		return fmt.Errorf("loop %q: only one of until or range can be specified", stepID)
 	}
 
 	if loop.Until != "" && loop.Max == 0 {
 		return fmt.Errorf("loop %q: max is required when until is set", stepID)
-	}
-
-	if loop.Count < 0 {
-		return fmt.Errorf("loop %q: count must be positive", stepID)
 	}
 
 	if loop.Max < 0 {
@@ -139,31 +113,7 @@ func expandLoop(step *Step) ([]*Step, error) {
 func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 	var result []*Step
 
-	if step.Loop.Count > 0 {
-		// Fixed-count loop: expand body N times
-		for i := 1; i <= step.Loop.Count; i++ {
-			// Built-in loop variable: i = 1-based iteration index
-			loopVars := map[string]string{"i": fmt.Sprintf("%d", i)}
-			iterSteps, err := expandLoopIteration(step, i, loopVars)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, iterSteps...)
-		}
-
-		// Recursively expand any nested loops FIRST
-		var err error
-		result, err = ApplyLoops(result)
-		if err != nil {
-			return nil, err
-		}
-
-		// THEN chain iterations on the expanded result
-		// This must happen AFTER recursive expansion so we chain the final steps
-		if step.Loop.Count > 1 && !step.Loop.Parallel {
-			result = chainExpandedIterations(result, step.ID, step.Loop.Count)
-		}
-	} else if step.Loop.Range != "" {
+	if step.Loop.Range != "" {
 		// Range loop: expand body for each value in the computed range
 		rangeSpec, err := ParseRange(step.Loop.Range, vars)
 		if err != nil {
@@ -199,8 +149,8 @@ func expandLoopWithVars(step *Step, vars map[string]string) ([]*Step, error) {
 			return nil, err
 		}
 
-		// THEN chain iterations on the expanded result
-		if count > 1 && !step.Loop.Parallel {
+		// Chain iterations on the expanded result
+		if count > 1 {
 			result = chainExpandedIterations(result, step.ID, count)
 		}
 	} else {
@@ -373,32 +323,9 @@ func expandLoopChildren(children []*Step, loopID string, iteration int, bodyStep
 	return result
 }
 
-// chainLoopIterations adds dependencies between loop iterations.
-// Each iteration's first step depends on the previous iteration's last step.
-func chainLoopIterations(steps []*Step, body []*Step, count int) []*Step {
-	if len(body) == 0 || count < 2 {
-		return steps
-	}
-
-	stepsPerIter := len(body)
-
-	for iter := 2; iter <= count; iter++ {
-		// First step of this iteration
-		firstIdx := (iter - 1) * stepsPerIter
-		// Last step of previous iteration
-		lastStep := steps[(iter-2)*stepsPerIter+stepsPerIter-1]
-
-		if firstIdx < len(steps) {
-			steps[firstIdx].Needs = appendUnique(steps[firstIdx].Needs, lastStep.ID)
-		}
-	}
-
-	return steps
-}
-
 // chainExpandedIterations chains iterations AFTER nested loop expansion.
-// Unlike chainLoopIterations, this handles variable step counts per iteration
-// by finding iteration boundaries via ID prefix matching.
+// This handles variable step counts per iteration by finding iteration
+// boundaries via ID prefix matching.
 func chainExpandedIterations(steps []*Step, loopID string, count int) []*Step {
 	if len(steps) == 0 || count < 2 {
 		return steps
@@ -571,7 +498,7 @@ func applyGatesWithMap(stepMap map[string]*Step, compose *ComposeRules) error {
 }
 
 // ApplyControlFlow applies all control flow operators in the correct order:
-// 1. Loops (expand iterations)
+// 1. Loops (expand range and conditional iterations)
 // 2. Branches (wire fork-join dependencies)
 // 3. Gates (add condition labels)
 //
@@ -631,13 +558,10 @@ func cloneLoopSpec(loop *LoopSpec) *LoopSpec {
 		return nil
 	}
 	clone := &LoopSpec{
-		Count:     loop.Count,
-		CountExpr: loop.CountExpr,
-		Until:     loop.Until,
-		Max:       loop.Max,
-		Range:     loop.Range,
-		Var:       loop.Var,
-		Parallel:  loop.Parallel,
+		Until: loop.Until,
+		Max:   loop.Max,
+		Range: loop.Range,
+		Var:   loop.Var,
 	}
 	if len(loop.Body) > 0 {
 		clone.Body = make([]*Step, len(loop.Body))

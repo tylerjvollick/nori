@@ -2,6 +2,8 @@ package services
 
 import (
 	"fmt"
+	"os"
+	"sort"
 	"testing"
 
 	"github.com/google/uuid"
@@ -1891,6 +1893,411 @@ func TestDependencyWiring_MixedConvergence(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("expected fan-out dependency %s → %s (glue-up %d → dry-fit)", glueUpID, dryFitID, n+1)
+		}
+	}
+}
+
+// ==========================================================================
+// Chair Recipe Integration Test (US-007)
+// ==========================================================================
+//
+// Pours the actual seeds/chair.toml with batch_size=6 and verifies:
+//   - Exact task counts per stream
+//   - Batch size / quantity on each task
+//   - Dependency edge counts and wiring patterns (fan-out, 1:1, fan-in)
+//   - Ready tasks (no blockers)
+
+func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
+	// Load the real chair.toml from the seeds directory.
+	chairTOML, err := os.ReadFile("../../../seeds/chair.toml")
+	if err != nil {
+		t.Fatalf("failed to read seeds/chair.toml: %v", err)
+	}
+
+	svc, recipeID, spaceID, userID := setupRecipeService(string(chairTOML))
+
+	vars := map[string]string{"batch_size": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+
+	// ── Root job ──────────────────────────────────────────────────────
+	if rootTask.Type != models.TaskTypeJob {
+		t.Errorf("root task type: expected %q, got %q", models.TaskTypeJob, rootTask.Type)
+	}
+
+	// ── Count child tasks (excluding root) ───────────────────────────
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+
+	// Expected task counts per step (26 steps in chair.toml):
+	//
+	// Legs (8 steps, all batch_size=6 → 1 ticket each):
+	//   leg-rough-cut, leg-joint-face, leg-thickness, leg-rough-shape,
+	//   leg-shape-profile, leg-face-mortises, leg-edge-mortises, hand-shape-legs
+	//                                                             = 8 tasks
+	//
+	// Rails (7 steps, all batch_size=6 → 1 ticket each):
+	//   rail-rough-cut, rail-joint-face-edge, rail-thickness, rail-rip-width,
+	//   rail-compound-miters, rail-tenons, hand-shape-rails
+	//                                                             = 7 tasks
+	//
+	// Dry fit (batch_size=1 → 6 tickets):                        = 6 tasks
+	//
+	// Back stream:
+	//   resaw-veneers (bs=6 → 1 ticket)                          = 1 task
+	//   glue-lamination (bs=1 → 6 tickets)                       = 6 tasks
+	//   true-up-edge (inherits bs=1 → 6 tickets)                 = 6 tasks
+	//   rip-back-parallel (inherits bs=1 → 6 tickets)            = 6 tasks
+	//   cut-back-miters (inherits bs=1 → 6 tickets)              = 6 tasks
+	//   shape-back (inherits bs=1 → 6 tickets)                   = 6 tasks
+	//                                                      subtotal = 31 tasks
+	//
+	// Seat stream (4 steps, all batch_size=6 → 1 ticket each):
+	//   cut-seat-blank, cut-foam, cut-fabric, upholster-seat
+	//                                                             = 4 tasks
+	//
+	// Assembly:
+	//   glue-up (bs=1 → 6 tickets)                               = 6 tasks
+	//   spray-finish (inherits bs=1 → 6 tickets)                 = 6 tasks
+	//                                                      subtotal = 12 tasks
+	//
+	// Final convergence:
+	//   install-seat (bs=1 → 6 tickets)                          = 6 tasks
+	//   done (bs=6 → 1 ticket)                                   = 1 task
+	//                                                      subtotal = 7 tasks
+	//
+	// TOTAL child tasks: 8 + 7 + 6 + 31 + 4 + 12 + 7 = 75
+	expectedChildCount := 75
+	if childCount != expectedChildCount {
+		t.Errorf("expected %d child tasks, got %d", expectedChildCount, childCount)
+	}
+
+	// ── Build step→taskIDs map from the created tasks ────────────────
+	// We reconstruct this by examining task IDs and their creation order.
+	// Tasks are created sequentially: .1, .2, .3, ... under rootTask.ID.
+
+	// Collect all child task IDs sorted by their sequence number.
+	type childInfo struct {
+		id       string
+		seq      int // sequence number extracted from ID
+		title    string
+		quantity int
+		taskType models.TaskType
+	}
+	var children []childInfo
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			// Extract sequence from ID: "nori-xxx.N" → N
+			path := extractPath(task.ID, rootTask.ID)
+			var seq int
+			fmt.Sscanf(path, "%d", &seq)
+			children = append(children, childInfo{
+				id:       task.ID,
+				seq:      seq,
+				title:    task.Title,
+				quantity: task.Quantity,
+				taskType: task.Type,
+			})
+		}
+	}
+	sort.Slice(children, func(i, j int) bool { return children[i].seq < children[j].seq })
+
+	if len(children) != expectedChildCount {
+		t.Fatalf("sorted children count mismatch: expected %d, got %d", expectedChildCount, len(children))
+	}
+
+	// ── Verify task sequence and quantities ──────────────────────────
+	// Map out the expected sequence of tasks by step ID:
+	//
+	// .1  leg-rough-cut          qty=6
+	// .2  leg-joint-face         qty=6
+	// .3  leg-thickness          qty=6
+	// .4  leg-rough-shape        qty=6
+	// .5  leg-shape-profile      qty=6
+	// .6  leg-face-mortises      qty=6
+	// .7  leg-edge-mortises      qty=6
+	// .8  hand-shape-legs        qty=6
+	// .9  rail-rough-cut         qty=6
+	// .10 rail-joint-face-edge   qty=6
+	// .11 rail-thickness         qty=6
+	// .12 rail-rip-width         qty=6
+	// .13 rail-compound-miters   qty=6
+	// .14 rail-tenons            qty=6
+	// .15 hand-shape-rails       qty=6
+	// .16-.21 dry-fit (6×)       qty=1
+	// .22 resaw-veneers          qty=6
+	// .23-.28 glue-lamination    qty=1
+	// .29-.34 true-up-edge       qty=1
+	// .35-.40 rip-back-parallel  qty=1
+	// .41-.46 cut-back-miters    qty=1
+	// .47-.52 shape-back         qty=1
+	// .53 cut-seat-blank         qty=6
+	// .54 cut-foam               qty=6
+	// .55 cut-fabric             qty=6
+	// .56 upholster-seat         qty=6
+	// .57-.62 glue-up            qty=1
+	// .63-.68 spray-finish       qty=1
+	// .69-.74 install-seat       qty=1
+	// .75 done                   qty=6
+
+	// Helper to get task at a 1-based sequence position.
+	taskAt := func(seq int) childInfo {
+		idx := seq - 1
+		if idx < 0 || idx >= len(children) {
+			t.Fatalf("invalid sequence %d (have %d children)", seq, len(children))
+		}
+		return children[idx]
+	}
+
+	// Spot-check leg stream (batch tasks, qty=6).
+	legRoughCut := taskAt(1)
+	if legRoughCut.quantity != 6 {
+		t.Errorf("leg-rough-cut: expected qty 6, got %d", legRoughCut.quantity)
+	}
+	if legRoughCut.title != "Rough cut leg stock" {
+		t.Errorf("leg-rough-cut: expected title %q, got %q", "Rough cut leg stock", legRoughCut.title)
+	}
+
+	handShapeLegs := taskAt(8)
+	if handShapeLegs.quantity != 6 {
+		t.Errorf("hand-shape-legs: expected qty 6, got %d", handShapeLegs.quantity)
+	}
+
+	// Spot-check rail stream.
+	railRoughCut := taskAt(9)
+	if railRoughCut.quantity != 6 {
+		t.Errorf("rail-rough-cut: expected qty 6, got %d", railRoughCut.quantity)
+	}
+
+	handShapeRails := taskAt(15)
+	if handShapeRails.quantity != 6 {
+		t.Errorf("hand-shape-rails: expected qty 6, got %d", handShapeRails.quantity)
+	}
+
+	// Spot-check dry-fit (per-piece, qty=1).
+	for i := 16; i <= 21; i++ {
+		df := taskAt(i)
+		if df.quantity != 1 {
+			t.Errorf("dry-fit ticket %d: expected qty 1, got %d", i-15, df.quantity)
+		}
+	}
+
+	// Spot-check back stream.
+	resawVeneers := taskAt(22)
+	if resawVeneers.quantity != 6 {
+		t.Errorf("resaw-veneers: expected qty 6, got %d", resawVeneers.quantity)
+	}
+
+	// glue-lamination per-piece tickets (qty=1).
+	for i := 23; i <= 28; i++ {
+		gl := taskAt(i)
+		if gl.quantity != 1 {
+			t.Errorf("glue-lamination ticket %d: expected qty 1, got %d", i-22, gl.quantity)
+		}
+	}
+
+	// Spot-check seat stream (batch tasks, qty=6).
+	cutSeatBlank := taskAt(53)
+	if cutSeatBlank.quantity != 6 {
+		t.Errorf("cut-seat-blank: expected qty 6, got %d", cutSeatBlank.quantity)
+	}
+	if cutSeatBlank.title != "Cut out seat blanks" {
+		t.Errorf("cut-seat-blank: expected title %q, got %q", "Cut out seat blanks", cutSeatBlank.title)
+	}
+
+	// Spot-check done milestone (batch, qty=6).
+	done := taskAt(75)
+	if done.quantity != 6 {
+		t.Errorf("done: expected qty 6, got %d", done.quantity)
+	}
+	if done.title != "6 Chairs complete" {
+		t.Errorf("done: expected title %q, got %q", "6 Chairs complete", done.title)
+	}
+	if done.taskType != models.TaskTypeMilestone {
+		t.Errorf("done: expected type %q, got %q", models.TaskTypeMilestone, done.taskType)
+	}
+
+	// ── Dependency edge count ────────────────────────────────────────
+	//
+	// Legs chain (all 1:1 between single-ticket steps):
+	//   7 single-dep chains + hand-shape-legs has 2 deps = 8 edges
+	//
+	// Rails chain (all 1:1 between single-ticket steps):
+	//   6 edges
+	//
+	// Dry fit (6 tickets) ← hand-shape-legs (1) + hand-shape-rails (1):
+	//   fan-out: 6×1 + 6×1 = 12 edges
+	//
+	// Back: glue-lamination (6) ← resaw-veneers (1): fan-out = 6
+	//   true-up-edge (6) ← glue-lamination (6): 1:1 = 6
+	//   rip-back-parallel (6) ← true-up-edge (6): 1:1 = 6
+	//   cut-back-miters (6) ← rip-back-parallel (6): 1:1 = 6
+	//   shape-back (6) ← cut-back-miters (6): 1:1 = 6
+	//   subtotal = 30 edges
+	//
+	// Seat: cut-foam←cut-seat-blank + cut-fabric←cut-foam + upholster-seat←cut-fabric
+	//   3 edges (all 1:1 between single-ticket steps)
+	//
+	// Assembly:
+	//   glue-up (6) ← dry-fit (6): 1:1 = 6
+	//   glue-up (6) ← shape-back (6): 1:1 = 6
+	//   spray-finish (6) ← glue-up (6): 1:1 = 6
+	//   subtotal = 18 edges
+	//
+	// Install-seat (6) ← upholster-seat (1) + spray-finish (6):
+	//   fan-out: 6 + 1:1: 6 = 12 edges
+	//
+	// Done (1) ← install-seat (6): fan-in = 6 edges
+	//
+	// TOTAL: 8 + 6 + 12 + 30 + 3 + 18 + 12 + 6 = 95 edges
+	expectedEdgeCount := 95
+	if len(depRepo.deps) != expectedEdgeCount {
+		t.Errorf("expected %d dependency edges, got %d", expectedEdgeCount, len(depRepo.deps))
+	}
+
+	// ── Verify ready tasks (no blockers) ─────────────────────────────
+	// Tasks with no incoming dependencies are "ready" — these are the
+	// starting points for all four streams.
+	//
+	// Expected ready tasks:
+	//   leg-rough-cut (.1), rail-rough-cut (.9), resaw-veneers (.22), cut-seat-blank (.53)
+
+	// Build set of all task IDs that have at least one blocker.
+	blockedTasks := make(map[string]bool)
+	for _, dep := range depRepo.deps {
+		blockedTasks[dep.FromTaskID] = true
+	}
+
+	// Find ready child tasks (not blocked, not the root).
+	var readyTasks []childInfo
+	for _, child := range children {
+		if !blockedTasks[child.id] {
+			readyTasks = append(readyTasks, child)
+		}
+	}
+
+	expectedReadySeqs := []int{1, 9, 22, 53} // leg-rough-cut, rail-rough-cut, resaw-veneers, cut-seat-blank
+	if len(readyTasks) != len(expectedReadySeqs) {
+		var readySeqs []int
+		for _, rt := range readyTasks {
+			readySeqs = append(readySeqs, rt.seq)
+		}
+		t.Errorf("expected %d ready tasks at positions %v, got %d at positions %v",
+			len(expectedReadySeqs), expectedReadySeqs, len(readyTasks), readySeqs)
+	} else {
+		sort.Slice(readyTasks, func(i, j int) bool { return readyTasks[i].seq < readyTasks[j].seq })
+		for i, expected := range expectedReadySeqs {
+			if readyTasks[i].seq != expected {
+				t.Errorf("ready task %d: expected seq %d, got %d (%q)", i, expected, readyTasks[i].seq, readyTasks[i].title)
+			}
+		}
+	}
+
+	// ── Verify specific wiring patterns ──────────────────────────────
+
+	// 1. Fan-out: resaw-veneers (.22, 1 ticket) → glue-lamination (.23-.28, 6 tickets)
+	resawID := taskAt(22).id
+	for i := 23; i <= 28; i++ {
+		glueID := taskAt(i).id
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == glueID && dep.ToTaskID == resawID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("fan-out: expected glue-lamination ticket %d (%s) → resaw-veneers (%s)", i-22, glueID, resawID)
+		}
+	}
+
+	// 2. 1:1 chain: glue-lamination[i] → true-up-edge[i]
+	for i := 0; i < 6; i++ {
+		glueID := taskAt(23 + i).id
+		trueUpID := taskAt(29 + i).id
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == trueUpID && dep.ToTaskID == glueID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("1:1: expected true-up-edge[%d] (%s) → glue-lamination[%d] (%s)", i+1, trueUpID, i+1, glueID)
+		}
+	}
+
+	// 3. Fan-in: done (.75, 1 ticket) ← install-seat (.69-.74, 6 tickets)
+	doneID := taskAt(75).id
+	for i := 69; i <= 74; i++ {
+		installID := taskAt(i).id
+		found := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == doneID && dep.ToTaskID == installID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("fan-in: expected done (%s) → install-seat ticket %d (%s)", doneID, i-68, installID)
+		}
+	}
+
+	// 4. Mixed convergence at glue-up:
+	//    glue-up[i] depends on dry-fit[i] (1:1) AND shape-back[i] (1:1)
+	for i := 0; i < 6; i++ {
+		glueUpID := taskAt(57 + i).id
+		dryFitID := taskAt(16 + i).id
+		shapeBackID := taskAt(47 + i).id
+
+		foundDryFit := false
+		foundShapeBack := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == glueUpID && dep.ToTaskID == dryFitID {
+				foundDryFit = true
+			}
+			if dep.FromTaskID == glueUpID && dep.ToTaskID == shapeBackID {
+				foundShapeBack = true
+			}
+		}
+		if !foundDryFit {
+			t.Errorf("convergence: expected glue-up[%d] (%s) → dry-fit[%d] (%s)", i+1, glueUpID, i+1, dryFitID)
+		}
+		if !foundShapeBack {
+			t.Errorf("convergence: expected glue-up[%d] (%s) → shape-back[%d] (%s)", i+1, glueUpID, i+1, shapeBackID)
+		}
+	}
+
+	// 5. install-seat depends on both upholster-seat (1 ticket, fan-out) and spray-finish (6 tickets, 1:1)
+	upholsterID := taskAt(56).id // upholster-seat, 1 ticket
+	for i := 0; i < 6; i++ {
+		installID := taskAt(69 + i).id
+		sprayFinishID := taskAt(63 + i).id
+
+		foundUpholster := false
+		foundSpray := false
+		for _, dep := range depRepo.deps {
+			if dep.FromTaskID == installID && dep.ToTaskID == upholsterID {
+				foundUpholster = true
+			}
+			if dep.FromTaskID == installID && dep.ToTaskID == sprayFinishID {
+				foundSpray = true
+			}
+		}
+		if !foundUpholster {
+			t.Errorf("install-seat[%d] (%s): expected dep → upholster-seat (%s)", i+1, installID, upholsterID)
+		}
+		if !foundSpray {
+			t.Errorf("install-seat[%d] (%s): expected dep → spray-finish[%d] (%s)", i+1, installID, i+1, sprayFinishID)
 		}
 	}
 }

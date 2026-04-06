@@ -199,28 +199,6 @@ station = "roubo-workbench"
 needs = ["cut-back-miters"]
 description = "Final shaping of the chair back with spokeshave and scraper."
 
-# ── Assembly (dry-fit + back converge, per-piece) ────────────────
-
-[[steps]]
-id = "glue-up"
-title = "Glue up chair assembly"
-station = "assembly-table"
-batch_size = 1
-needs = ["dry-fit", "shape-back"]
-description = "Full chair glue-up. Glue side frames first, then join front/back rails and back. Use cauls for even clamping pressure."
-
-  [steps.gate]
-  type = "timer"
-  id = "cure-time"
-  timeout = "4h"
-
-[[steps]]
-id = "spray-finish"
-title = "Spray finish"
-station = "spray-booth"
-needs = ["glue-up"]
-description = "Spray finish on the assembled chair frame."
-
 # ── STREAM 4: Seat (all batch — 1 ticket per step) ──────────────
 
 [[steps]]
@@ -247,6 +225,28 @@ title = "Upholster seats"
 needs = ["cut-fabric"]
 description = "Wrap foam and fabric around the seat blanks, staple underneath."
 
+# ── Assembly (dry-fit + back converge, per-piece) ────────────────
+
+[[steps]]
+id = "glue-up"
+title = "Glue up chair assembly"
+station = "assembly-table"
+batch_size = 1
+needs = ["dry-fit", "shape-back"]
+description = "Full chair glue-up. Glue side frames first, then join front/back rails and back. Use cauls for even clamping pressure."
+
+  [steps.gate]
+  type = "timer"
+  id = "cure-time"
+  timeout = "4h"
+
+[[steps]]
+id = "spray-finish"
+title = "Spray finish"
+station = "spray-booth"
+needs = ["glue-up"]
+description = "Spray finish on the assembled chair frame."
+
 # ── Final convergence (per-piece) ────────────────────────────────
 
 [[steps]]
@@ -259,6 +259,7 @@ description = "Mount the upholstered seat to the finished chair frame."
 [[steps]]
 id = "done"
 title = "{{batch_size}} Chairs complete"
+batch_size = 6
 needs = ["install-seat"]
 type = "milestone"
 description = "All chairs assembled, finished, and seats installed. Ready for delivery."
