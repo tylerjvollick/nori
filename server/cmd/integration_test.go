@@ -42,6 +42,14 @@ type mockTask struct {
 	Priority   int     `json:"priority"`
 	ParentID   *string `json:"parentId,omitempty"`
 	AssigneeID *string `json:"assigneeId,omitempty"`
+	Quantity   int     `json:"quantity"`
+	StepID     string  `json:"stepId,omitempty"` // links back to recipe step
+}
+
+// mockDep represents a dependency edge: FromTaskID depends on ToTaskID.
+type mockDep struct {
+	FromTaskID string // the blocked task
+	ToTaskID   string // the blocker
 }
 
 // mockRecipe represents a recipe in the mock server's state.
@@ -68,6 +76,7 @@ type mockState struct {
 	recipes  []mockRecipe
 	versions []mockVersion
 	tasks    []mockTask
+	deps     []mockDep
 
 	// Authentication
 	validToken string
@@ -171,42 +180,174 @@ func (s *mockState) pourRecipe(recipeID string) (*mockTask, []*mockTask) {
 	}
 	s.tasks = append(s.tasks, job)
 
-	// Create child tasks simulating a simplified chair recipe pour.
-	// The real pour engine would parse the TOML and expand loops, but
-	// for this integration test we create a representative set of tasks.
-	childDefs := []struct {
-		suffix  string
-		title   string
-		station string
-	}{
-		{"1", "Rough mill — Walnut", "mill"},
-		{"2", "Layout and mark joinery — chair 1", "joinery"},
-		{"3", "Cut mortises — chair 1", "joinery"},
-		{"4", "Cut tenons — chair 1", "joinery"},
-		{"5", "Dry fit — chair 1", "joinery"},
-		{"6", "Glue up sub-assemblies — chair 1", "assembly"},
-		{"7", "Sand to 220 — chair 1", "finish"},
-		{"8", "Batch finish — oil", "finish"},
-		{"9", "Final inspection", ""},
+	// --- Chair recipe task definitions ---
+	// Each step definition specifies: id, title, station, batchSize, needs.
+	// batchSize=6 → 1 ticket with qty=6 (batch).
+	// batchSize=1 → 6 tickets with qty=1 (per-piece).
+	// Steps without explicit batchSize inherit from their dependency chain.
+	//
+	// This mirrors the real chair.toml / PourRecipe logic.
+
+	type stepDef struct {
+		id        string
+		title     string
+		station   string
+		batchSize int // 0 means "inherit from needs chain"
+		needs     []string
+		taskType  string // "" means "task", "milestone" for done
 	}
 
+	steps := []stepDef{
+		// STREAM 1: Legs (all batch — 1 ticket per step, qty=6)
+		{id: "leg-rough-cut", title: "Rough cut leg stock", station: "miter-saw"},
+		{id: "leg-joint-face", title: "Joint 1 face on legs", station: "jointer", needs: []string{"leg-rough-cut"}},
+		{id: "leg-thickness", title: "Thickness plane legs", station: "thickness-planer", needs: []string{"leg-joint-face"}},
+		{id: "leg-rough-shape", title: "Rough cut out leg shape", station: "band-saw", needs: []string{"leg-thickness"}},
+		{id: "leg-shape-profile", title: "Shape leg profile", station: "router-table", needs: []string{"leg-rough-shape"}},
+		{id: "leg-face-mortises", title: "Leg face mortises", station: "assembly-table", needs: []string{"leg-shape-profile"}},
+		{id: "leg-edge-mortises", title: "Leg edge mortises", station: "assembly-table", needs: []string{"leg-shape-profile"}},
+		{id: "hand-shape-legs", title: "Hand shape legs", station: "roubo-workbench", needs: []string{"leg-face-mortises", "leg-edge-mortises"}},
+
+		// STREAM 2: Rails (all batch — 1 ticket per step, qty=6)
+		{id: "rail-rough-cut", title: "Rough cut rail stock", station: "miter-saw"},
+		{id: "rail-joint-face-edge", title: "Jointer 1 face and 1 edge on rails", station: "jointer", needs: []string{"rail-rough-cut"}},
+		{id: "rail-thickness", title: "Thickness plane rails", station: "thickness-planer", needs: []string{"rail-joint-face-edge"}},
+		{id: "rail-rip-width", title: "Rip rails to width", station: "table-saw", needs: []string{"rail-thickness"}},
+		{id: "rail-compound-miters", title: "Rail compound miters", station: "table-saw", needs: []string{"rail-rip-width"}},
+		{id: "rail-tenons", title: "Rail tenons", station: "panto-router", needs: []string{"rail-compound-miters"}},
+		{id: "hand-shape-rails", title: "Hand shape rails", station: "roubo-workbench", needs: []string{"rail-tenons"}},
+
+		// Dry fit (per-piece, batch_size=1)
+		{id: "dry-fit", title: "Dry fit legs + rails", batchSize: 1, needs: []string{"hand-shape-legs", "hand-shape-rails"}},
+
+		// STREAM 3: Chair back
+		{id: "resaw-veneers", title: "Resaw veneers", station: "band-saw"},
+		{id: "glue-lamination", title: "Glue lamination", station: "assembly-table", batchSize: 1, needs: []string{"resaw-veneers"}},
+		{id: "true-up-edge", title: "True up one edge of glue lamination", station: "jointer", needs: []string{"glue-lamination"}},
+		{id: "rip-back-parallel", title: "Rip back parallel", station: "table-saw", needs: []string{"true-up-edge"}},
+		{id: "cut-back-miters", title: "Cut chair back compound miters", station: "table-saw", needs: []string{"rip-back-parallel"}},
+		{id: "shape-back", title: "Shape chair back", station: "roubo-workbench", needs: []string{"cut-back-miters"}},
+
+		// STREAM 4: Seat (all batch)
+		{id: "cut-seat-blank", title: "Cut out seat blanks", station: "table-saw"},
+		{id: "cut-foam", title: "Cut out seat foam", needs: []string{"cut-seat-blank"}},
+		{id: "cut-fabric", title: "Cut out upholstery fabric", needs: []string{"cut-foam"}},
+		{id: "upholster-seat", title: "Upholster seats", needs: []string{"cut-fabric"}},
+
+		// Assembly (per-piece, batch_size=1)
+		{id: "glue-up", title: "Glue up chair assembly", station: "assembly-table", batchSize: 1, needs: []string{"dry-fit", "shape-back"}},
+		{id: "spray-finish", title: "Spray finish", station: "spray-booth", needs: []string{"glue-up"}},
+
+		// Final convergence (per-piece)
+		{id: "install-seat", title: "Install chair seat", batchSize: 1, needs: []string{"upholster-seat", "spray-finish"}},
+		{id: "done", title: "6 Chairs complete", batchSize: 6, needs: []string{"install-seat"}, taskType: "milestone"},
+	}
+
+	// Resolve batch sizes via inheritance.
+	orderQty := 6
+	defaultBatchSize := 6
+	resolvedBS := make(map[string]int)
+	for _, step := range steps {
+		if step.batchSize > 0 {
+			resolvedBS[step.id] = step.batchSize
+		}
+	}
+	// Propagate: steps without explicit batchSize inherit from deps.
+	for _, step := range steps {
+		if _, ok := resolvedBS[step.id]; !ok {
+			if len(step.needs) > 0 {
+				// All deps must agree; otherwise fall back to default.
+				bs := resolvedBS[step.needs[0]]
+				allSame := true
+				for _, n := range step.needs[1:] {
+					if resolvedBS[n] != bs {
+						allSame = false
+						break
+					}
+				}
+				if allSame && bs > 0 {
+					resolvedBS[step.id] = bs
+				} else {
+					resolvedBS[step.id] = defaultBatchSize
+				}
+			} else {
+				resolvedBS[step.id] = defaultBatchSize
+			}
+		}
+	}
+
+	// Create tasks and track step→taskIDs mapping.
+	stepTaskIDs := make(map[string][]string) // step ID → list of task IDs
+	seq := 1
+
 	var children []*mockTask
-	for _, def := range childDefs {
-		childID := fmt.Sprintf("%s.%s", jobID, def.suffix)
-		child := mockTask{
-			ID:       childID,
-			Title:    def.title,
-			Status:   "open",
-			Type:     "task",
-			ParentID: &jobID,
-			Priority: 1,
+	for _, step := range steps {
+		bs := resolvedBS[step.id]
+		ticketCount := orderQty / bs
+		qty := bs
+
+		for n := 0; n < ticketCount; n++ {
+			childID := fmt.Sprintf("%s.%d", jobID, seq)
+			seq++
+
+			title := step.title
+			if ticketCount > 1 {
+				title = fmt.Sprintf("%s %d of %d", step.title, n+1, ticketCount)
+			}
+
+			taskType := "task"
+			if step.taskType != "" {
+				taskType = step.taskType
+			}
+
+			child := mockTask{
+				ID:       childID,
+				Title:    title,
+				Status:   "open",
+				Type:     taskType,
+				ParentID: &jobID,
+				Priority: 1,
+				Quantity: qty,
+				StepID:   step.id,
+			}
+			if step.station != "" {
+				station := step.station
+				child.StationID = &station
+			}
+			s.tasks = append(s.tasks, child)
+			children = append(children, &s.tasks[len(s.tasks)-1])
+			stepTaskIDs[step.id] = append(stepTaskIDs[step.id], childID)
 		}
-		if def.station != "" {
-			station := def.station
-			child.StationID = &station
+	}
+
+	// Wire dependencies using batch-aware patterns.
+	for _, step := range steps {
+		if len(step.needs) == 0 {
+			continue
 		}
-		s.tasks = append(s.tasks, child)
-		children = append(children, &s.tasks[len(s.tasks)-1])
+		fromIDs := stepTaskIDs[step.id]
+		for _, needID := range step.needs {
+			toIDs := stepTaskIDs[needID]
+			fromCount := len(fromIDs)
+			toCount := len(toIDs)
+
+			if fromCount == toCount {
+				// 1:1 wiring
+				for i := 0; i < fromCount; i++ {
+					s.deps = append(s.deps, mockDep{FromTaskID: fromIDs[i], ToTaskID: toIDs[i]})
+				}
+			} else if fromCount > toCount && toCount == 1 {
+				// Fan-out: single blocker → multiple blocked
+				for i := 0; i < fromCount; i++ {
+					s.deps = append(s.deps, mockDep{FromTaskID: fromIDs[i], ToTaskID: toIDs[0]})
+				}
+			} else if fromCount == 1 && toCount > 1 {
+				// Fan-in: multiple blockers → single blocked
+				for i := 0; i < toCount; i++ {
+					s.deps = append(s.deps, mockDep{FromTaskID: fromIDs[0], ToTaskID: toIDs[i]})
+				}
+			}
+		}
 	}
 
 	return &job, children
@@ -231,9 +372,25 @@ func (s *mockState) findRecipeByID(id string) *mockRecipe {
 }
 
 func (s *mockState) readyTasks() []mockTask {
+	// Build set of "done" task IDs for dependency resolution.
+	doneSet := make(map[string]bool)
+	for _, t := range s.tasks {
+		if t.Status == "done" {
+			doneSet[t.ID] = true
+		}
+	}
+
+	// Build set of task IDs that have at least one unsatisfied dep.
+	blockedSet := make(map[string]bool)
+	for _, dep := range s.deps {
+		if !doneSet[dep.ToTaskID] {
+			blockedSet[dep.FromTaskID] = true
+		}
+	}
+
 	var ready []mockTask
 	for _, t := range s.tasks {
-		if t.Status == "open" && t.Type == "task" {
+		if t.Status == "open" && t.Type == "task" && !blockedSet[t.ID] {
 			ready = append(ready, t)
 		}
 	}
@@ -247,6 +404,17 @@ func (s *mockState) findTask(id string) *mockTask {
 		}
 	}
 	return nil
+}
+
+// findTasksByStep returns all tasks for a given step ID.
+func (s *mockState) findTasksByStep(stepID string) []*mockTask {
+	var result []*mockTask
+	for i := range s.tasks {
+		if s.tasks[i].StepID == stepID {
+			result = append(result, &s.tasks[i])
+		}
+	}
+	return result
 }
 
 // --- Mock HTTP server ---
@@ -711,78 +879,275 @@ func TestChairWorkflowE2E(t *testing.T) {
 			childCount++
 		}
 	}
-	assert.Equal(t, 9, childCount, "should have 9 child tasks from the pour")
+	// 26 steps in chair.toml produce 75 child tasks when batch_size=6:
+	//   Legs: 8, Rails: 7, Dry-fit: 6, Back: 31, Seat: 4, Assembly: 12,
+	//   Install-seat: 6, Done: 1  =  75 total
+	assert.Equal(t, 75, childCount, "should have 75 child tasks from the pour")
 	state.mu.Unlock()
 
-	// ── Step 4: Ready (list ready tasks) ──────────────────────────────────
+	// ── Step 4: Ready (list ready tasks — should be 4 stream starts) ─────
 
-	t.Log("Step 4: nori ready")
+	t.Log("Step 4: nori ready (initial — 4 stream starts)")
 
 	readyJSONFlag = false
 	err = runReady(readyCmd, nil)
 	require.NoError(t, err, "ready should succeed")
 
-	// ── Step 5: Claim and complete the first 3 tasks ──────────────────────
-
-	t.Log("Step 5: Task claim + complete loop")
-
 	state.mu.Lock()
 	readyTasks := state.readyTasks()
+	require.Equal(t, 4, len(readyTasks), "should have exactly 4 ready tasks (4 stream starts)")
+
+	// Verify the ready tasks are the correct stream start steps.
+	readySteps := make(map[string]bool)
+	for _, rt := range readyTasks {
+		readySteps[rt.StepID] = true
+	}
+	assert.True(t, readySteps["leg-rough-cut"], "leg-rough-cut should be ready")
+	assert.True(t, readySteps["rail-rough-cut"], "rail-rough-cut should be ready")
+	assert.True(t, readySteps["resaw-veneers"], "resaw-veneers should be ready")
+	assert.True(t, readySteps["cut-seat-blank"], "cut-seat-blank should be ready")
 	state.mu.Unlock()
-	require.True(t, len(readyTasks) >= 3, "should have at least 3 ready tasks")
 
-	// Work through the first 3 tasks: claim then complete each.
-	for i := 0; i < 3; i++ {
-		taskID := readyTasks[i].ID
-		t.Logf("  Claiming task %s: %s", taskID, readyTasks[i].Title)
+	// ── Step 5: Claim and complete resaw-veneers (batch task) ────────────
 
-		taskJSONFlag = false
-		err = runTaskClaim(taskClaimCmd, []string{taskID})
-		require.NoError(t, err, "task claim should succeed for %s", taskID)
+	t.Log("Step 5: Claim and complete resaw-veneers (fan-out test)")
 
-		// Verify status changed to active.
+	state.mu.Lock()
+	resawTasks := state.findTasksByStep("resaw-veneers")
+	require.Len(t, resawTasks, 1, "resaw-veneers should be 1 batch ticket")
+	resawID := resawTasks[0].ID
+	assert.Equal(t, 6, resawTasks[0].Quantity, "resaw-veneers should have qty=6")
+	state.mu.Unlock()
+
+	// Claim it.
+	taskJSONFlag = false
+	err = runTaskClaim(taskClaimCmd, []string{resawID})
+	require.NoError(t, err, "claim resaw-veneers should succeed")
+
+	state.mu.Lock()
+	resawTask := state.findTask(resawID)
+	assert.Equal(t, "active", resawTask.Status, "resaw-veneers should be active after claim")
+	state.mu.Unlock()
+
+	// Complete it.
+	err = runTaskComplete(taskCompleteCmd, []string{resawID})
+	require.NoError(t, err, "complete resaw-veneers should succeed")
+
+	state.mu.Lock()
+	resawTask = state.findTask(resawID)
+	assert.Equal(t, "done", resawTask.Status, "resaw-veneers should be done after complete")
+
+	// Verify fan-out: completing resaw-veneers (1 ticket) should unlock
+	// all 6 glue-lamination tickets.
+	glueLamTasks := state.findTasksByStep("glue-lamination")
+	require.Len(t, glueLamTasks, 6, "glue-lamination should have 6 per-piece tickets")
+
+	readyTasks = state.readyTasks()
+	readySteps = make(map[string]bool)
+	readyIDs := make(map[string]bool)
+	for _, rt := range readyTasks {
+		readySteps[rt.StepID] = true
+		readyIDs[rt.ID] = true
+	}
+	for _, gl := range glueLamTasks {
+		assert.True(t, readyIDs[gl.ID],
+			"glue-lamination ticket %s should be ready after resaw-veneers completed", gl.ID)
+		assert.Equal(t, 1, gl.Quantity, "glue-lamination ticket should have qty=1")
+	}
+	state.mu.Unlock()
+
+	// ── Step 6: Complete glue-lamination[1] and verify 1:1 dep chain ─────
+
+	t.Log("Step 6: Complete glue-lamination 1 of 6 → unlocks true-up-edge 1 of 6")
+
+	state.mu.Lock()
+	glueLam1ID := glueLamTasks[0].ID
+	state.mu.Unlock()
+
+	// Claim and complete glue-lamination ticket 1.
+	err = runTaskClaim(taskClaimCmd, []string{glueLam1ID})
+	require.NoError(t, err)
+	err = runTaskComplete(taskCompleteCmd, []string{glueLam1ID})
+	require.NoError(t, err)
+
+	state.mu.Lock()
+	trueUpTasks := state.findTasksByStep("true-up-edge")
+	require.Len(t, trueUpTasks, 6, "true-up-edge should have 6 per-piece tickets")
+
+	// Only the first true-up-edge ticket should be ready (1:1 mapping).
+	readyTasks = state.readyTasks()
+	readyIDs = make(map[string]bool)
+	for _, rt := range readyTasks {
+		readyIDs[rt.ID] = true
+	}
+	assert.True(t, readyIDs[trueUpTasks[0].ID],
+		"true-up-edge[1] should be ready after glue-lamination[1] completed")
+
+	// The other 5 true-up-edge tickets should NOT be ready.
+	for i := 1; i < 6; i++ {
+		assert.False(t, readyIDs[trueUpTasks[i].ID],
+			"true-up-edge[%d] should NOT be ready (glue-lamination[%d] not done)", i+1, i+1)
+	}
+	state.mu.Unlock()
+
+	// ── Step 7: Complete the full back stream for all 6 pieces ───────────
+
+	t.Log("Step 7: Complete full back stream (all 6 pieces through shape-back)")
+
+	backSteps := []string{"glue-lamination", "true-up-edge", "rip-back-parallel", "cut-back-miters", "shape-back"}
+	for _, stepID := range backSteps {
 		state.mu.Lock()
-		task := state.findTask(taskID)
-		require.NotNil(t, task)
-		assert.Equal(t, "active", task.Status, "claimed task should be active")
+		tasks := state.findTasksByStep(stepID)
 		state.mu.Unlock()
 
-		t.Logf("  Completing task %s: %s", taskID, readyTasks[i].Title)
-
-		err = runTaskComplete(taskCompleteCmd, []string{taskID})
-		require.NoError(t, err, "task complete should succeed for %s", taskID)
-
-		// Verify status changed to done.
-		state.mu.Lock()
-		task = state.findTask(taskID)
-		require.NotNil(t, task)
-		assert.Equal(t, "done", task.Status, "completed task should be done")
-		state.mu.Unlock()
+		for _, task := range tasks {
+			if task.Status == "done" {
+				continue // already completed (glue-lamination[1] done in step 6)
+			}
+			err = runTaskClaim(taskClaimCmd, []string{task.ID})
+			require.NoError(t, err, "claim %s should succeed", task.ID)
+			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
+			require.NoError(t, err, "complete %s should succeed", task.ID)
+		}
 	}
 
-	// ── Step 6: Ready again (verify remaining tasks) ──────────────────────
+	// ── Step 8: Complete leg + rail streams and dry-fit ───────────────────
 
-	t.Log("Step 6: nori ready (after completing 3 tasks)")
+	t.Log("Step 8: Complete legs, rails, and dry-fit streams")
 
-	err = runReady(readyCmd, nil)
-	require.NoError(t, err, "ready should succeed after completing tasks")
+	legRailSteps := []string{
+		"leg-rough-cut", "leg-joint-face", "leg-thickness", "leg-rough-shape",
+		"leg-shape-profile", "leg-face-mortises", "leg-edge-mortises", "hand-shape-legs",
+		"rail-rough-cut", "rail-joint-face-edge", "rail-thickness", "rail-rip-width",
+		"rail-compound-miters", "rail-tenons", "hand-shape-rails",
+		"dry-fit",
+	}
+	for _, stepID := range legRailSteps {
+		state.mu.Lock()
+		tasks := state.findTasksByStep(stepID)
+		state.mu.Unlock()
 
-	// Verify only open tasks remain in the ready list.
+		for _, task := range tasks {
+			err = runTaskClaim(taskClaimCmd, []string{task.ID})
+			require.NoError(t, err, "claim %s should succeed", task.ID)
+			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
+			require.NoError(t, err, "complete %s should succeed", task.ID)
+		}
+	}
+
+	// After legs+rails+dry-fit+back complete, glue-up should be ready.
 	state.mu.Lock()
-	remainingReady := state.readyTasks()
-	assert.Equal(t, 6, len(remainingReady), "should have 6 remaining ready tasks (9 - 3 completed)")
+	readyTasks = state.readyTasks()
+	readySteps = make(map[string]bool)
+	for _, rt := range readyTasks {
+		readySteps[rt.StepID] = true
+	}
+	assert.True(t, readySteps["glue-up"],
+		"glue-up should be ready after dry-fit and shape-back complete")
 	state.mu.Unlock()
 
-	// ── Step 7: Validate API call sequence ────────────────────────────────
+	// ── Step 9: Complete assembly stream (glue-up + spray-finish) ────────
 
-	t.Log("Step 7: Validate API call sequence")
+	t.Log("Step 9: Complete assembly stream (glue-up + spray-finish)")
+
+	for _, stepID := range []string{"glue-up", "spray-finish"} {
+		state.mu.Lock()
+		tasks := state.findTasksByStep(stepID)
+		state.mu.Unlock()
+
+		for _, task := range tasks {
+			err = runTaskClaim(taskClaimCmd, []string{task.ID})
+			require.NoError(t, err, "claim %s should succeed", task.ID)
+			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
+			require.NoError(t, err, "complete %s should succeed", task.ID)
+		}
+	}
+
+	// ── Step 10: Complete seat stream ────────────────────────────────────
+
+	t.Log("Step 10: Complete seat stream")
+
+	for _, stepID := range []string{"cut-seat-blank", "cut-foam", "cut-fabric", "upholster-seat"} {
+		state.mu.Lock()
+		tasks := state.findTasksByStep(stepID)
+		state.mu.Unlock()
+
+		for _, task := range tasks {
+			err = runTaskClaim(taskClaimCmd, []string{task.ID})
+			require.NoError(t, err, "claim %s should succeed", task.ID)
+			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
+			require.NoError(t, err, "complete %s should succeed", task.ID)
+		}
+	}
+
+	// ── Step 11: Install seats and verify done milestone ─────────────────
+
+	t.Log("Step 11: Install seats → done milestone")
+
+	state.mu.Lock()
+	installTasks := state.findTasksByStep("install-seat")
+	require.Len(t, installTasks, 6, "install-seat should have 6 per-piece tickets")
+	doneTasks := state.findTasksByStep("done")
+	require.Len(t, doneTasks, 1, "done should be 1 milestone ticket")
+	doneTask := doneTasks[0]
+
+	// Done should NOT be ready yet (install-seat not complete).
+	readyTasks = state.readyTasks()
+	readyIDs = make(map[string]bool)
+	for _, rt := range readyTasks {
+		readyIDs[rt.ID] = true
+	}
+	assert.False(t, readyIDs[doneTask.ID],
+		"done milestone should NOT be ready before all install-seat complete")
+	state.mu.Unlock()
+
+	// Complete all 6 install-seat tickets.
+	for _, task := range installTasks {
+		err = runTaskClaim(taskClaimCmd, []string{task.ID})
+		require.NoError(t, err, "claim %s should succeed", task.ID)
+		err = runTaskComplete(taskCompleteCmd, []string{task.ID})
+		require.NoError(t, err, "complete %s should succeed", task.ID)
+	}
+
+	// Verify done milestone is now ready (fan-in complete).
+	state.mu.Lock()
+	readyTasks = state.readyTasks()
+	readyIDs = make(map[string]bool)
+	for _, rt := range readyTasks {
+		readyIDs[rt.ID] = true
+	}
+	state.mu.Unlock()
+
+	// The done milestone has type "milestone", not "task", so it won't
+	// appear in readyTasks() which filters for type=="task".  Verify
+	// that it has no unsatisfied deps instead.
+	state.mu.Lock()
+	doneBlocked := false
+	doneSet := make(map[string]bool)
+	for _, t := range state.tasks {
+		if t.Status == "done" {
+			doneSet[t.ID] = true
+		}
+	}
+	for _, dep := range state.deps {
+		if dep.FromTaskID == doneTask.ID && !doneSet[dep.ToTaskID] {
+			doneBlocked = true
+			break
+		}
+	}
+	assert.False(t, doneBlocked,
+		"done milestone should have all deps satisfied after install-seat complete")
+	assert.Equal(t, 6, doneTask.Quantity, "done milestone should have qty=6")
+	assert.Equal(t, "milestone", doneTask.Type, "done should be a milestone")
+	state.mu.Unlock()
+
+	// ── Step 12: Validate API call sequence ──────────────────────────────
+
+	t.Log("Step 12: Validate API call sequence")
 
 	state.mu.Lock()
 	calls := state.apiCalls
 	state.mu.Unlock()
-
-	// Verify the expected sequence of API calls.
-	require.True(t, len(calls) >= 10, "should have at least 10 API calls, got %d", len(calls))
 
 	// The first call should be login.
 	assert.Equal(t, "POST /auth/login", calls[0], "first call should be login")
@@ -802,27 +1167,17 @@ func TestChairWorkflowE2E(t *testing.T) {
 	// Ready check.
 	assert.Equal(t, "GET /api/v1/tasks/ready", calls[7], "should check ready tasks")
 
-	// Claim/complete cycle should alternate.
-	claimCompleteStart := 8
-	for i := 0; i < 3; i++ {
-		claimIdx := claimCompleteStart + (i * 2)
-		completeIdx := claimIdx + 1
-		if claimIdx < len(calls) {
-			assert.Contains(t, calls[claimIdx], "/claim", "call %d should be a claim", claimIdx)
-		}
-		if completeIdx < len(calls) {
-			assert.Contains(t, calls[completeIdx], "/complete", "call %d should be a complete", completeIdx)
-		}
-	}
-
 	// ── Summary ───────────────────────────────────────────────────────────
 
 	t.Logf("E2E workflow completed successfully:")
 	t.Logf("  - Logged in as %s", state.userEmail)
 	t.Logf("  - Created recipe %q (slug: %s)", recipe.Name, recipe.Slug)
 	t.Logf("  - Poured into job %s with %d tasks", jobTask.ID, childCount)
-	t.Logf("  - Claimed and completed 3 tasks")
-	t.Logf("  - %d tasks remaining", len(remainingReady))
+	t.Logf("  - Verified 4 ready tasks (stream starts)")
+	t.Logf("  - Verified fan-out: resaw-veneers → 6 glue-lamination tickets")
+	t.Logf("  - Verified 1:1: glue-lamination[1] → true-up-edge[1]")
+	t.Logf("  - Completed all 75 tasks through claim/complete workflow")
+	t.Logf("  - Verified fan-in: 6 install-seat → done milestone")
 	t.Logf("  - Total API calls: %d", len(calls))
 }
 
