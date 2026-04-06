@@ -62,9 +62,9 @@ Specs listed in priority order. Work top-down.
 | 8 | [materials-and-bom.md](materials-and-bom.md) | Bill of materials, stock thresholds, pull signals | materials, BOM, inventory, lumber, hardware, replenish, stock | |
 | 9 | [time-tracking.md](time-tracking.md) | Time event store, multiple input sources | time, clock, check-in, checkout, duration, events, sources, logging | |
 | 10 | [bottleneck-analytics.md](bottleneck-analytics.md) | Constraint identification, WIP reports, throughput | bottleneck, analytics, constraint, throughput, reports, TOC, metrics | |
-| 11 | [cli.md](cli.md) | The `nori` CLI for terminal-native workflows | CLI, terminal, commands, task, recipe, ready, pour, cobra | |
-| 12 | [mcp-server.md](mcp-server.md) | MCP protocol for LLM client integration | MCP, LLM, AI, tools, resources, opencode, claude, protocol | |
-| 13 | [ai-features.md](ai-features.md) | Embedded Ollama: recipe suggestions, capture prompts | AI, ollama, local, suggestions, prompts, summaries, inference | |
+| 11 | [cli.md](cli.md) | The `nori` CLI, AI skill for external agents, `nori init` setup | CLI, terminal, commands, task, recipe, ready, pour, cobra, skill, init, agent | |
+| 12 | [mcp-server.md](mcp-server.md) | MCP protocol for embedded AI (chat, voice, photo) | MCP, LLM, AI, tools, resources, embedded, chat, voice, internal | |
+| 13 | [ai-features.md](ai-features.md) | Embedded AI: recipe suggestions, capture prompts, BYOK | AI, ollama, local, suggestions, prompts, summaries, inference, BYOK, openai, anthropic | |
 | 14 | [passive-observation.md](passive-observation.md) | Camera/sensor integration, presence detection | camera, sensors, passive, presence, frigate, vision, detection | |
 | 15 | [recipe-marketplace.md](recipe-marketplace.md) | Public Recipe sharing, forking, community | marketplace, public, fork, share, community, open source, recipe |
 

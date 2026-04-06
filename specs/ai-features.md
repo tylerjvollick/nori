@@ -10,11 +10,27 @@
 
 ## What
 
-Embedded AI capabilities powered by a local Ollama instance. These are
-features *within* Nori itself (not the MCP server, which exposes Nori to
-*external* LLMs). The AI layer handles: recipe refinement suggestions,
-first-time capture assistance, voice-to-text transcription, photo annotation,
-bottleneck summaries in plain language, and auto-tagging.
+Embedded AI capabilities powered by a local LLM or cloud provider (BYOK).
+These are features *within* Nori itself — not the CLI skill that exposes Nori
+to external AI agents (see cli.md). The embedded AI uses the MCP server
+(see mcp-server.md) as its tool protocol to interact with Nori's service
+layer.
+
+The AI layer handles: recipe refinement suggestions, first-time capture
+assistance, voice-to-text transcription, photo annotation, bottleneck
+summaries in plain language, and auto-tagging.
+
+### Two AI Integration Layers
+
+1. **External AI agents** (OpenCode, Claude Code, Open Claw): Use the CLI
+   via a skill file. The AI runs outside Nori and operates it through shell
+   commands. This is the v1 integration — already works during development.
+
+2. **Embedded AI** (this spec): An LLM running inside or alongside Nori,
+   powering features in Nori's own UI — chat, voice, photo, recipe assist.
+   Uses MCP tools to interact with Nori's internals. This is the v2
+   integration that makes Nori AI-native for shop floor workers who don't
+   use a terminal.
 
 ## Where
 
@@ -33,25 +49,55 @@ AI inverts this: documentation happens as a side effect of working. Analysis
 happens automatically. The operator's job is to build furniture — Nori's AI
 handles the knowledge capture.
 
-Key constraint: **everything runs locally via Ollama**. No cloud AI
-dependencies. This matters for:
+Key constraint: **Nori never owns AI costs for other shops.** The default
+is local Ollama (zero external cost, full privacy). Shops that want cloud
+LLMs bring their own API key (BYOK). This matters for:
 - Shop floor privacy (photos of proprietary designs)
-- Offline operation (spotty shop wifi)
-- Cost (no per-token billing)
+- Offline operation (spotty shop wifi — local Ollama still works)
+- Cost (no per-token billing from Nori)
 - Self-hosting promise (the whole point of Nori)
+- Managed hosting viability (subscription covers infra, not AI tokens)
 
 ## How
 
-### Ollama Integration
+### LLM Provider Configuration (BYOK)
 
+Nori supports multiple LLM backends. Shops choose their own cost/quality
+tradeoff:
+
+**Local (Ollama) — Default, recommended for self-hosted:**
 - Ollama runs as an optional Docker Compose service
-- Nori communicates with Ollama via its HTTP API (localhost)
-- If Ollama is not available, AI features degrade gracefully — everything
-  still works, just without AI assistance
-- Model selection is configurable per feature (different models for different
-  tasks)
+- Models run on the shop's hardware (needs ~8GB RAM for 7B models)
+- Zero external API cost, full privacy, works offline
+- Best for: shops with a homelab or decent workstation
 
-Recommended models (subject to change as ecosystem evolves):
+**Cloud (Bring Your Own Key) — For shops without GPU hardware:**
+- Shop provides their own API key for OpenAI, Anthropic, or other providers
+- Nori proxies requests to the cloud endpoint
+- Higher quality models available (GPT-4, Claude, etc.)
+- Best for: cloud-hosted Nori, shops without local GPU
+
+**Disabled — Everything works without AI:**
+- All AI features degrade gracefully (see Graceful Degradation below)
+- No LLM container needed, no API keys needed
+- Best for: shops that just want the task/recipe workflow
+
+Nori communicates with the LLM via a provider-agnostic interface. The
+embedded AI features use MCP tools (see mcp-server.md) to query and act
+on Nori data, then pass context + tool results to the LLM for generation.
+
+```
+User (chat/voice/photo) → Nori AI Service → LLM Provider (Ollama/cloud)
+                              ↕                    ↕
+                         MCP Tools            Model response
+                              ↕
+                        Nori Service Layer
+```
+
+Model selection is configurable per feature (different models for different
+tasks):
+
+Recommended models for Ollama (subject to change as ecosystem evolves):
 - **Text generation/summarization**: Llama 3 8B or Mistral 7B (fast, good
   quality for structured tasks)
 - **Vision**: LLaVA or Llama 3 Vision (for photo understanding)
@@ -149,19 +195,37 @@ The system should never block on AI. All AI calls are async with timeouts.
 ```yaml
 ai:
   enabled: true
-  ollama_url: http://ollama:11434
-  models:
-    text: llama3:8b
-    vision: llava:13b
-    transcription: whisper
+  provider: ollama              # ollama | openai | anthropic | disabled
+  ollama:
+    url: http://ollama:11434
+    models:
+      text: llama3:8b
+      vision: llava:13b
+      transcription: whisper
+  openai:                       # only used when provider: openai
+    api_key: ${NORI_OPENAI_KEY} # env var reference, never stored in plain text
+    models:
+      text: gpt-4o-mini
+      vision: gpt-4o
+  anthropic:                    # only used when provider: anthropic
+    api_key: ${NORI_ANTHROPIC_KEY}
+    models:
+      text: claude-sonnet-4-20250514
+      vision: claude-sonnet-4-20250514
   features:
     first_time_capture: true
-    sop_refinement: true
+    recipe_refinement: true
     voice_to_text: true
     photo_understanding: true
     bottleneck_summary: true
     auto_tagging: true
 ```
+
+Environment variables for sensitive values:
+- `NORI_AI_PROVIDER` — override provider
+- `NORI_OPENAI_KEY` — OpenAI API key
+- `NORI_ANTHROPIC_KEY` — Anthropic API key
+- `NORI_OLLAMA_URL` — Ollama endpoint
 
 ### API Surface
 
@@ -189,3 +253,10 @@ POST   /api/ai/describe-image                      — Photo description endpoin
   data fine-tunes the model? (Not for v1, but architecturally interesting.)
 - Is Whisper the right transcription path, or should we lean on browser
   APIs exclusively? (Browser API is simpler; Whisper is more accurate.)
+- For the managed/hosted offering, should there be a "Nori AI" tier that
+  bundles an Ollama instance in the subscription? Or always BYOK?
+- Should the BYOK configuration be per-feature? (e.g., use local Ollama for
+  auto-tagging but cloud GPT-4 for recipe drafting.) This would let shops
+  optimize cost vs. quality per feature.
+- How do we handle provider-specific prompt formats? Abstract behind a
+  common interface, or use provider SDKs directly?

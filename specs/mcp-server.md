@@ -246,3 +246,10 @@ calls the service layer directly (in-process).
   for safety.)
 - What's the right granularity for resources? Too many small resources =
   LLM makes many calls. Too few large resources = LLM gets too much context.
+- When should we build the MCP server vs. extending the CLI? The CLI covers
+  all external AI agent use cases. MCP is only needed once we start building
+  embedded AI features (chat panel, voice input). Don't build MCP before
+  it has a consumer.
+- Should the MCP server be a separate process or embedded in the main Nori
+  server binary? Embedded is simpler (shared service layer, no IPC), but a
+  separate process is more resilient (AI crash doesn't take down the server).

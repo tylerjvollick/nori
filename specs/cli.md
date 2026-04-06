@@ -34,6 +34,7 @@ shop floor and composability for automation.
 
 ```
 nori
+  ├── init                         — First-time setup (Docker, DB, admin user, AI skill)
   ├── serve                        — Start the Nori server
   ├── login                        — Authenticate and store token
   │
@@ -82,6 +83,8 @@ nori
   │
   ├── checkin <station>            — Clock in at a station
   ├── checkout                     — Clock out
+  │
+  ├── status                       — Health check: server, DB, auth, current space
   │
   ├── station
   │     ├── list                   — List stations with WIP status
@@ -174,6 +177,88 @@ Environment variables override config:
 - Single static binary, cross-compiled for Linux/macOS/Windows
 - Tab completion supported for bash/zsh/fish (cobra native)
 
+### AI Skill (External Agent Integration)
+
+The CLI is the primary interface for external AI agents (OpenCode, Claude
+Code, Open Claw, Cursor, etc.). These agents learn to use Nori through a
+**skill file** — a markdown document that teaches the agent the available
+commands, their arguments, and common workflows.
+
+This is the same pattern used by beads (`AGENTS.md` integration block) and
+ralph-tui (config + skill). No MCP server or special protocol needed — the
+AI agent just reads the instructions and runs shell commands.
+
+**Skill file contents:**
+- Available commands and their flags
+- Common workflows (pour → ready → claim → complete loop)
+- Output format notes (`--json` for structured parsing)
+- Authentication setup (`nori login`, config file location)
+- Contextual state (current station, current task)
+
+**Installation**: `nori init` generates the skill file automatically (see
+below). It can also be appended to an existing `AGENTS.md` or placed in
+`.claude/` for Claude Code / OpenCode.
+
+**Example skill snippet:**
+```markdown
+## Nori CLI
+
+You are connected to a Nori manufacturing operations server.
+Use these commands to manage tasks, recipes, and jobs.
+
+### Quick Workflow
+nori ready                          # see what's available
+nori task claim <id>                # claim a task (starts timer)
+nori task complete                  # complete current task
+nori recipe pour <slug> --var k=v   # create job from recipe
+
+### All commands support --json for structured output.
+```
+
+The skill file is auto-generated from the CLI's cobra command tree, so it
+stays in sync as commands are added or changed.
+
+### `nori init` — First-Time Setup
+
+`nori init` scaffolds a new Nori installation:
+
+```bash
+$ nori init
+  ✓ Generated docker-compose.yml
+  ✓ Generated .env with defaults (edit to customize)
+  ✓ Started containers (server, db, web)
+  ✓ Ran database migrations
+  ✓ Created admin user (admin@localhost / <generated password>)
+  ✓ Created default space ("My Shop")
+  ✓ Wrote AI skill file → .claude/nori-skill.md
+  ✓ Appended Nori integration → AGENTS.md
+
+  Nori is running at http://localhost:3000
+  API available at http://localhost:8080/api/v1
+
+  Next steps:
+    nori login                    # authenticate the CLI
+    nori recipe create --from-toml recipes/chair.toml
+    nori recipe pour chair        # create your first job
+    nori ready                    # see available work
+```
+
+**What `nori init` does:**
+1. Generates `docker-compose.yml` with server, postgres, web, and
+   optionally ollama containers
+2. Generates `.env` with sensible defaults (JWT secret, admin email,
+   DB credentials) — user can customize before starting
+3. Starts the Docker stack (`docker compose up -d`)
+4. Runs database migrations (`nori migrate up`)
+5. Creates an admin user and default space via the API
+6. Generates the AI skill file for the detected agent environment
+   (checks for `.claude/`, `AGENTS.md`, `.cursor/`, etc.)
+
+**What `nori init` does NOT do:**
+- No cloud account creation — this is self-hosted
+- No payment or subscription — open source
+- No Ollama model pulling (optional, user can run `ollama pull` separately)
+
 ## Open Questions
 
 - Should `nori ready` be the default command (no subcommand)? i.e., just
@@ -188,3 +273,11 @@ Environment variables override config:
 
 - Should `nori task complete` auto-claim the next ready task at the same
   station, or just suggest it? Leaning toward suggest with `[Y/n]` prompt.
+
+- Should the AI skill file be auto-generated from cobra's command tree
+  (always in sync, but generic) or hand-written (more natural language,
+  better agent UX, but can drift)? Probably auto-generated with a
+  hand-written preamble.
+
+- Should `nori init` detect the host environment (Docker installed? GPU
+  available? Which AI agent?) and adapt the generated config accordingly?
