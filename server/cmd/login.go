@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 
 	"github.com/tylerjvollick/nori/internal/cli"
 )
@@ -43,20 +42,20 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	// Prompt for server URL
-	serverURL, err := promptString(reader, "Server URL")
+	serverURL, err := cli.PromptString(reader, "Server URL")
 	if err != nil {
 		return fmt.Errorf("failed to read server URL: %w", err)
 	}
 	serverURL = normalizeURL(serverURL)
 
 	// Prompt for email
-	email, err := promptString(reader, "Email")
+	email, err := cli.PromptString(reader, "Email")
 	if err != nil {
 		return fmt.Errorf("failed to read email: %w", err)
 	}
 
 	// Prompt for password (hidden)
-	password, err := promptPassword("Password")
+	password, err := cli.PromptPassword("Password")
 	if err != nil {
 		return fmt.Errorf("failed to read password: %w", err)
 	}
@@ -124,17 +123,17 @@ func runLogin(cmd *cobra.Command, args []string) error {
 // Returns the new access token on success.
 func handlePasswordChange(reader *bufio.Reader, client *cli.Client, currentToken string) (string, error) {
 	// Get the current password (user just typed it — ask again for change flow)
-	currentPassword, err := promptPassword("Current password")
+	currentPassword, err := cli.PromptPassword("Current password")
 	if err != nil {
 		return "", fmt.Errorf("failed to read current password: %w", err)
 	}
 
-	newPassword, err := promptPassword("New password")
+	newPassword, err := cli.PromptPassword("New password")
 	if err != nil {
 		return "", fmt.Errorf("failed to read new password: %w", err)
 	}
 
-	confirmPassword, err := promptPassword("Confirm new password")
+	confirmPassword, err := cli.PromptPassword("Confirm new password")
 	if err != nil {
 		return "", fmt.Errorf("failed to read password confirmation: %w", err)
 	}
@@ -176,27 +175,6 @@ func handlePasswordChange(reader *bufio.Reader, client *cli.Client, currentToken
 
 	fmt.Println("Password changed successfully.")
 	return changeResp.AccessToken, nil
-}
-
-// promptString prints a prompt and reads a line from the reader.
-func promptString(reader *bufio.Reader, prompt string) (string, error) {
-	fmt.Printf("%s: ", prompt)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(input), nil
-}
-
-// promptPassword prints a prompt and reads a password without echoing.
-func promptPassword(prompt string) (string, error) {
-	fmt.Printf("%s: ", prompt)
-	password, err := term.ReadPassword(int(os.Stdin.Fd()))
-	fmt.Println() // newline after hidden input
-	if err != nil {
-		return "", err
-	}
-	return string(password), nil
 }
 
 // normalizeURL ensures the server URL has a scheme and no trailing slash.
