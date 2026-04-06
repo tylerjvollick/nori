@@ -93,7 +93,7 @@ func New(cfg *config.Config) *App {
 	requirePasswordChanged := middleware.RequirePasswordChanged()
 
 	// ── Public routes (no auth) ────────────────────────────────────────
-	handlers.RegisterHealthRoutes(app, nil)
+	handlers.RegisterHealthRoutes(app)
 	authHandler.RegisterAuthRoutes(app)
 
 	// ── Auth-only routes (no RequirePasswordChanged) ───────────────────
