@@ -26,6 +26,12 @@ type stationItem struct {
 
 var stationJSONFlag bool
 
+// Flags for station create
+var (
+	stationCreateWIPLimit    int
+	stationCreateDescription string
+)
+
 var stationCmd = &cobra.Command{
 	Use:   "station",
 	Short: "Manage stations",
@@ -39,9 +45,20 @@ var stationListCmd = &cobra.Command{
 	RunE:  runStationList,
 }
 
+var stationCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a new station",
+	Long:  "Create a new station in the current space (admin only). The station is appended to the end of the display order.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runStationCreate,
+}
+
 func init() {
 	stationCmd.PersistentFlags().BoolVar(&stationJSONFlag, "json", false, "Output as JSON")
+	stationCreateCmd.Flags().IntVar(&stationCreateWIPLimit, "wip-limit", 1, "WIP limit for the station")
+	stationCreateCmd.Flags().StringVar(&stationCreateDescription, "description", "", "Station description")
 	stationCmd.AddCommand(stationListCmd)
+	stationCmd.AddCommand(stationCreateCmd)
 	rootCmd.AddCommand(stationCmd)
 }
 
@@ -96,4 +113,55 @@ func runStationList(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", s.Name, s.WIPCount, s.WIPLimit, s.BufferSize, active)
 	}
 	return w.Flush()
+}
+
+// runStationCreate implements `nori station create <name>`.
+func runStationCreate(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return err
+	}
+
+	client := newClientWithSpace(creds)
+
+	body := map[string]interface{}{
+		"name":     name,
+		"wipLimit": stationCreateWIPLimit,
+	}
+	if stationCreateDescription != "" {
+		body["description"] = stationCreateDescription
+	}
+
+	resp, err := client.Post("/api/v1/stations", body)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("server error: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var station stationItem
+	if err := cli.ReadJSON(resp, &station); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if stationJSONFlag {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(station)
+	}
+
+	fmt.Printf("Created station: %s (WIP limit: %d)\n", station.Name, station.WIPLimit)
+	return nil
 }
