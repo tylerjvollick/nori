@@ -13,8 +13,13 @@ services:
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_SIZE: 1073741824
       ALLOWED_MIME_TYPES: image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm
+      NORI_JWT_SECRET: dev-jwt-secret-change-me
+      NORI_ADMIN_EMAIL: admin@nori.dev
+      NORI_ADMIN_PASSWORD: admin
+      NORI_ACCOUNT_NAME: Nori Dev
     depends_on:
-      - database
+      database:
+        condition: service_healthy
     ports:
       - "8080:8080"
     volumes:

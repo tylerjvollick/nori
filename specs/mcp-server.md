@@ -2,38 +2,64 @@
 
 ## Who
 
-- **Shop owners / operators using LLM tools**: Interact with Nori through
-  natural language via OpenCode, Claude Desktop, or any MCP-compatible client.
-- **Developers**: Build custom AI integrations on top of Nori's data.
+- **Nori's embedded AI**: The internal LLM (Ollama or cloud provider) uses
+  MCP tools to query and act on Nori data — powering chat, voice, photo
+  understanding, and recipe assistance features within the Nori app itself.
+- **Future external integrations**: Remote AI clients that can't use the CLI
+  directly (e.g., a mobile app, a hosted AI assistant).
 
 ## What
 
 A Model Context Protocol (MCP) server that exposes Nori's data and actions
-as tools and resources that LLM clients can use. This enables natural language
-interaction with the production system: "What's the bottleneck this week?",
-"Log 30 minutes at joinery for task abc.3", "What's the next ready task for
-the dining table job?"
+as structured tools for AI consumption. This is the **internal tool protocol**
+that connects Nori's embedded AI features (see ai-features.md) to Nori's
+service layer.
+
+**Important distinction — two integration layers:**
+
+1. **CLI skill (external AI agents)**: For AI tools with shell access
+   (OpenCode, Claude Code, Open Claw, Cursor), the CLI *is* the AI
+   interface. A markdown skill file teaches the agent the commands. This is
+   the primary integration path for development, automation, and power users.
+   See cli.md for the skill specification.
+
+2. **MCP server (embedded AI)**: For AI running *inside* Nori's own
+   interface — chat panels, voice input, photo understanding — where there's
+   no shell to run commands. MCP provides structured tool definitions so the
+   embedded LLM can interact with Nori's internals directly.
+
+The CLI skill is v1. The MCP server is needed when we build the embedded AI
+features (ai-features.md).
 
 ## Where
 
 - Backend: MCP server endpoint in the Go binary (separate port or path from
   the REST API)
-- Protocol: MCP specification (JSON-RPC over stdio or SSE)
-- Connects to: OpenCode, Claude Desktop, or any MCP-compatible client
+- Protocol: MCP specification (JSON-RPC over stdio or HTTP+SSE)
+- Primary consumer: Nori's own AI service layer (Ollama sidecar)
+- Secondary consumer: Remote MCP-compatible clients (future)
 
 ## Why
 
-This is what makes the current OpenCode + Jira + Confluence workflow native
-to Nori. Instead of the LLM bridging three disconnected systems, it talks
-directly to one system that understands manufacturing.
+The CLI covers external AI agents well, but it requires shell access. The
+MCP server exists for cases where the AI doesn't have a shell:
 
-The MCP approach means:
-- **No custom integration per LLM client** — any tool that speaks MCP works
-- **The LLM is the UI for hands-dirty situations** — voice command to OpenCode
-  while your hands are covered in wood glue
-- **Nori stays the system of record** — the LLM reads/writes Nori data, it
-  doesn't replace it
-- **Users choose their LLM** — OpenCode today, something else tomorrow
+- **Embedded chat in the Nori web UI**: A shop worker asks "what should I
+  work on next?" — the embedded LLM calls MCP tools to query the ready queue
+  and dependency graph, then responds in plain language.
+- **Voice input on the shop floor**: "Hey Nori, I'm done with the mortises"
+  — speech-to-text produces text, the embedded LLM interprets it and calls
+  `nori_task_complete` via MCP.
+- **Photo understanding**: Operator snaps a photo of a defect — the vision
+  model describes it and the embedded LLM uses MCP to create a deviation note.
+- **Recipe drafting**: "Make a recipe like the dining table but simpler" —
+  the LLM reads existing recipes via MCP resources and generates a new TOML.
+
+MCP is the standard protocol for this. It means:
+- **No custom integration per LLM** — Ollama, OpenAI, Anthropic all work
+  through the same tool definitions
+- **Nori stays the system of record** — the LLM reads/writes Nori data
+- **Users bring their own LLM** — local Ollama or cloud provider (BYOK)
 
 ## How
 
@@ -171,21 +197,42 @@ The MCP server authenticates via the same mechanism as the REST API:
 ### Implementation
 
 - Built in Go alongside the REST API server
-- MCP transport: **stdio** for local use (OpenCode), **SSE** for remote
+- MCP transport: **stdio** for local embedded use, **HTTP+SSE** for remote
   clients
 - Tools and resources are registered at server startup
-- Each tool validates inputs, calls the same service layer as the REST API,
-  and returns structured results
+- Each tool validates inputs, calls the same service layer as the REST API
+  and CLI, and returns structured results
 - MCP server can be enabled/disabled via config flag
+- The MCP server is a consumer of the same backend services as the REST API
+  and CLI — no duplication of business logic
 
-### Relationship to CLI
+### Relationship to CLI and REST API
 
-The MCP server and CLI serve similar functions (interact with Nori
-programmatically) but for different audiences:
-- **CLI**: Explicit commands, scriptable, for users who know what they want
-- **MCP**: Natural language, AI-mediated, for hands-dirty or exploratory use
+Three interfaces, one service layer:
 
-Both call the same backend service layer. No duplication of business logic.
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Nori Service Layer                   │
+│  (tasks, recipes, ready-work, time tracking, analytics) │
+└────────┬──────────────────┬──────────────────┬──────────┘
+         │                  │                  │
+    REST API            CLI (cobra)        MCP Server
+         │                  │                  │
+    Web frontend     External AI agents   Embedded AI
+    (SvelteKit)      (OpenCode, Claude    (chat panel,
+                      Code, Open Claw)    voice, photo,
+                                          recipe assist)
+```
+
+- **REST API**: Powers the web frontend. Standard HTTP endpoints.
+- **CLI**: Powers external AI agents via skill files AND human operators
+  via terminal. The CLI is the primary AI integration for v1.
+- **MCP**: Powers embedded AI features inside Nori's own UI. Needed when
+  we build the chat/voice/photo features from ai-features.md.
+
+All three call the same service layer. The CLI and MCP server are both
+thin wrappers — the CLI wraps HTTP calls to the REST API, the MCP server
+calls the service layer directly (in-process).
 
 ## Open Questions
 
