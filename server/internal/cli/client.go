@@ -16,6 +16,7 @@ import (
 type Client struct {
 	ServerURL  string
 	Token      string
+	SpaceID    string
 	httpClient *http.Client
 }
 
@@ -65,6 +66,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
+	if c.SpaceID != "" {
+		req.Header.Set("X-Space-ID", c.SpaceID)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -110,6 +114,14 @@ var isInteractiveFunc = defaultIsInteractive
 // Used to decide whether to prompt for re-authentication on 401.
 func IsInteractive() bool {
 	return isInteractiveFunc()
+}
+
+// SetIsInteractiveFunc overrides the interactive check for testing.
+// Returns the previous function so callers can restore it with defer.
+func SetIsInteractiveFunc(fn func() bool) func() bool {
+	prev := isInteractiveFunc
+	isInteractiveFunc = fn
+	return prev
 }
 
 func defaultIsInteractive() bool {
