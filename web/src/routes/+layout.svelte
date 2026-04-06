@@ -7,7 +7,6 @@
 	import { authStore } from '$lib/stores/auth';
 	import { themeStore } from '$lib/stores/theme';
 	import AppSidebar from '$lib/components/AppSidebar.svelte';
-	import CreateTaskModal from '$lib/components/CreateTaskModal.svelte';
 	import CreateSOPModal from '$lib/components/CreateSOPModal.svelte';
 	import SearchForm from '$lib/components/SearchForm.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
@@ -17,7 +16,6 @@
 
 	let { children } = $props();
 
-	let showCreateTaskModal = $state(false);
 	let showCreateSOPModal = $state(false);
 	let showCreateDropdown = $state(false);
 	let theme: 'light' | 'dark' = $state('light');
@@ -42,18 +40,9 @@
 		themeStore.initialize();
 	});
 
-	function handleOpenCreateTask() {
-		showCreateTaskModal = true;
-		showCreateDropdown = false;
-	}
-
 	function handleOpenCreateSOP() {
 		showCreateSOPModal = true;
 		showCreateDropdown = false;
-	}
-
-	function handleCloseCreateTask() {
-		showCreateTaskModal = false;
 	}
 
 	function handleCloseCreateSOP() {
@@ -120,30 +109,7 @@
 								onkeydown={(e) => e.key === 'Escape' && closeDropdown()}
 							>
 								<Button
-									onclick={handleOpenCreateTask}
-									variant="ghost"
-									class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
-								>
-									<svg
-										class="w-5 h-5 text-primary mt-0.5"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-										/>
-									</svg>
-									<div>
-										<div class="text-sm font-medium text-foreground">Task</div>
-										<div class="text-xs text-muted-foreground">From SOP template</div>
-									</div>
-								</Button>
-								<Button
-									onclick={handleOpenCreateSOP}
+								onclick={handleOpenCreateSOP}
 									variant="ghost"
 									class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
 								>
@@ -203,5 +169,4 @@
 {/if}
 
 <!-- Modals -->
-<CreateTaskModal isOpen={showCreateTaskModal} onClose={handleCloseCreateTask} />
 <CreateSOPModal isOpen={showCreateSOPModal} onClose={handleCloseCreateSOP} />
