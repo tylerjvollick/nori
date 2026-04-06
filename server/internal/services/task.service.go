@@ -146,6 +146,114 @@ func (s *TaskService) ClaimTask(taskID string, userID uuid.UUID) (*models.Task, 
 	return task, nil
 }
 
+// CompleteTask marks a task as done. Only the assigned user can complete it,
+// and the task must be in "active" status. All blocking dependencies must be
+// resolved (in a terminal status: done, skipped, or cancelled).
+// If all sibling tasks under the same parent are now done, the parent is
+// auto-completed as well.
+func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate status: must be active (in_progress).
+	if task.Status != models.TaskStatusActive {
+		return nil, fmt.Errorf("task %q cannot be completed: status is %q, must be %q", taskID, task.Status, models.TaskStatusActive)
+	}
+
+	// Validate assignee: must be assigned to the requesting user.
+	if task.AssignedToID == nil || *task.AssignedToID != userID {
+		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
+	}
+
+	// Check blocking dependencies are resolved.
+	// GetDependents returns deps where from_task_id = taskID (i.e., deps that this task has).
+	// We filter for type "blocks" and check each blocker's status.
+	deps, err := s.taskDepRepo.GetDependents(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check dependencies for task %q: %w", taskID, err)
+	}
+
+	for _, dep := range deps {
+		if dep.Type != models.DepTypeBlocks {
+			continue
+		}
+		blocker, err := s.taskRepo.GetByID(dep.ToTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to look up blocking task %q: %w", dep.ToTaskID, err)
+		}
+		if !isTerminalStatus(blocker.Status) {
+			return nil, fmt.Errorf("task %q cannot be completed: blocked by task %q (status %q)", taskID, blocker.ID, blocker.Status)
+		}
+	}
+
+	// Mark task as done.
+	now := time.Now()
+	task.Status = models.TaskStatusDone
+	task.CompletedAt = &now
+	task.UpdatedAt = now
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, err
+	}
+
+	// Auto-complete parent if all siblings are done.
+	if task.ParentID != nil {
+		if err := s.maybeCompleteParent(*task.ParentID); err != nil {
+			// Log but don't fail the completion — the task itself is done.
+			// In a production system we'd log this; for now we silently ignore.
+			_ = err
+		}
+	}
+
+	return task, nil
+}
+
+// maybeCompleteParent checks if all children of the given parent task are in
+// a terminal status, and if so, auto-completes the parent.
+func (s *TaskService) maybeCompleteParent(parentID string) error {
+	parent, err := s.taskRepo.GetByID(parentID)
+	if err != nil {
+		return fmt.Errorf("failed to look up parent task %q: %w", parentID, err)
+	}
+
+	// Only auto-complete if parent is still in an active-ish state.
+	if parent.Status == models.TaskStatusDone || parent.Status == models.TaskStatusCancelled || parent.Status == models.TaskStatusSkipped {
+		return nil
+	}
+
+	children, err := s.taskRepo.GetChildren(parentID)
+	if err != nil {
+		return fmt.Errorf("failed to get children of task %q: %w", parentID, err)
+	}
+
+	if len(children) == 0 {
+		return nil
+	}
+
+	for _, child := range children {
+		if !isTerminalStatus(child.Status) {
+			return nil // at least one child is not done
+		}
+	}
+
+	// All children are in terminal status — auto-complete parent.
+	now := time.Now()
+	parent.Status = models.TaskStatusDone
+	parent.CompletedAt = &now
+	parent.UpdatedAt = now
+
+	return s.taskRepo.Update(parent)
+}
+
+// isTerminalStatus returns true if the status indicates the task is finished.
+func isTerminalStatus(status models.TaskStatus) bool {
+	return status == models.TaskStatusDone ||
+		status == models.TaskStatusSkipped ||
+		status == models.TaskStatusCancelled
+}
+
 // PauseTask pauses an active task. Only the assigned user can pause it.
 // Returns an error if the task is not in "active" status or is not assigned to the user.
 func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, error) {
