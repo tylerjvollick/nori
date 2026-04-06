@@ -36,7 +36,10 @@
 
 	onMount(() => {
 		// Initialize the client-side auth store for API calls (logout, etc.)
-		authStore.initialize();
+		// Skip on auth pages to avoid a 401 → redirect loop when not logged in.
+		if (!isAuthPage()) {
+			authStore.initialize();
+		}
 		themeStore.initialize();
 	});
 
