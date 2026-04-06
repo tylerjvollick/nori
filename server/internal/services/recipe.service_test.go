@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -1148,5 +1149,394 @@ func TestPromoteJobToRecipe_PreservesDependencies(t *testing.T) {
 	}
 	if len(assembleStep.DependsOn) != 1 || assembleStep.DependsOn[0] != "cut" {
 		t.Errorf("expected assemble depends_on [cut], got %v", assembleStep.DependsOn)
+	}
+}
+
+// --- Batch-Aware Pour Tests ---
+
+// batchTOML returns a recipe with explicit batch_size on steps.
+// order_qty=6, cut has batch_size=6 (1 batch ticket), sand has batch_size=1 (6 per-piece tickets).
+func batchTOML() string {
+	return `
+formula = "batch-build"
+description = "Build {{product}}"
+version = 1
+type = "workflow"
+
+[vars.product]
+description = "Product name"
+required = true
+
+[vars.order_qty]
+description = "Number of pieces to produce"
+required = true
+
+[vars.batch_size]
+default = "1"
+
+[[steps]]
+id = "cut"
+title = "Cut all parts"
+type = "task"
+batch_size = 6
+
+[[steps]]
+id = "sand"
+title = "Sand piece — {{n}} of {{batch_count}}"
+type = "task"
+batch_size = 1
+depends_on = ["cut"]
+`
+}
+
+func TestPourRecipe_BatchStep_OneBatchTicket(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	vars := map[string]string{"product": "Chair", "order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// "cut" has batch_size=6, order_qty=6 → ticket_count=1 → 1 task.
+	cutTaskID := rootTask.ID + ".1"
+	cutTask, ok := taskRepo.tasks[cutTaskID]
+	if !ok {
+		t.Fatalf("expected batch task at %q", cutTaskID)
+	}
+	if cutTask.Title != "Cut all parts" {
+		t.Errorf("expected title %q, got %q", "Cut all parts", cutTask.Title)
+	}
+	if cutTask.Quantity != 6 {
+		t.Errorf("expected Quantity 6, got %d", cutTask.Quantity)
+	}
+}
+
+func TestPourRecipe_PerPieceStep_MultipleTickets(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	vars := map[string]string{"product": "Chair", "order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// "sand" has batch_size=1, order_qty=6 → ticket_count=6 → 6 tasks.
+	// They occupy positions .2 through .7 (cut is .1).
+	for n := 1; n <= 6; n++ {
+		taskID := fmt.Sprintf("%s.%d", rootTask.ID, n+1) // +1 because cut is .1
+		task, ok := taskRepo.tasks[taskID]
+		if !ok {
+			t.Fatalf("expected per-piece task at %q", taskID)
+		}
+
+		expectedTitle := fmt.Sprintf("Sand piece — %d of 6", n)
+		if task.Title != expectedTitle {
+			t.Errorf("task %s: expected title %q, got %q", taskID, expectedTitle, task.Title)
+		}
+		if task.Quantity != 1 {
+			t.Errorf("task %s: expected Quantity 1, got %d", taskID, task.Quantity)
+		}
+	}
+
+	// Total child tasks under root: 1 (cut) + 6 (sand) = 7.
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 7 {
+		t.Errorf("expected 7 child tasks, got %d", childCount)
+	}
+}
+
+func TestPourRecipe_BatchAware_StepToTaskIDsMap(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	vars := map[string]string{"product": "Chair", "order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	// Verify dependency edges: each sand task depends on the cut task.
+	// sand has 6 tasks, cut has 1 → 6 dependency edges.
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 6 {
+		t.Fatalf("expected 6 dependency edges, got %d", len(depRepo.deps))
+	}
+
+	cutTaskID := rootTask.ID + ".1"
+	for _, dep := range depRepo.deps {
+		if dep.ToTaskID != cutTaskID {
+			t.Errorf("expected all deps to point to cut task %q, got ToTaskID %q", cutTaskID, dep.ToTaskID)
+		}
+	}
+}
+
+func TestPourRecipe_BatchAware_UnevenDivisionError(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	// order_qty=7 is not evenly divisible by batch_size=6 (for cut step).
+	vars := map[string]string{"product": "Chair", "order_qty": "7"}
+	_, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err == nil {
+		t.Fatal("expected error for uneven division, got nil")
+	}
+}
+
+func TestPourRecipe_BatchAware_NoOrderQty(t *testing.T) {
+	// When order_qty is not provided, it defaults to the recipe-level batch_size (1).
+	// This means ticket_count = 1/1 = 1 for each step → no per-piece expansion.
+	svc, recipeID, spaceID, userID := setupRecipeService(simpleTOML())
+
+	vars := map[string]string{"product": "Chair"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	// Should still create exactly 2 child tasks (cut, assemble) — no batch expansion.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 2 {
+		t.Errorf("expected 2 child tasks, got %d", childCount)
+	}
+
+	// All tasks should have Quantity = 1 (default).
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			if task.Quantity != 1 {
+				t.Errorf("task %s: expected Quantity 1, got %d", task.ID, task.Quantity)
+			}
+		}
+	}
+}
+
+// allBatchTOML returns a recipe where all steps have batch_size = order_qty,
+// so every step produces exactly 1 ticket.
+func allBatchTOML() string {
+	return `
+formula = "all-batch"
+description = "All batch steps"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "prep"
+title = "Prep materials"
+type = "task"
+batch_size = 4
+
+[[steps]]
+id = "assemble"
+title = "Assemble"
+type = "task"
+batch_size = 4
+depends_on = ["prep"]
+`
+}
+
+func TestPourRecipe_AllBatchSteps(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(allBatchTOML())
+
+	vars := map[string]string{"order_qty": "4"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// Both steps have batch_size=4, order_qty=4 → 1 ticket each.
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+			if task.Quantity != 4 {
+				t.Errorf("task %s: expected Quantity 4, got %d", task.ID, task.Quantity)
+			}
+		}
+	}
+	if childCount != 2 {
+		t.Errorf("expected 2 child tasks, got %d", childCount)
+	}
+
+	// 1 dependency edge: assemble → prep.
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 1 {
+		t.Errorf("expected 1 dependency edge, got %d", len(depRepo.deps))
+	}
+}
+
+// perPieceChainTOML returns a recipe where two per-piece steps are chained.
+func perPieceChainTOML() string {
+	return `
+formula = "per-piece-chain"
+description = "Per-piece chain"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+required = true
+
+[[steps]]
+id = "sand"
+title = "Sand piece {{n}}"
+type = "task"
+batch_size = 1
+
+[[steps]]
+id = "finish"
+title = "Finish piece {{n}}"
+type = "task"
+batch_size = 1
+depends_on = ["sand"]
+`
+}
+
+func TestPourRecipe_PerPieceChain_FanInDependencies(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(perPieceChainTOML())
+
+	vars := map[string]string{"order_qty": "3"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// sand: 3 tasks (.1, .2, .3), finish: 3 tasks (.4, .5, .6).
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 6 {
+		t.Errorf("expected 6 child tasks, got %d", childCount)
+	}
+
+	// Fan-in: each finish task depends on ALL sand tasks → 3 * 3 = 9 edges.
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 9 {
+		t.Errorf("expected 9 dependency edges (3 finish × 3 sand), got %d", len(depRepo.deps))
+	}
+
+	// Verify titles use {{n}} substitution.
+	for n := 1; n <= 3; n++ {
+		sandID := fmt.Sprintf("%s.%d", rootTask.ID, n)
+		sandTask, ok := taskRepo.tasks[sandID]
+		if !ok {
+			t.Fatalf("expected sand task at %q", sandID)
+		}
+		expectedTitle := fmt.Sprintf("Sand piece %d", n)
+		if sandTask.Title != expectedTitle {
+			t.Errorf("task %s: expected title %q, got %q", sandID, expectedTitle, sandTask.Title)
+		}
+
+		finishID := fmt.Sprintf("%s.%d", rootTask.ID, n+3)
+		finishTask, ok := taskRepo.tasks[finishID]
+		if !ok {
+			t.Fatalf("expected finish task at %q", finishID)
+		}
+		expectedTitle = fmt.Sprintf("Finish piece %d", n)
+		if finishTask.Title != expectedTitle {
+			t.Errorf("task %s: expected title %q, got %q", finishID, expectedTitle, finishTask.Title)
+		}
+	}
+}
+
+func TestPourRecipe_BatchAware_InvalidOrderQty(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	// Non-integer order_qty.
+	vars := map[string]string{"product": "Chair", "order_qty": "abc"}
+	_, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err == nil {
+		t.Fatal("expected error for non-integer order_qty, got nil")
+	}
+}
+
+func TestPourRecipe_BatchAware_ZeroOrderQty(t *testing.T) {
+	svc, recipeID, spaceID, userID := setupRecipeService(batchTOML())
+
+	vars := map[string]string{"product": "Chair", "order_qty": "0"}
+	_, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err == nil {
+		t.Fatal("expected error for zero order_qty, got nil")
+	}
+}
+
+func TestPourRecipe_BatchAware_RootJobAndMilestoneUnchanged(t *testing.T) {
+	// Milestones and the root job should be unaffected by batch logic.
+	toml := `
+formula = "milestone-test"
+description = "Build with milestone"
+version = 1
+type = "workflow"
+
+[vars.order_qty]
+default = "6"
+
+[[steps]]
+id = "cut"
+title = "Cut parts"
+type = "task"
+batch_size = 6
+
+[[steps]]
+id = "done"
+title = "All done"
+type = "milestone"
+batch_size = 6
+depends_on = ["cut"]
+`
+	svc, recipeID, spaceID, userID := setupRecipeService(toml)
+
+	vars := map[string]string{"order_qty": "6"}
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	// Root job should be a job type.
+	if rootTask.Type != models.TaskTypeJob {
+		t.Errorf("expected root type %q, got %q", models.TaskTypeJob, rootTask.Type)
+	}
+
+	// Milestone should be created as a milestone type.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	milestoneID := rootTask.ID + ".2"
+	milestone, ok := taskRepo.tasks[milestoneID]
+	if !ok {
+		t.Fatalf("expected milestone task at %q", milestoneID)
+	}
+	if milestone.Type != models.TaskTypeMilestone {
+		t.Errorf("expected milestone type %q, got %q", models.TaskTypeMilestone, milestone.Type)
+	}
+
+	// Both are batch steps (batch_size=6, order_qty=6 → 1 ticket each).
+	childCount := 0
+	for _, task := range taskRepo.tasks {
+		if task.ParentID != nil && *task.ParentID == rootTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 2 {
+		t.Errorf("expected 2 child tasks, got %d", childCount)
 	}
 }

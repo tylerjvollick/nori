@@ -100,7 +100,7 @@ func (s *RecipeService) PourRecipe(
 	}
 
 	// 4. Process steps through the formula pipeline:
-	//    resolve loop counts → conditions → control flow → variable substitution
+	//    resolve loop counts → conditions → control flow → batch sizes
 	steps := f.Steps
 
 	// Resolve template expressions in loop count fields (e.g., "{{batch_size}}" → 6).
@@ -118,6 +118,30 @@ func (s *RecipeService) PourRecipe(
 	steps, err = formula.ApplyControlFlow(steps, f.Compose)
 	if err != nil {
 		return nil, fmt.Errorf("applying control flow: %w", err)
+	}
+
+	// Resolve batch sizes on all steps (explicit → inherited → default).
+	// The recipe-level default comes from vars["batch_size"] or falls back to 1.
+	defaultBatchSize := 1
+	if bsStr, ok := allVars["batch_size"]; ok {
+		if bs, err := strconv.Atoi(bsStr); err == nil && bs > 0 {
+			defaultBatchSize = bs
+		}
+	}
+	formula.ResolveBatchSizes(steps, defaultBatchSize)
+
+	// Parse order_qty from vars. If not provided, default to the recipe-level
+	// batch_size (meaning every step gets exactly 1 ticket).
+	orderQty := defaultBatchSize
+	if oqStr, ok := allVars["order_qty"]; ok {
+		oq, err := strconv.Atoi(oqStr)
+		if err != nil {
+			return nil, fmt.Errorf("order_qty %q is not a valid integer", oqStr)
+		}
+		if oq <= 0 {
+			return nil, fmt.Errorf("order_qty must be > 0, got %d", oq)
+		}
+		orderQty = oq
 	}
 
 	// 5. Build the root task (not yet persisted).
@@ -154,13 +178,15 @@ func (s *RecipeService) PourRecipe(
 		}
 
 		// Create child tasks from formula steps with hierarchical IDs.
-		stepToTaskID := make(map[string]string)
-		if err := createChildTasks(taskRepo, rootID, spaceID, createdByID, steps, allVars, &recipeID, recipe.CurrentVersionID, now, stepToTaskID); err != nil {
+		// stepToTaskIDs maps formula step ID → list of created task IDs.
+		// Per-piece steps create multiple tasks; batch steps create one.
+		stepToTaskIDs := make(map[string][]string)
+		if err := createChildTasks(taskRepo, rootID, spaceID, createdByID, steps, allVars, &recipeID, recipe.CurrentVersionID, now, stepToTaskIDs, orderQty); err != nil {
 			return fmt.Errorf("creating child tasks: %w", err)
 		}
 
 		// Create TaskDep edges from formula step dependencies.
-		if err := createDependencyEdges(taskDepRepo, steps, stepToTaskID); err != nil {
+		if err := createDependencyEdges(taskDepRepo, steps, stepToTaskIDs); err != nil {
 			return fmt.Errorf("creating dependency edges: %w", err)
 		}
 
@@ -188,7 +214,13 @@ func (s *RecipeService) PourRecipe(
 
 // createChildTasks recursively creates child tasks from formula steps.
 // Each step gets a hierarchical ID: parentID.1, parentID.2, etc.
-// The stepToTaskID map is populated with formula step ID → task ID mappings.
+//
+// Batch-aware: for each step, ticket count = orderQty / step.BatchSize.
+//   - ticket_count == 1 (batch step): creates 1 task with Quantity = batch_size.
+//   - ticket_count > 1 (per-piece step): creates N tasks, each with Quantity = batch_size.
+//     Titles support {{n}} (1-based piece number) and {{batch_count}} (total tickets).
+//
+// The stepToTaskIDs map is populated with formula step ID → []taskID.
 func createChildTasks(
 	taskRepo TaskRepositoryInterface,
 	parentID string,
@@ -199,18 +231,25 @@ func createChildTasks(
 	recipeID *uuid.UUID,
 	recipeVersionID *int,
 	now time.Time,
-	stepToTaskID map[string]string,
+	stepToTaskIDs map[string][]string,
+	orderQty int,
 ) error {
-	for i, step := range steps {
-		childID := fmt.Sprintf("%s.%d", parentID, i+1)
-		stepToTaskID[step.ID] = childID
+	// childSeq tracks the next child sequence number under parentID.
+	// This auto-increments as we create tasks, even when a per-piece step
+	// creates multiple tasks (each gets its own sequence number).
+	childSeq := 1
 
-		title := formula.Substitute(step.Title, vars)
-		var description *string
-		if step.Description != "" {
-			desc := formula.Substitute(step.Description, vars)
-			description = &desc
+	for _, step := range steps {
+		batchSize := 1
+		if step.BatchSize != nil {
+			batchSize = *step.BatchSize
 		}
+
+		// Calculate ticket count.
+		if orderQty%batchSize != 0 {
+			return fmt.Errorf("step %q: order_qty %d is not evenly divisible by batch_size %d", step.ID, orderQty, batchSize)
+		}
+		ticketCount := orderQty / batchSize
 
 		taskType := models.TaskTypeTask
 		if step.Type == "milestone" {
@@ -224,30 +263,56 @@ func createChildTasks(
 			priority = *step.Priority
 		}
 
-		task := &models.Task{
-			ID:              childID,
-			SpaceID:         spaceID,
-			ParentID:        &parentID,
-			CreatedByID:     createdByID,
-			RecipeID:        recipeID,
-			RecipeVersionID: recipeVersionID,
-			Type:            taskType,
-			Status:          models.TaskStatusOpen,
-			Title:           title,
-			Description:     description,
-			Priority:        priority,
-			DisplayOrder:    i + 1,
-			CreatedAt:       now,
-			UpdatedAt:       now,
+		var description *string
+		if step.Description != "" {
+			desc := formula.Substitute(step.Description, vars)
+			description = &desc
 		}
 
-		if err := taskRepo.Create(task); err != nil {
-			return fmt.Errorf("creating task for step %q: %w", step.ID, err)
+		var taskIDs []string
+
+		for n := 1; n <= ticketCount; n++ {
+			childID := fmt.Sprintf("%s.%d", parentID, childSeq)
+			childSeq++
+
+			// Build title with {{n}} and {{batch_count}} substitution.
+			title := formula.Substitute(step.Title, vars)
+			if ticketCount > 1 {
+				title = strings.ReplaceAll(title, "{{n}}", strconv.Itoa(n))
+				title = strings.ReplaceAll(title, "{{batch_count}}", strconv.Itoa(ticketCount))
+			}
+
+			task := &models.Task{
+				ID:              childID,
+				SpaceID:         spaceID,
+				ParentID:        &parentID,
+				CreatedByID:     createdByID,
+				RecipeID:        recipeID,
+				RecipeVersionID: recipeVersionID,
+				Type:            taskType,
+				Status:          models.TaskStatusOpen,
+				Title:           title,
+				Description:     description,
+				Quantity:        batchSize,
+				Priority:        priority,
+				DisplayOrder:    childSeq - 1, // use the sequence number we just used
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}
+
+			if err := taskRepo.Create(task); err != nil {
+				return fmt.Errorf("creating task for step %q (ticket %d/%d): %w", step.ID, n, ticketCount, err)
+			}
+
+			taskIDs = append(taskIDs, childID)
 		}
+
+		stepToTaskIDs[step.ID] = taskIDs
 
 		// Recursively create children if the step has nested children.
+		// Children are created under the first task of this step.
 		if len(step.Children) > 0 {
-			if err := createChildTasks(taskRepo, childID, spaceID, createdByID, step.Children, vars, recipeID, recipeVersionID, now, stepToTaskID); err != nil {
+			if err := createChildTasks(taskRepo, taskIDs[0], spaceID, createdByID, step.Children, vars, recipeID, recipeVersionID, now, stepToTaskIDs, orderQty); err != nil {
 				return err
 			}
 		}
@@ -258,9 +323,14 @@ func createChildTasks(
 
 // createDependencyEdges creates TaskDep edges from formula step dependencies.
 // It processes both DependsOn and Needs fields (which are semantically equivalent).
-func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*formula.Step, stepToTaskID map[string]string) error {
+//
+// Because batch-aware steps can create multiple tasks per step, dependencies
+// use fan-in: each task created for the dependent step depends on ALL tasks
+// created for the dependency step. This ensures per-piece work can't start
+// until all pieces of the upstream step are complete.
+func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*formula.Step, stepToTaskIDs map[string][]string) error {
 	for _, step := range steps {
-		taskID, ok := stepToTaskID[step.ID]
+		taskIDs, ok := stepToTaskIDs[step.ID]
 		if !ok {
 			continue
 		}
@@ -271,28 +341,33 @@ func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*form
 		allDeps = append(allDeps, step.Needs...)
 
 		for _, depStepID := range allDeps {
-			depTaskID, ok := stepToTaskID[depStepID]
+			depTaskIDs, ok := stepToTaskIDs[depStepID]
 			if !ok {
 				// Dependency references a step that was filtered out or doesn't exist.
 				// Skip silently — this can happen when conditions filter steps.
 				continue
 			}
 
-			dep := &models.TaskDep{
-				ID:         uuid.New(),
-				FromTaskID: taskID,
-				ToTaskID:   depTaskID,
-				Type:       models.DepTypeBlocks,
-			}
+			// Fan-in: every task for this step depends on every task for the dep step.
+			for _, taskID := range taskIDs {
+				for _, depTaskID := range depTaskIDs {
+					dep := &models.TaskDep{
+						ID:         uuid.New(),
+						FromTaskID: taskID,
+						ToTaskID:   depTaskID,
+						Type:       models.DepTypeBlocks,
+					}
 
-			if err := taskDepRepo.AddDep(dep); err != nil {
-				return fmt.Errorf("adding dependency %s → %s: %w", taskID, depTaskID, err)
+					if err := taskDepRepo.AddDep(dep); err != nil {
+						return fmt.Errorf("adding dependency %s → %s: %w", taskID, depTaskID, err)
+					}
+				}
 			}
 		}
 
 		// Recursively process children.
 		if len(step.Children) > 0 {
-			if err := createDependencyEdges(taskDepRepo, step.Children, stepToTaskID); err != nil {
+			if err := createDependencyEdges(taskDepRepo, step.Children, stepToTaskIDs); err != nil {
 				return err
 			}
 		}
