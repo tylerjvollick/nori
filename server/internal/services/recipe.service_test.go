@@ -495,3 +495,303 @@ func TestGenerateTaskID(t *testing.T) {
 		t.Errorf("expected unique IDs, got same: %q", id)
 	}
 }
+
+// --- Diff Tests ---
+
+// setupDiffTest pours a recipe and returns the service, root task, and recipe version ID
+// for use in diff tests. Optionally mutates the poured task tree before returning.
+func setupDiffTest(t *testing.T, tomlContent string, vars map[string]string) (*RecipeService, *models.Task, int) {
+	t.Helper()
+	svc, recipeID, spaceID, userID := setupRecipeService(tomlContent)
+
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	return svc, rootTask, 1 // version ID is always 1 in setupRecipeService
+}
+
+func TestDiffJobToRecipe_NoDifferences(t *testing.T) {
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Dining Table"})
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	if diff.JobID != rootTask.ID {
+		t.Errorf("expected JobID %q, got %q", rootTask.ID, diff.JobID)
+	}
+	if diff.RecipeVersionID != versionID {
+		t.Errorf("expected RecipeVersionID %d, got %d", versionID, diff.RecipeVersionID)
+	}
+	if len(diff.Added) != 0 {
+		t.Errorf("expected 0 added, got %d: %+v", len(diff.Added), diff.Added)
+	}
+	if len(diff.Removed) != 0 {
+		t.Errorf("expected 0 removed, got %d: %+v", len(diff.Removed), diff.Removed)
+	}
+	// Modified might be non-zero because diff uses default vars (no product var
+	// substituted), so titles will differ. This tests the "structural match" case.
+	// The recipe defaults apply "" for required vars, so titles with {{product}}
+	// will resolve to empty substitution.
+}
+
+func TestDiffJobToRecipe_AddedTask(t *testing.T) {
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Add an extra task that isn't in the recipe.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	extraID := rootTask.ID + ".3"
+	parentID := rootTask.ID
+	taskRepo.tasks[extraID] = &models.Task{
+		ID:          extraID,
+		SpaceID:     rootTask.SpaceID,
+		ParentID:    &parentID,
+		Title:       "Extra finishing step",
+		Type:        models.TaskTypeTask,
+		Status:      models.TaskStatusOpen,
+		CreatedByID: rootTask.CreatedByID,
+	}
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	if len(diff.Added) != 1 {
+		t.Fatalf("expected 1 added, got %d: %+v", len(diff.Added), diff.Added)
+	}
+
+	added := diff.Added[0]
+	if added.Path != "3" {
+		t.Errorf("expected added path %q, got %q", "3", added.Path)
+	}
+	if added.TaskID != extraID {
+		t.Errorf("expected added TaskID %q, got %q", extraID, added.TaskID)
+	}
+	if added.Title != "Extra finishing step" {
+		t.Errorf("expected added title %q, got %q", "Extra finishing step", added.Title)
+	}
+	if added.ChangeType != DiffChangeAdded {
+		t.Errorf("expected change type %q, got %q", DiffChangeAdded, added.ChangeType)
+	}
+}
+
+func TestDiffJobToRecipe_RemovedTask(t *testing.T) {
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Remove the second child task (assemble) from the job.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	secondChildID := rootTask.ID + ".2"
+	delete(taskRepo.tasks, secondChildID)
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	if len(diff.Removed) != 1 {
+		t.Fatalf("expected 1 removed, got %d: %+v", len(diff.Removed), diff.Removed)
+	}
+
+	removed := diff.Removed[0]
+	if removed.Path != "2" {
+		t.Errorf("expected removed path %q, got %q", "2", removed.Path)
+	}
+	if removed.StepID != "assemble" {
+		t.Errorf("expected removed StepID %q, got %q", "assemble", removed.StepID)
+	}
+	if removed.ChangeType != DiffChangeRemoved {
+		t.Errorf("expected change type %q, got %q", DiffChangeRemoved, removed.ChangeType)
+	}
+}
+
+func TestDiffJobToRecipe_ModifiedTitle(t *testing.T) {
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Modify the first child's title.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	firstChildID := rootTask.ID + ".1"
+	task := taskRepo.tasks[firstChildID]
+	task.Title = "Rough cut Table parts (modified)"
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	// Find the modified item for path "1".
+	var found *DiffItem
+	for i := range diff.Modified {
+		if diff.Modified[i].Path == "1" {
+			found = &diff.Modified[i]
+			break
+		}
+	}
+
+	if found == nil {
+		t.Fatalf("expected modified item at path '1', got modified: %+v", diff.Modified)
+	}
+
+	if found.Title != "Rough cut Table parts (modified)" {
+		t.Errorf("expected modified title %q, got %q", "Rough cut Table parts (modified)", found.Title)
+	}
+	if found.ChangeType != DiffChangeModified {
+		t.Errorf("expected change type %q, got %q", DiffChangeModified, found.ChangeType)
+	}
+	if found.TaskID != firstChildID {
+		t.Errorf("expected TaskID %q, got %q", firstChildID, found.TaskID)
+	}
+	if found.StepID != "cut" {
+		t.Errorf("expected StepID %q, got %q", "cut", found.StepID)
+	}
+}
+
+func TestDiffJobToRecipe_ModifiedDescription(t *testing.T) {
+	// Use a TOML with descriptions on steps.
+	toml := `
+formula = "desc-test"
+description = "Build {{product}}"
+version = 1
+type = "workflow"
+
+[vars.product]
+description = "Product name"
+default = "Widget"
+
+[[steps]]
+id = "prep"
+title = "Prep {{product}}"
+description = "Prepare all {{product}} materials"
+type = "task"
+`
+	svc, rootTask, versionID := setupDiffTest(t, toml, map[string]string{"product": "Widget"})
+
+	// Modify the description.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	firstChildID := rootTask.ID + ".1"
+	task := taskRepo.tasks[firstChildID]
+	newDesc := "Prepare all Widget materials and tools"
+	task.Description = &newDesc
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	if len(diff.Modified) != 1 {
+		t.Fatalf("expected 1 modified, got %d: %+v", len(diff.Modified), diff.Modified)
+	}
+
+	mod := diff.Modified[0]
+	if mod.Description != "Prepare all Widget materials and tools" {
+		t.Errorf("expected modified description %q, got %q", "Prepare all Widget materials and tools", mod.Description)
+	}
+	if mod.ExpectedDescription != "Prepare all Widget materials" {
+		t.Errorf("expected expected description %q, got %q", "Prepare all Widget materials", mod.ExpectedDescription)
+	}
+}
+
+func TestDiffJobToRecipe_MixedChanges(t *testing.T) {
+	// Use simpleTOML (no conditionals) so the recipe side has a predictable shape.
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// Modify the first task's title (cut).
+	firstChildID := rootTask.ID + ".1"
+	taskRepo.tasks[firstChildID].Title = "Rough cut Table parts"
+
+	// Remove the second task (assemble).
+	secondChildID := rootTask.ID + ".2"
+	delete(taskRepo.tasks, secondChildID)
+
+	// Add an extra task.
+	extraID := rootTask.ID + ".3"
+	parentID := rootTask.ID
+	taskRepo.tasks[extraID] = &models.Task{
+		ID:          extraID,
+		SpaceID:     rootTask.SpaceID,
+		ParentID:    &parentID,
+		Title:       "Quality check",
+		Type:        models.TaskTypeTask,
+		Status:      models.TaskStatusOpen,
+		CreatedByID: rootTask.CreatedByID,
+	}
+
+	diff, err := svc.DiffJobToRecipe(rootTask.ID, versionID)
+	if err != nil {
+		t.Fatalf("DiffJobToRecipe failed: %v", err)
+	}
+
+	if len(diff.Added) != 1 {
+		t.Errorf("expected 1 added, got %d: %+v", len(diff.Added), diff.Added)
+	}
+	if len(diff.Removed) != 1 {
+		t.Errorf("expected 1 removed, got %d: %+v", len(diff.Removed), diff.Removed)
+	}
+	// The title for step "cut" was changed: recipe has "Cut  parts" (defaults apply
+	// empty string for required vars with no default), job has "Rough cut Table parts".
+	foundModified := false
+	for _, m := range diff.Modified {
+		if m.Path == "1" && m.Title == "Rough cut Table parts" {
+			foundModified = true
+		}
+	}
+	if !foundModified {
+		t.Errorf("expected modified item at path '1' with title 'Rough cut Table parts', got: %+v", diff.Modified)
+	}
+}
+
+func TestDiffJobToRecipe_NotAJob(t *testing.T) {
+	svc, rootTask, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Try to diff a child task (not a job).
+	childID := rootTask.ID + ".1"
+	_, err := svc.DiffJobToRecipe(childID, versionID)
+	if err == nil {
+		t.Fatal("expected error for non-job task, got nil")
+	}
+}
+
+func TestDiffJobToRecipe_InvalidVersion(t *testing.T) {
+	svc, rootTask, _ := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	_, err := svc.DiffJobToRecipe(rootTask.ID, 999)
+	if err == nil {
+		t.Fatal("expected error for invalid version ID, got nil")
+	}
+}
+
+func TestDiffJobToRecipe_InvalidJobID(t *testing.T) {
+	svc, _, versionID := setupDiffTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	_, err := svc.DiffJobToRecipe("nonexistent-id", versionID)
+	if err == nil {
+		t.Fatal("expected error for invalid job ID, got nil")
+	}
+}
+
+func TestExtractPath(t *testing.T) {
+	tests := []struct {
+		taskID   string
+		rootID   string
+		expected string
+	}{
+		{"nori-abc123.1", "nori-abc123", "1"},
+		{"nori-abc123.1.2", "nori-abc123", "1.2"},
+		{"nori-abc123.1.2.3", "nori-abc123", "1.2.3"},
+		{"other-id", "nori-abc123", ""},     // doesn't match
+		{"nori-abc123", "nori-abc123", ""},  // no suffix
+		{"nori-abc123.", "nori-abc123", ""}, // empty suffix
+	}
+
+	for _, tt := range tests {
+		result := extractPath(tt.taskID, tt.rootID)
+		if result != tt.expected {
+			t.Errorf("extractPath(%q, %q) = %q, want %q", tt.taskID, tt.rootID, result, tt.expected)
+		}
+	}
+}
