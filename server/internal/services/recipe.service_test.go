@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tylerjvollick/nori/internal/formula"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 )
@@ -37,6 +38,25 @@ func (m *mockRecipeRepo) GetVersionByID(id int) (*models.RecipeVersion, error) {
 		return nil, errNotFound("recipe version not found")
 	}
 	return v, nil
+}
+
+func (m *mockRecipeRepo) CreateVersion(version *models.RecipeVersion) error {
+	// Auto-assign an ID if not set.
+	if version.ID == 0 {
+		version.ID = len(m.versions) + 1
+	}
+	m.versions[version.ID] = version
+	return nil
+}
+
+func (m *mockRecipeRepo) ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error) {
+	var result []models.RecipeVersion
+	for _, v := range m.versions {
+		if v.RecipeID == recipeID {
+			result = append(result, *v)
+		}
+	}
+	return result, nil
 }
 
 type mockTaskRepo struct {
@@ -793,5 +813,340 @@ func TestExtractPath(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("extractPath(%q, %q) = %q, want %q", tt.taskID, tt.rootID, result, tt.expected)
 		}
+	}
+}
+
+// --- Promote Tests ---
+
+// setupPromoteTest pours a recipe and returns the service, root task, recipe ID,
+// and recipe version ID for use in promote tests.
+func setupPromoteTest(t *testing.T, tomlContent string, vars map[string]string) (*RecipeService, *models.Task, uuid.UUID, int) {
+	t.Helper()
+	svc, recipeID, spaceID, userID := setupRecipeService(tomlContent)
+
+	rootTask, err := svc.PourRecipe(recipeID, spaceID, userID, vars, nil)
+	if err != nil {
+		t.Fatalf("PourRecipe failed: %v", err)
+	}
+
+	return svc, rootTask, recipeID, 1 // version ID is always 1 in setupRecipeService
+}
+
+func TestPromoteJobToRecipe_NoDiff(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "No real changes")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	// Should create a new draft version.
+	if newVersion.Status != models.RecipeVersionStatusDraft {
+		t.Errorf("expected status %q, got %q", models.RecipeVersionStatusDraft, newVersion.Status)
+	}
+	if newVersion.VersionNumber != 2 {
+		t.Errorf("expected version number 2, got %d", newVersion.VersionNumber)
+	}
+	if newVersion.RecipeID != recipeID {
+		t.Errorf("expected recipe ID %s, got %s", recipeID, newVersion.RecipeID)
+	}
+	if newVersion.ChangeSummary == nil || *newVersion.ChangeSummary != "No real changes" {
+		t.Errorf("expected change summary %q, got %v", "No real changes", newVersion.ChangeSummary)
+	}
+
+	// Content should be valid TOML.
+	if newVersion.Content == "" {
+		t.Error("expected non-empty content")
+	}
+}
+
+func TestPromoteJobToRecipe_ModifiedTitle(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Modify the first child's title in the job.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	firstChildID := rootTask.ID + ".1"
+	taskRepo.tasks[firstChildID].Title = "Rough cut Table parts"
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Updated cut step title")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	if newVersion.Status != models.RecipeVersionStatusDraft {
+		t.Errorf("expected status %q, got %q", models.RecipeVersionStatusDraft, newVersion.Status)
+	}
+
+	// Parse the new content and verify the title was updated.
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	if len(f.Steps) < 1 {
+		t.Fatalf("expected at least 1 step, got %d", len(f.Steps))
+	}
+
+	// The first step's title should reflect the job's modified title.
+	if f.Steps[0].Title != "Rough cut Table parts" {
+		t.Errorf("expected step title %q, got %q", "Rough cut Table parts", f.Steps[0].Title)
+	}
+}
+
+func TestPromoteJobToRecipe_AddedTask(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Add an extra task in the job.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	extraID := rootTask.ID + ".3"
+	parentID := rootTask.ID
+	taskRepo.tasks[extraID] = &models.Task{
+		ID:          extraID,
+		SpaceID:     rootTask.SpaceID,
+		ParentID:    &parentID,
+		Title:       "Quality check",
+		Type:        models.TaskTypeTask,
+		Status:      models.TaskStatusOpen,
+		CreatedByID: rootTask.CreatedByID,
+	}
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Added quality check step")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	// Parse the new content and verify the added step.
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	// Should have 3 steps (original 2 + 1 added).
+	if len(f.Steps) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(f.Steps))
+	}
+
+	// The third step should be the added one.
+	found := false
+	for _, step := range f.Steps {
+		if step.Title == "Quality check" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected added step with title 'Quality check' in new version")
+	}
+}
+
+func TestPromoteJobToRecipe_RemovedTask(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Remove the second child task from the job.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	secondChildID := rootTask.ID + ".2"
+	delete(taskRepo.tasks, secondChildID)
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Removed assemble step")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	// Parse the new content and verify the step was removed.
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	// Should have 1 step (original 2 - 1 removed).
+	if len(f.Steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(f.Steps))
+	}
+
+	// The remaining step should be "cut", not "assemble".
+	if f.Steps[0].ID != "cut" {
+		t.Errorf("expected remaining step ID %q, got %q", "cut", f.Steps[0].ID)
+	}
+}
+
+func TestPromoteJobToRecipe_MixedChanges(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+
+	// Modify the first task's title.
+	firstChildID := rootTask.ID + ".1"
+	taskRepo.tasks[firstChildID].Title = "Rough cut Table parts"
+
+	// Remove the second task.
+	secondChildID := rootTask.ID + ".2"
+	delete(taskRepo.tasks, secondChildID)
+
+	// Add an extra task.
+	extraID := rootTask.ID + ".3"
+	parentID := rootTask.ID
+	taskRepo.tasks[extraID] = &models.Task{
+		ID:          extraID,
+		SpaceID:     rootTask.SpaceID,
+		ParentID:    &parentID,
+		Title:       "Finishing",
+		Type:        models.TaskTypeTask,
+		Status:      models.TaskStatusOpen,
+		CreatedByID: rootTask.CreatedByID,
+	}
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Major rework")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	// Should have 2 steps: modified "cut" + added "Finishing" (assemble removed).
+	if len(f.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(f.Steps))
+	}
+
+	// Verify the modified step.
+	if f.Steps[0].Title != "Rough cut Table parts" {
+		t.Errorf("expected first step title %q, got %q", "Rough cut Table parts", f.Steps[0].Title)
+	}
+
+	// Verify the added step exists.
+	foundFinishing := false
+	for _, step := range f.Steps {
+		if step.Title == "Finishing" {
+			foundFinishing = true
+		}
+	}
+	if !foundFinishing {
+		t.Error("expected step with title 'Finishing'")
+	}
+}
+
+func TestPromoteJobToRecipe_NotAJob(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Try to promote a child task (not a job).
+	childID := rootTask.ID + ".1"
+	_, err := svc.PromoteJobToRecipe(childID, recipeID, "Should fail")
+	if err == nil {
+		t.Fatal("expected error for non-job task, got nil")
+	}
+}
+
+func TestPromoteJobToRecipe_WrongRecipe(t *testing.T) {
+	svc, rootTask, _, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// Try to promote with a different recipe ID than the job's source.
+	wrongRecipeID := uuid.New()
+	_, err := svc.PromoteJobToRecipe(rootTask.ID, wrongRecipeID, "Should fail")
+	if err == nil {
+		t.Fatal("expected error for wrong recipe ID, got nil")
+	}
+}
+
+func TestPromoteJobToRecipe_VersionNumberIncrement(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	// First promote.
+	v1, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "First promote")
+	if err != nil {
+		t.Fatalf("first PromoteJobToRecipe failed: %v", err)
+	}
+	if v1.VersionNumber != 2 {
+		t.Errorf("expected version number 2, got %d", v1.VersionNumber)
+	}
+
+	// Second promote.
+	v2, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Second promote")
+	if err != nil {
+		t.Fatalf("second PromoteJobToRecipe failed: %v", err)
+	}
+	if v2.VersionNumber != 3 {
+		t.Errorf("expected version number 3, got %d", v2.VersionNumber)
+	}
+}
+
+func TestPromoteJobToRecipe_EmptyChangeSummary(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	if newVersion.ChangeSummary != nil {
+		t.Errorf("expected nil change summary for empty string, got %q", *newVersion.ChangeSummary)
+	}
+}
+
+func TestPromoteJobToRecipe_PreservesFormulaMetadata(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Preserve metadata")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	// Parse the new content and verify formula metadata is preserved.
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	if f.Formula != "simple-build" {
+		t.Errorf("expected formula name %q, got %q", "simple-build", f.Formula)
+	}
+	if f.Version != 1 {
+		t.Errorf("expected formula version 1, got %d", f.Version)
+	}
+	if f.Type != formula.TypeWorkflow {
+		t.Errorf("expected formula type %q, got %q", formula.TypeWorkflow, f.Type)
+	}
+
+	// Vars should be preserved.
+	productVar, ok := f.Vars["product"]
+	if !ok {
+		t.Fatal("expected 'product' variable to be preserved")
+	}
+	if !productVar.Required {
+		t.Error("expected 'product' variable to be required")
+	}
+}
+
+func TestPromoteJobToRecipe_PreservesDependencies(t *testing.T) {
+	svc, rootTask, recipeID, _ := setupPromoteTest(t, simpleTOML(), map[string]string{"product": "Table"})
+
+	newVersion, err := svc.PromoteJobToRecipe(rootTask.ID, recipeID, "Check deps")
+	if err != nil {
+		t.Fatalf("PromoteJobToRecipe failed: %v", err)
+	}
+
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	if err != nil {
+		t.Fatalf("failed to parse new version TOML: %v", err)
+	}
+
+	// The "assemble" step should still depend on "cut".
+	if len(f.Steps) < 2 {
+		t.Fatalf("expected at least 2 steps, got %d", len(f.Steps))
+	}
+
+	assembleStep := f.Steps[1]
+	if assembleStep.ID != "assemble" {
+		t.Fatalf("expected second step ID %q, got %q", "assemble", assembleStep.ID)
+	}
+	if len(assembleStep.DependsOn) != 1 || assembleStep.DependsOn[0] != "cut" {
+		t.Errorf("expected assemble depends_on [cut], got %v", assembleStep.DependsOn)
 	}
 }

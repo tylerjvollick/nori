@@ -1,9 +1,13 @@
 package services
 
 import (
+	"bytes"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
 
 	"github.com/tylerjvollick/nori/internal/formula"
@@ -14,6 +18,8 @@ import (
 type RecipeRepositoryInterface interface {
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
+	CreateVersion(version *models.RecipeVersion) error
+	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
 }
 
 // RecipeService handles recipe operations including pouring recipes into task graphs.
@@ -558,4 +564,297 @@ func generateTaskID() string {
 	id := uuid.New()
 	hex := fmt.Sprintf("%x", id[:4])
 	return "nori-" + hex
+}
+
+// ---------------------------------------------------------------------------
+// Recipe Promote
+// ---------------------------------------------------------------------------
+
+// PromoteJobToRecipe creates a new draft recipe version by applying live edits
+// from a job back to its source recipe. It diffs the job against the source
+// version, applies the diff to the source TOML, and creates a new
+// RecipeVersion with status=draft.
+//
+// This completes the feedback loop: live edits during execution become the
+// next recipe version.
+//
+// Parameters:
+//   - jobID: the root job task whose edits to promote
+//   - recipeID: the recipe to create a new version for
+//   - changeSummary: human-readable description of the changes
+//
+// Returns the newly created RecipeVersion.
+func (s *RecipeService) PromoteJobToRecipe(
+	jobID string,
+	recipeID uuid.UUID,
+	changeSummary string,
+) (*models.RecipeVersion, error) {
+	// 1. Load the root job to get the source recipe version.
+	rootTask, err := s.taskRepo.GetByID(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("loading job %q: %w", jobID, err)
+	}
+	if rootTask.Type != models.TaskTypeJob {
+		return nil, fmt.Errorf("task %q is not a job (type=%s)", jobID, rootTask.Type)
+	}
+	if rootTask.RecipeID == nil || *rootTask.RecipeID != recipeID {
+		return nil, fmt.Errorf("job %q is not linked to recipe %s", jobID, recipeID)
+	}
+	if rootTask.RecipeVersionID == nil {
+		return nil, fmt.Errorf("job %q has no source recipe version", jobID)
+	}
+
+	sourceVersionID := *rootTask.RecipeVersionID
+
+	// 2. Diff the job against its source recipe version.
+	diff, err := s.DiffJobToRecipe(jobID, sourceVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("diffing job against recipe: %w", err)
+	}
+
+	// 3. Load and parse the source version's TOML.
+	sourceVersion, err := s.recipeRepo.GetVersionByID(sourceVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source version: %w", err)
+	}
+
+	parser := formula.NewParser()
+	f, err := parser.ParseTOML([]byte(sourceVersion.Content))
+	if err != nil {
+		return nil, fmt.Errorf("parsing source TOML: %w", err)
+	}
+
+	// 4. Apply the diff to the formula steps.
+	applyDiffToFormula(f, diff)
+
+	// 5. Marshal the updated formula back to TOML.
+	newContent, err := marshalFormulaToTOML(f)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling updated TOML: %w", err)
+	}
+
+	// 6. Determine the next version number.
+	versions, err := s.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing versions: %w", err)
+	}
+	nextVersionNumber := 1
+	for _, v := range versions {
+		if v.VersionNumber >= nextVersionNumber {
+			nextVersionNumber = v.VersionNumber + 1
+		}
+	}
+
+	// 7. Create the new draft version.
+	now := time.Now()
+	newVersion := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: nextVersionNumber,
+		Status:        models.RecipeVersionStatusDraft,
+		Content:       newContent,
+		AuthorID:      rootTask.CreatedByID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if changeSummary != "" {
+		newVersion.ChangeSummary = &changeSummary
+	}
+
+	if err := s.recipeRepo.CreateVersion(newVersion); err != nil {
+		return nil, fmt.Errorf("creating new version: %w", err)
+	}
+
+	return newVersion, nil
+}
+
+// applyDiffToFormula mutates a formula's steps in place based on a RecipeDiff.
+// It handles modifications (title/description changes), removals, and additions.
+func applyDiffToFormula(f *formula.Formula, diff *RecipeDiff) {
+	// Build a step index by ID for quick lookup.
+	stepByID := make(map[string]*formula.Step)
+	indexStepsByID(f.Steps, stepByID)
+
+	// Apply modifications: update title and/or description on matching steps.
+	for _, mod := range diff.Modified {
+		if step, ok := stepByID[mod.StepID]; ok {
+			step.Title = mod.Title
+			if mod.Description != "" || mod.ExpectedDescription != "" {
+				step.Description = mod.Description
+			}
+		}
+	}
+
+	// Apply removals: remove steps by ID.
+	for _, rem := range diff.Removed {
+		f.Steps = removeStepByID(f.Steps, rem.StepID)
+	}
+
+	// Apply additions: append new steps at the corresponding position.
+	for _, add := range diff.Added {
+		newStep := &formula.Step{
+			ID:          pathToStepID(add.Path),
+			Title:       add.Title,
+			Description: add.Description,
+			Type:        "task",
+		}
+		f.Steps = insertStepAtPath(f.Steps, add.Path, newStep)
+	}
+}
+
+// indexStepsByID recursively indexes all steps by their ID.
+func indexStepsByID(steps []*formula.Step, index map[string]*formula.Step) {
+	for _, step := range steps {
+		index[step.ID] = step
+		if len(step.Children) > 0 {
+			indexStepsByID(step.Children, index)
+		}
+	}
+}
+
+// removeStepByID recursively removes a step with the given ID from the slice.
+func removeStepByID(steps []*formula.Step, id string) []*formula.Step {
+	result := make([]*formula.Step, 0, len(steps))
+	for _, step := range steps {
+		if step.ID == id {
+			continue
+		}
+		if len(step.Children) > 0 {
+			step.Children = removeStepByID(step.Children, id)
+		}
+		result = append(result, step)
+	}
+	return result
+}
+
+// pathToStepID converts a hierarchical path like "3" or "1.3" to a step ID
+// like "added-3" or "added-1-3" (since we don't know the original step ID
+// for tasks added during execution).
+func pathToStepID(path string) string {
+	return "added-" + strings.ReplaceAll(path, ".", "-")
+}
+
+// insertStepAtPath inserts a step at the position indicated by a hierarchical
+// path. A path like "3" inserts at top-level position 3. A path like "1.3"
+// inserts as child 3 of top-level step 1.
+func insertStepAtPath(steps []*formula.Step, path string, newStep *formula.Step) []*formula.Step {
+	parts := strings.Split(path, ".")
+	if len(parts) == 1 {
+		// Top-level insertion — convert path to 0-based index.
+		idx, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return append(steps, newStep)
+		}
+		idx-- // path is 1-based
+
+		if idx >= len(steps) {
+			return append(steps, newStep)
+		}
+		// Insert at position.
+		result := make([]*formula.Step, 0, len(steps)+1)
+		result = append(result, steps[:idx]...)
+		result = append(result, newStep)
+		result = append(result, steps[idx:]...)
+		return result
+	}
+
+	// Nested insertion — descend into the parent step's children.
+	parentIdx, err := strconv.Atoi(parts[0])
+	if err != nil || parentIdx-1 >= len(steps) {
+		return append(steps, newStep)
+	}
+	parentIdx-- // 1-based → 0-based
+	childPath := strings.Join(parts[1:], ".")
+	steps[parentIdx].Children = insertStepAtPath(steps[parentIdx].Children, childPath, newStep)
+	return steps
+}
+
+// tomlFormula is the serialization-friendly representation of a Formula for
+// TOML output. We use explicit struct tags to control field ordering and
+// naming, avoiding the complexity of marshaling the full Formula type which
+// includes internal-only fields.
+type tomlFormula struct {
+	Formula     string                 `toml:"formula"`
+	Description string                 `toml:"description,omitempty"`
+	Version     int                    `toml:"version"`
+	Type        formula.FormulaType    `toml:"type"`
+	Vars        map[string]*tomlVarDef `toml:"vars,omitempty"`
+	Steps       []*tomlStep            `toml:"steps"`
+	Compose     *formula.ComposeRules  `toml:"compose,omitempty"`
+}
+
+type tomlVarDef struct {
+	Description string   `toml:"description,omitempty"`
+	Default     *string  `toml:"default,omitempty"`
+	Required    bool     `toml:"required,omitempty"`
+	Enum        []string `toml:"enum,omitempty"`
+	Pattern     string   `toml:"pattern,omitempty"`
+	Type        string   `toml:"type,omitempty"`
+}
+
+type tomlStep struct {
+	ID          string      `toml:"id"`
+	Title       string      `toml:"title"`
+	Description string      `toml:"description,omitempty"`
+	Type        string      `toml:"type,omitempty"`
+	Priority    *int        `toml:"priority,omitempty"`
+	DependsOn   []string    `toml:"depends_on,omitempty"`
+	Needs       []string    `toml:"needs,omitempty"`
+	Condition   string      `toml:"condition,omitempty"`
+	Children    []*tomlStep `toml:"children,omitempty"`
+}
+
+// marshalFormulaToTOML converts a Formula to TOML string content.
+func marshalFormulaToTOML(f *formula.Formula) (string, error) {
+	tf := &tomlFormula{
+		Formula:     f.Formula,
+		Description: f.Description,
+		Version:     f.Version,
+		Type:        f.Type,
+		Steps:       convertStepsToTOML(f.Steps),
+		Compose:     f.Compose,
+	}
+
+	if len(f.Vars) > 0 {
+		tf.Vars = make(map[string]*tomlVarDef, len(f.Vars))
+		for name, v := range f.Vars {
+			tf.Vars[name] = &tomlVarDef{
+				Description: v.Description,
+				Default:     v.Default,
+				Required:    v.Required,
+				Enum:        v.Enum,
+				Pattern:     v.Pattern,
+				Type:        v.Type,
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	encoder := toml.NewEncoder(&buf)
+	if err := encoder.Encode(tf); err != nil {
+		return "", fmt.Errorf("encoding TOML: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// convertStepsToTOML recursively converts formula.Step to tomlStep.
+func convertStepsToTOML(steps []*formula.Step) []*tomlStep {
+	result := make([]*tomlStep, len(steps))
+	for i, s := range steps {
+		ts := &tomlStep{
+			ID:          s.ID,
+			Title:       s.Title,
+			Description: s.Description,
+			Type:        s.Type,
+			Priority:    s.Priority,
+			DependsOn:   s.DependsOn,
+			Needs:       s.Needs,
+			Condition:   s.Condition,
+		}
+		if len(s.Children) > 0 {
+			ts.Children = convertStepsToTOML(s.Children)
+		}
+		result[i] = ts
+	}
+	return result
 }
