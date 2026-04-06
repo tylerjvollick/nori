@@ -1,0 +1,452 @@
+package handlers
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"github.com/tylerjvollick/nori/internal/dtos"
+	"github.com/tylerjvollick/nori/internal/models"
+	"github.com/tylerjvollick/nori/internal/repositories"
+)
+
+// RecipeRepoInterface defines the repository methods needed by RecipeHandler.
+type RecipeRepoInterface interface {
+	Create(recipe *models.Recipe) error
+	GetByID(id uuid.UUID) (*models.Recipe, error)
+	List(filter repositories.RecipeFilter) ([]models.Recipe, int64, error)
+	Update(recipe *models.Recipe) error
+	Delete(id uuid.UUID) error
+	CreateVersion(version *models.RecipeVersion) error
+	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
+	GetVersionByID(id int) (*models.RecipeVersion, error)
+}
+
+// RecipePourServiceInterface defines the pour method from RecipeService.
+type RecipePourServiceInterface interface {
+	PourRecipe(recipeID uuid.UUID, spaceID uuid.UUID, createdByID uuid.UUID, vars map[string]string, orderID *uuid.UUID) (*models.Task, error)
+}
+
+// RecipeHandler handles HTTP requests for recipes.
+type RecipeHandler struct {
+	recipeRepo  RecipeRepoInterface
+	pourService RecipePourServiceInterface
+}
+
+// NewRecipeHandler creates a new RecipeHandler.
+func NewRecipeHandler(recipeRepo RecipeRepoInterface, pourService RecipePourServiceInterface) *RecipeHandler {
+	return &RecipeHandler{recipeRepo: recipeRepo, pourService: pourService}
+}
+
+// RegisterRecipeRoutes registers recipe API routes on the Fiber app.
+func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fiber.Handler) {
+	group := app.Group("/api/v1/recipes", middlewares...)
+
+	group.Get("", h.ListRecipes)
+	group.Post("", h.CreateRecipe)
+	group.Get("/:id", h.GetRecipe)
+	group.Put("/:id", h.UpdateRecipe)
+	group.Delete("/:id", h.DeleteRecipe)
+	group.Get("/:id/versions", h.ListVersions)
+	group.Post("/:id/versions", h.CreateVersion)
+	group.Post("/:id/pour", h.PourRecipe)
+}
+
+// ListRecipes returns a paginated list of recipes for the active space.
+func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	if authDTO.ActiveSpaceID == nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "X-Space-ID header is required",
+		})
+	}
+
+	filter := repositories.RecipeFilter{
+		SpaceID: authDTO.ActiveSpaceID,
+	}
+
+	// Parse optional query parameters.
+	if categoryID := c.Query("categoryId"); categoryID != "" {
+		if id, err := uuid.Parse(categoryID); err == nil {
+			filter.CategoryID = &id
+		}
+	}
+	if isActive := c.Query("isActive"); isActive != "" {
+		b := isActive == "true"
+		filter.IsActive = &b
+	}
+	if offset := c.Query("offset"); offset != "" {
+		if v, err := strconv.Atoi(offset); err == nil {
+			filter.Offset = v
+		}
+	}
+	if limit := c.Query("limit"); limit != "" {
+		if v, err := strconv.Atoi(limit); err == nil {
+			filter.Limit = v
+		}
+	}
+
+	// Default limit.
+	if filter.Limit == 0 {
+		filter.Limit = 50
+	}
+
+	recipes, total, err := h.recipeRepo.List(filter)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	items := make([]dtos.RecipeResponse, len(recipes))
+	for i := range recipes {
+		items[i] = dtos.RecipeResponseFromModel(&recipes[i])
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.RecipeListResponse{
+		Items:  items,
+		Total:  total,
+		Offset: filter.Offset,
+		Limit:  filter.Limit,
+	})
+}
+
+// CreateRecipe creates a new recipe in the active space.
+func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	if authDTO.ActiveSpaceID == nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "X-Space-ID header is required",
+		})
+	}
+
+	var dto dtos.CreateRecipeRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if dto.Name == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "name is required",
+		})
+	}
+
+	now := time.Now()
+	recipe := &models.Recipe{
+		ID:          uuid.New(),
+		SpaceID:     *authDTO.ActiveSpaceID,
+		Name:        dto.Name,
+		Slug:        slugify(dto.Name),
+		Description: dto.Description,
+		CategoryID:  dto.CategoryID,
+		CreatedByID: authDTO.User.ID,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := h.recipeRepo.Create(recipe); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.RecipeResponseFromModel(recipe))
+}
+
+// GetRecipe returns a single recipe by ID.
+func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	recipe, err := h.recipeRepo.GetByID(id)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.RecipeResponseFromModel(recipe))
+}
+
+// UpdateRecipe updates an existing recipe.
+func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	recipe, err := h.recipeRepo.GetByID(id)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	var dto dtos.UpdateRecipeRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if dto.Name != nil {
+		recipe.Name = *dto.Name
+		recipe.Slug = slugify(*dto.Name)
+	}
+	if dto.Description != nil {
+		recipe.Description = dto.Description
+	}
+	if dto.CategoryID != nil {
+		recipe.CategoryID = dto.CategoryID
+	}
+	if dto.IsActive != nil {
+		recipe.IsActive = *dto.IsActive
+	}
+	recipe.UpdatedAt = time.Now()
+
+	if err := h.recipeRepo.Update(recipe); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.RecipeResponseFromModel(recipe))
+}
+
+// DeleteRecipe soft-deletes a recipe by ID.
+func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	if err := h.recipeRepo.Delete(id); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusNoContent).Send(nil)
+}
+
+// ListVersions returns all versions for a recipe.
+func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	recipeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	// Verify the recipe exists.
+	if _, err := h.recipeRepo.GetByID(recipeID); err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	versions, err := h.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	items := make([]dtos.RecipeVersionResponse, len(versions))
+	for i := range versions {
+		items[i] = dtos.RecipeVersionResponseFromModel(&versions[i])
+	}
+
+	return c.Status(http.StatusOK).JSON(fiber.Map{
+		"items": items,
+		"total": len(items),
+	})
+}
+
+// CreateVersion creates a new version for a recipe.
+func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	recipeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	// Verify the recipe exists.
+	if _, err := h.recipeRepo.GetByID(recipeID); err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	var dto dtos.CreateRecipeVersionRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if dto.Content == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "content is required",
+		})
+	}
+
+	// Determine the next version number.
+	versions, err := h.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	nextVersion := 1
+	if len(versions) > 0 {
+		// Versions are ordered by version_number DESC, so the first is the latest.
+		nextVersion = versions[0].VersionNumber + 1
+	}
+
+	now := time.Now()
+	version := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: nextVersion,
+		Status:        models.RecipeVersionStatusDraft,
+		Content:       dto.Content,
+		ChangeSummary: dto.ChangeSummary,
+		AuthorID:      authDTO.User.ID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := h.recipeRepo.CreateVersion(version); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.RecipeVersionResponseFromModel(version))
+}
+
+// PourRecipe pours a recipe into a task graph via the formula engine.
+func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
+	authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
+	if authDTO == nil {
+		return c.Status(http.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	if authDTO.ActiveSpaceID == nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "X-Space-ID header is required",
+		})
+	}
+
+	recipeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	var dto dtos.PourRecipeRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	rootTask, err := h.pourService.PourRecipe(
+		recipeID,
+		*authDTO.ActiveSpaceID,
+		authDTO.User.ID,
+		dto.Vars,
+		dto.OrderID,
+	)
+	if err != nil {
+		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(rootTask))
+}
+
+// slugify converts a string into a URL-friendly slug.
+func slugify(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteRune('-')
+			prevDash = true
+		}
+	}
+	result := b.String()
+	return strings.TrimRight(result, "-")
+}

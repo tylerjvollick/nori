@@ -36,6 +36,7 @@ func New(cfg *config.Config) *App {
 	spaceMemberRepo := repositories.NewSpaceMemberRepository(database.DB)
 	taskRepo := repositories.NewTaskRepository(database.DB)
 	taskDepRepo := repositories.NewTaskDepRepository(database.DB)
+	recipeRepo := repositories.NewRecipeRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -63,6 +64,7 @@ func New(cfg *config.Config) *App {
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	taskService := services.NewTaskService(taskRepo, taskDepRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)
+	recipeService := services.NewRecipeService(recipeRepo, taskRepo, taskDepRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
@@ -71,6 +73,7 @@ func New(cfg *config.Config) *App {
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
+	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
 	app := fiber.New(fiber.Config{
@@ -101,6 +104,7 @@ func New(cfg *config.Config) *App {
 	// ── Fully guarded routes (auth + password changed) ─────────────────
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
 	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
+	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())
