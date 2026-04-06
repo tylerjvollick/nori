@@ -258,7 +258,7 @@ func setupRecipeService(tomlContent string) (*RecipeService, uuid.UUID, uuid.UUI
 		AuthorID:      userID,
 	}
 
-	svc := NewRecipeService(recipeRepo, taskRepo, depRepo)
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
 	return svc, recipeID, spaceID, userID
 }
 
@@ -369,7 +369,7 @@ func TestPourRecipe_NoPublishedVersion(t *testing.T) {
 		IsActive:         true,
 	}
 
-	svc := NewRecipeService(recipeRepo, taskRepo, depRepo)
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
 	_, err := svc.PourRecipe(recipeID, spaceID, userID, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for recipe with no published version, got nil")

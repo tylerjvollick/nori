@@ -27,6 +27,11 @@ func NewTaskRepository(db *gorm.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
+// WithTx returns a new TaskRepository that uses the given transaction handle.
+func (r *TaskRepository) WithTx(tx *gorm.DB) *TaskRepository {
+	return &TaskRepository{db: tx}
+}
+
 func (r *TaskRepository) Create(task *models.Task) error {
 	return r.db.Create(task).Error
 }

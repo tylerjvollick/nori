@@ -64,7 +64,7 @@ func New(cfg *config.Config) *App {
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	taskService := services.NewTaskService(taskRepo, taskDepRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)
-	recipeService := services.NewRecipeService(recipeRepo, taskRepo, taskDepRepo)
+	recipeService := services.NewRecipeService(database.DB, recipeRepo, taskRepo, taskDepRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)

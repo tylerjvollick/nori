@@ -15,6 +15,11 @@ func NewTaskDepRepository(db *gorm.DB) *TaskDepRepository {
 	return &TaskDepRepository{db: db}
 }
 
+// WithTx returns a new TaskDepRepository that uses the given transaction handle.
+func (r *TaskDepRepository) WithTx(tx *gorm.DB) *TaskDepRepository {
+	return &TaskDepRepository{db: tx}
+}
+
 // AddDep creates a new dependency edge between two tasks.
 // It rejects the dependency if it would create a cycle in the dependency graph.
 func (r *TaskDepRepository) AddDep(dep *models.TaskDep) error {

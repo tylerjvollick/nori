@@ -9,9 +9,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/tylerjvollick/nori/internal/formula"
 	"github.com/tylerjvollick/nori/internal/models"
+	"github.com/tylerjvollick/nori/internal/repositories"
 )
 
 // RecipeRepositoryInterface defines the methods needed from a recipe repository.
@@ -24,18 +26,23 @@ type RecipeRepositoryInterface interface {
 
 // RecipeService handles recipe operations including pouring recipes into task graphs.
 type RecipeService struct {
+	db          *gorm.DB
 	recipeRepo  RecipeRepositoryInterface
 	taskRepo    TaskRepositoryInterface
 	taskDepRepo TaskDepRepositoryInterface
 }
 
 // NewRecipeService creates a new RecipeService.
+// The db parameter is used to create transactions for operations like PourRecipe
+// that span multiple repositories. Pass nil in tests that use mock repositories.
 func NewRecipeService(
+	db *gorm.DB,
 	recipeRepo RecipeRepositoryInterface,
 	taskRepo TaskRepositoryInterface,
 	taskDepRepo TaskDepRepositoryInterface,
 ) *RecipeService {
 	return &RecipeService{
+		db:          db,
 		recipeRepo:  recipeRepo,
 		taskRepo:    taskRepo,
 		taskDepRepo: taskDepRepo,
@@ -108,7 +115,7 @@ func (s *RecipeService) PourRecipe(
 		return nil, fmt.Errorf("applying control flow: %w", err)
 	}
 
-	// 5. Create root job task.
+	// 5. Build the root task (not yet persisted).
 	now := time.Now()
 	rootID := generateTaskID()
 	jobTitle := formula.Substitute(f.Description, allVars)
@@ -134,20 +141,41 @@ func (s *RecipeService) PourRecipe(
 		rootTask.Metadata = models.JSONB{"orderID": orderID.String()}
 	}
 
-	if err := s.taskRepo.Create(rootTask); err != nil {
-		return nil, fmt.Errorf("creating root job task: %w", err)
+	// 6. Wrap all database writes in a transaction.
+	//    If any task or dependency creation fails, the entire pour is rolled back.
+	pourFn := func(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface) error {
+		if err := taskRepo.Create(rootTask); err != nil {
+			return fmt.Errorf("creating root job task: %w", err)
+		}
+
+		// Create child tasks from formula steps with hierarchical IDs.
+		stepToTaskID := make(map[string]string)
+		if err := createChildTasks(taskRepo, rootID, spaceID, createdByID, steps, allVars, &recipeID, recipe.CurrentVersionID, now, stepToTaskID); err != nil {
+			return fmt.Errorf("creating child tasks: %w", err)
+		}
+
+		// Create TaskDep edges from formula step dependencies.
+		if err := createDependencyEdges(taskDepRepo, steps, stepToTaskID); err != nil {
+			return fmt.Errorf("creating dependency edges: %w", err)
+		}
+
+		return nil
 	}
 
-	// 6. Create child tasks from formula steps with hierarchical IDs.
-	//    Also build a map from formula step ID → task ID for dependency wiring.
-	stepToTaskID := make(map[string]string)
-	if err := s.createChildTasks(rootID, spaceID, createdByID, steps, allVars, &recipeID, recipe.CurrentVersionID, now, stepToTaskID); err != nil {
-		return nil, fmt.Errorf("creating child tasks: %w", err)
+	if s.db != nil {
+		// Production path: wrap writes in a database transaction.
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txTaskRepo := repositories.NewTaskRepository(tx)
+			txTaskDepRepo := repositories.NewTaskDepRepository(tx)
+			return pourFn(txTaskRepo, txTaskDepRepo)
+		})
+	} else {
+		// Test path: no DB available, use injected mock repos directly.
+		err = pourFn(s.taskRepo, s.taskDepRepo)
 	}
 
-	// 7. Create TaskDep edges from formula step dependencies.
-	if err := s.createDependencyEdges(steps, stepToTaskID); err != nil {
-		return nil, fmt.Errorf("creating dependency edges: %w", err)
+	if err != nil {
+		return nil, err
 	}
 
 	return rootTask, nil
@@ -156,7 +184,8 @@ func (s *RecipeService) PourRecipe(
 // createChildTasks recursively creates child tasks from formula steps.
 // Each step gets a hierarchical ID: parentID.1, parentID.2, etc.
 // The stepToTaskID map is populated with formula step ID → task ID mappings.
-func (s *RecipeService) createChildTasks(
+func createChildTasks(
+	taskRepo TaskRepositoryInterface,
 	parentID string,
 	spaceID uuid.UUID,
 	createdByID uuid.UUID,
@@ -207,13 +236,13 @@ func (s *RecipeService) createChildTasks(
 			UpdatedAt:       now,
 		}
 
-		if err := s.taskRepo.Create(task); err != nil {
+		if err := taskRepo.Create(task); err != nil {
 			return fmt.Errorf("creating task for step %q: %w", step.ID, err)
 		}
 
 		// Recursively create children if the step has nested children.
 		if len(step.Children) > 0 {
-			if err := s.createChildTasks(childID, spaceID, createdByID, step.Children, vars, recipeID, recipeVersionID, now, stepToTaskID); err != nil {
+			if err := createChildTasks(taskRepo, childID, spaceID, createdByID, step.Children, vars, recipeID, recipeVersionID, now, stepToTaskID); err != nil {
 				return err
 			}
 		}
@@ -224,7 +253,7 @@ func (s *RecipeService) createChildTasks(
 
 // createDependencyEdges creates TaskDep edges from formula step dependencies.
 // It processes both DependsOn and Needs fields (which are semantically equivalent).
-func (s *RecipeService) createDependencyEdges(steps []*formula.Step, stepToTaskID map[string]string) error {
+func createDependencyEdges(taskDepRepo TaskDepRepositoryInterface, steps []*formula.Step, stepToTaskID map[string]string) error {
 	for _, step := range steps {
 		taskID, ok := stepToTaskID[step.ID]
 		if !ok {
@@ -251,14 +280,14 @@ func (s *RecipeService) createDependencyEdges(steps []*formula.Step, stepToTaskI
 				Type:       models.DepTypeBlocks,
 			}
 
-			if err := s.taskDepRepo.AddDep(dep); err != nil {
+			if err := taskDepRepo.AddDep(dep); err != nil {
 				return fmt.Errorf("adding dependency %s → %s: %w", taskID, depTaskID, err)
 			}
 		}
 
 		// Recursively process children.
 		if len(step.Children) > 0 {
-			if err := s.createDependencyEdges(step.Children, stepToTaskID); err != nil {
+			if err := createDependencyEdges(taskDepRepo, step.Children, stepToTaskID); err != nil {
 				return err
 			}
 		}
