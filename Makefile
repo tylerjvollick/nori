@@ -1,24 +1,26 @@
 DOCKER_COMPOSE_DEV = ./docker/docker-compose.dev.yml
+DOCKER_ENV_FILE    = ./docker/.env
+DC_DEV             = docker compose -f $(DOCKER_COMPOSE_DEV) --env-file $(DOCKER_ENV_FILE)
 
 dev:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up --build --remove-orphans || make dev-down
+	$(DC_DEV) up --build --remove-orphans || make dev-down
 
 dev-down:
-	docker compose -f $(DOCKER_COMPOSE_DEV) down --remove-orphans
+	$(DC_DEV) down --remove-orphans
 dev-fresh:
-	docker compose -f $(DOCKER_COMPOSE_DEV) down -v --remove-orphans 
+	$(DC_DEV) down -v --remove-orphans 
 	
 dev-update:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up --build -V --remove-orphans
+	$(DC_DEV) up --build -V --remove-orphans
 
 dev-server:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up --build -d nori-server --remove-orphans
+	$(DC_DEV) up --build -d nori-server --remove-orphans
 
 dev-web:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up --build nori-web --remove-orphans
+	$(DC_DEV) up --build nori-web --remove-orphans
 
 dev-db:
-	docker compose -f $(DOCKER_COMPOSE_DEV) up -d database --remove-orphans || make dev-db-down
+	$(DC_DEV) up -d database --remove-orphans || make dev-db-down
 
 # Migration commands
 migrate-up:

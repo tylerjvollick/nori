@@ -1,22 +1,25 @@
 name: nori-dev
 
+# Create docker/.env from docker/.env.example before running.
+# Pass --env-file docker/.env when invoking docker compose.
+
 services:
   nori-server:
     container_name: nori-server
     build: ../server
     environment:
       DB_HOST: database
-      DB_USER: postgres
-      DB_PASSWORD: password
-      DB_NAME: nori
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-nori}
       DB_PORT: 5432
       UPLOAD_DIR: /app/uploads
-      MAX_UPLOAD_SIZE: 1073741824
-      ALLOWED_MIME_TYPES: image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm
-      NORI_JWT_SECRET: dev-jwt-secret-change-me
-      NORI_ADMIN_EMAIL: admin@nori.dev
-      NORI_ADMIN_PASSWORD: admin
-      NORI_ACCOUNT_NAME: Nori Dev
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-1073741824}
+      ALLOWED_MIME_TYPES: ${ALLOWED_MIME_TYPES:-image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm}
+      NORI_JWT_SECRET: ${NORI_JWT_SECRET}
+      NORI_ADMIN_EMAIL: ${NORI_ADMIN_EMAIL:-admin@nori.dev}
+      NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
+      NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-Nori Dev}
     depends_on:
       database:
         condition: service_healthy
@@ -44,9 +47,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: nori
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-nori}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

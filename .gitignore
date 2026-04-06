@@ -11,3 +11,6 @@ specs/*-implementation.md
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Docker environment (contains secrets)
+docker/.env
