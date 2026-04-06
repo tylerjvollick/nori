@@ -72,6 +72,7 @@ type Task struct {
 	Status          TaskStatus `gorm:"type:varchar(50);not null;default:'open'" json:"status"`
 	Title           string     `gorm:"not null" json:"title"`
 	Description     *string    `json:"description,omitempty"`
+	Quantity        int        `gorm:"not null;default:1" json:"quantity"`
 	Priority        int        `gorm:"not null;default:0" json:"priority"`
 	DisplayOrder    int        `gorm:"not null;default:0" json:"displayOrder"`
 	DueDate         *time.Time `json:"dueDate,omitempty"`
