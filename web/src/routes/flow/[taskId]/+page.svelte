@@ -17,7 +17,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
 	import { ArrowLeft, AlertCircle, TreePine, LayoutGrid, GitBranch, List } from 'lucide-svelte';
-	import { isEditableTarget } from '$lib/utils/keyboard';
+	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 
 	let taskId = $derived($page.params.taskId);
 

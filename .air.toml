@@ -1,0 +1,26 @@
+# air configuration for nori server live reload
+# https://github.com/air-verse/air
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build the server binary
+  cmd = "cd server && go build -o ../tmp/nori ."
+  # Binary + args to run
+  bin = "./tmp/nori"
+  full_bin = "./tmp/nori serve"
+  # Watch these file extensions
+  include_ext = ["go", "toml", "sql"]
+  # Ignore these directories
+  exclude_dir = ["tmp", "web", "docker", "node_modules", ".beads", ".git", "vendor"]
+  # Delay before rebuild (ms)
+  delay = 500
+
+[log]
+  # Show log time
+  time = false
+
+[misc]
+  # Delete tmp directory on exit
+  clean_on_exit = true

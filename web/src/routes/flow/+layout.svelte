@@ -8,7 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Select from '$lib/components/ui/select';
 	import { LayoutGrid, GitBranch, List, Filter, X, Keyboard } from 'lucide-svelte';
-	import { isEditableTarget, getToast, clearToast } from '$lib/utils/keyboard';
+	import { isEditableTarget, getToast, clearToast } from '$lib/utils/keyboard.svelte';
 	import KeyboardHelp from '$lib/components/flow/KeyboardHelp.svelte';
 
 	let { children } = $props();

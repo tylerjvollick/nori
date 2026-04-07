@@ -8,7 +8,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import { RefreshCw, AlertCircle } from 'lucide-svelte';
-	import { isEditableTarget, showToast } from '$lib/utils/keyboard';
+	import { isEditableTarget, showToast } from '$lib/utils/keyboard.svelte';
 	import KanbanColumn from './KanbanColumn.svelte';
 	import TaskCard from './TaskCard.svelte';
 

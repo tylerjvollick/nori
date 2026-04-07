@@ -47,6 +47,37 @@ docker-clean-all:
 docker-stats:
 	docker system df
 
+# --- Native dev workflow (no Docker for Go server) ---
+# Requires: make dev-db (Postgres in Docker), air (go install github.com/air-verse/air@latest)
+
+# Load docker/.env vars and remap POSTGRES_* → DB_* for the Go server.
+# We source the file inside a subshell with 'set -a' but wrap values so
+# spaces are preserved, then export only the vars the server needs.
+define LOAD_ENV
+	eval $$(grep -v '^\s*\#' ./docker/.env | grep -v '^\s*$$' | sed 's/=\(.*\)/="\1"/' | sed 's/^/export /') && \
+	export DB_HOST=localhost \
+	       DB_USER="$${POSTGRES_USER:-postgres}" \
+	       DB_PASSWORD="$${POSTGRES_PASSWORD}" \
+	       DB_NAME="$${POSTGRES_DB:-nori}" \
+	       DB_PORT=5432
+endef
+
+# Run migrations natively (against local Postgres)
+migrate-native:
+	$(LOAD_ENV) && cd server && go run . migrate up
+
+# Start the Go server with air (live reload)
+serve:
+	$(LOAD_ENV) && $(HOME)/go/bin/air
+
+# One-shot: start Postgres, run migrations, then start air
+dev-local:
+	$(MAKE) dev-db
+	@echo "Waiting for Postgres to be healthy..."
+	@until docker exec nori-db pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
+	$(MAKE) migrate-native
+	$(MAKE) serve
+
 open-api:
 	cd ./open-api && bash ./bin/generate-open-api.sh
 

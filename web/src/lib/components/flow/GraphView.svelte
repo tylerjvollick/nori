@@ -12,7 +12,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import { RefreshCw, AlertCircle, Maximize2 } from 'lucide-svelte';
-	import { isEditableTarget } from '$lib/utils/keyboard';
+	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import TaskNode from './TaskNode.svelte';
 
 	import '@xyflow/svelte/dist/style.css';

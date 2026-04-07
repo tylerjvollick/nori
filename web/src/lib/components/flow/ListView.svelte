@@ -17,7 +17,7 @@
 		AlertCircle,
 		Inbox,
 	} from 'lucide-svelte';
-	import { isEditableTarget, showToast } from '$lib/utils/keyboard';
+	import { isEditableTarget, showToast } from '$lib/utils/keyboard.svelte';
 
 	/** Optional pre-loaded tasks. When provided, the list uses these instead of fetching. */
 	interface Props {
