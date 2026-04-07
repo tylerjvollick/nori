@@ -2,13 +2,16 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Clock, User } from 'lucide-svelte';
+	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
 		task: TaskResponse;
 		stationMap: Map<string, string>;
+		/** Called after a successful task action with the updated task */
+		onaction?: (updated: TaskResponse) => void;
 	}
 
-	let { task, stationMap }: Props = $props();
+	let { task, stationMap, onaction }: Props = $props();
 
 	// --- Helpers ---
 
@@ -87,7 +90,7 @@
 		{/if}
 	</div>
 
-	<!-- Footer: assignee + time ago -->
+	<!-- Footer: assignee + actions + time ago -->
 	<div class="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
 		<div class="flex items-center gap-1">
 			{#if task.assignedToId}
@@ -99,9 +102,12 @@
 				</span>
 			{/if}
 		</div>
-		<span class="flex items-center gap-0.5">
-			<Clock class="size-3" />
-			{formatTimeAgo(task.updatedAt)}
-		</span>
+		<div class="flex items-center gap-1.5">
+			<TaskActions {task} layout="compact" {onaction} />
+			<span class="flex items-center gap-0.5">
+				<Clock class="size-3" />
+				{formatTimeAgo(task.updatedAt)}
+			</span>
+		</div>
 	</div>
 </a>

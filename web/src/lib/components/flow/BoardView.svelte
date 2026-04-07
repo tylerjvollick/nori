@@ -180,6 +180,11 @@
 		if (!date) return '';
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
+
+	/** After any task action, refresh the board to reflect the new state. */
+	function handleTaskAction(): void {
+		fetchAllColumns({ silent: true });
+	}
 </script>
 
 <svelte:head>
@@ -224,7 +229,7 @@
 			isLoading={isLoading}
 		>
 			{#each blockedTasks as task (task.id)}
-				<TaskCard {task} {stationMap} />
+				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 			{/each}
 		</KanbanColumn>
 
@@ -236,7 +241,7 @@
 			isLoading={isLoading}
 		>
 			{#each readyTasks as task (task.id)}
-				<TaskCard {task} {stationMap} />
+				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 			{/each}
 		</KanbanColumn>
 
@@ -248,7 +253,7 @@
 			isLoading={isLoading}
 		>
 			{#each inProgressTasks as task (task.id)}
-				<TaskCard {task} {stationMap} />
+				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 			{/each}
 		</KanbanColumn>
 
@@ -260,7 +265,7 @@
 			isLoading={isLoading}
 		>
 			{#each doneTasks as task (task.id)}
-				<TaskCard {task} {stationMap} />
+				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 			{/each}
 		</KanbanColumn>
 	</div>

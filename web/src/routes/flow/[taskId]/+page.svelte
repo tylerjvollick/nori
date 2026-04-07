@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
+	import type { TaskResponse } from '$lib/types/task';
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
 	import TaskTree from '$lib/components/flow/TaskTree.svelte';
@@ -61,6 +62,41 @@
 			// Deps endpoint may fail — degrade gracefully
 			selectedDeps = null;
 		}
+	}
+
+	/** After a task action, reload the tree to reflect the new state. */
+	async function handleTaskAction(updated: TaskResponse): Promise<void> {
+		if (!taskId) return;
+		try {
+			const newTree = await taskApi.getTaskTree(taskId);
+			tree = newTree;
+			// Re-select the same task within the new tree
+			if (selectedTask) {
+				const found = findNode(newTree, selectedTask.id);
+				if (found) {
+					selectedTask = found;
+					try {
+						selectedDeps = await taskApi.getTaskDeps(found.id);
+					} catch {
+						selectedDeps = null;
+					}
+				}
+			}
+		} catch {
+			// Silently fail — user can refresh manually
+		}
+	}
+
+	/** Find a node by ID in the task tree. */
+	function findNode(node: TaskTreeResponse, id: string): TaskTreeResponse | null {
+		if (node.id === id) return node;
+		if (node.children) {
+			for (const child of node.children) {
+				const found = findNode(child, id);
+				if (found) return found;
+			}
+		}
+		return null;
 	}
 
 	onMount(async () => {
@@ -231,6 +267,7 @@
 						task={selectedTask}
 						{stationMap}
 						deps={selectedDeps}
+						onaction={handleTaskAction}
 					/>
 				{:else}
 					<div class="flex items-center justify-center h-full text-sm text-muted-foreground">

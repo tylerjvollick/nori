@@ -2,10 +2,12 @@
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
 	import { apiClient } from '$lib/api/client';
+	import { taskApi } from '$lib/api/task';
+	import type { TaskResponse } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { RefreshCw, Inbox, AlertCircle, Clock, ChevronRight } from 'lucide-svelte';
+	import { RefreshCw, Inbox, AlertCircle, Clock, ChevronRight, UserPlus, Loader2 } from 'lucide-svelte';
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 
 	/** Matches the backend TaskResponse DTO. */
@@ -162,6 +164,28 @@
 		if (!date) return '';
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
+
+	// ---- Claim action for ready queue ----
+	let claimingTaskId = $state<string | null>(null);
+
+	async function handleClaimTask(e: MouseEvent, taskId: string): Promise<void> {
+		e.preventDefault();
+		e.stopPropagation();
+		if (claimingTaskId) return;
+		claimingTaskId = taskId;
+		try {
+			await taskApi.claimTask(taskId);
+			// Remove the claimed task from the list and refresh
+			tasks = tasks.filter((t) => t.id !== taskId);
+			total = Math.max(0, total - 1);
+			// Trigger a background refresh to sync full state
+			fetchReadyTasks({ silent: true });
+		} catch (err) {
+			console.error(`Failed to claim task ${taskId}:`, err);
+		} finally {
+			claimingTaskId = null;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -282,7 +306,22 @@
 										</span>
 									</div>
 								</div>
-								<ChevronRight class="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0 mt-0.5" />
+								<div class="flex items-center gap-2 shrink-0 mt-0.5">
+								<Button
+									variant="default"
+									size="sm"
+									disabled={claimingTaskId !== null}
+									onclick={(e: MouseEvent) => handleClaimTask(e, task.id)}
+								>
+									{#if claimingTaskId === task.id}
+										<Loader2 class="size-4 animate-spin" />
+									{:else}
+										<UserPlus class="size-4" />
+									{/if}
+									Claim
+								</Button>
+								<ChevronRight class="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+							</div>
 							</div>
 						</a>
 					{/each}

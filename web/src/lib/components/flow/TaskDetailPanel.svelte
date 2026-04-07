@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
-	import type { TaskDep } from '$lib/types/task';
+	import type { TaskResponse, TaskDep } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import {
@@ -17,14 +17,17 @@
 		ArrowRight,
 		ArrowLeft,
 	} from 'lucide-svelte';
+	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
 		task: TaskTreeResponse;
 		stationMap: Map<string, string>;
 		deps?: TaskDepsResponse | null;
+		/** Called after a successful task action with the updated task */
+		onaction?: (updated: TaskResponse) => void;
 	}
 
-	let { task, stationMap, deps = null }: Props = $props();
+	let { task, stationMap, deps = null, onaction }: Props = $props();
 
 	// --- Helpers ---
 
@@ -162,6 +165,9 @@
 			<p class="text-sm text-muted-foreground mt-1">{task.description}</p>
 		{/if}
 	</div>
+
+	<!-- Action buttons -->
+	<TaskActions {task} layout="bar" {onaction} />
 
 	<Separator />
 
