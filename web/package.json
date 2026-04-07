@@ -20,6 +20,7 @@
 		"@sveltejs/kit": "^2.47.1",
 		"@sveltejs/vite-plugin-svelte": "^6.2.1",
 		"@tailwindcss/postcss": "^4.1.16",
+		"@types/dagre": "^0.7.54",
 		"dotenv": "^17.4.1",
 		"embla-carousel-svelte": "^8.6.0",
 		"svelte": "^5.41.0",
@@ -30,12 +31,14 @@
 		"vite": "^7.1.10"
 	},
 	"dependencies": {
+		"@dagrejs/dagre": "^3.0.0",
 		"@sveltejs/adapter-node": "^5.4.0",
 		"@tailwindcss/typography": "^0.5.19",
 		"@uppy/core": "^4.5.3",
 		"@uppy/file-input": "^4.2.2",
 		"@uppy/progress-bar": "^4.3.2",
 		"@uppy/tus": "^4.3.2",
+		"@xyflow/svelte": "^1.5.2",
 		"autoprefixer": "^10.4.21",
 		"bits-ui": "^2.14.1",
 		"clsx": "^2.1.1",
