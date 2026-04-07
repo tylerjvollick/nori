@@ -12,6 +12,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import { RefreshCw, AlertCircle, Maximize2 } from 'lucide-svelte';
+	import { isEditableTarget } from '$lib/utils/keyboard';
 	import TaskNode from './TaskNode.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
@@ -335,7 +336,62 @@
 		if (!date) return '';
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
+
+	// ---- Keyboard navigation ----
+	// useSvelteFlow provides zoomIn/zoomOut/fitView on the flow instance.
+	// It must be called inside a component that is a child of <SvelteFlow>,
+	// but since we render <SvelteFlow> in this same component, we'll use
+	// a direct approach with the nodes state and store refs.
+
+	let selectedNodeId = $derived.by(() => {
+		const sel = nodes.find((n) => n.selected);
+		return sel?.id ?? null;
+	});
+
+	function handleKeydown(e: KeyboardEvent): void {
+		if (isEditableTarget(e)) return;
+
+		switch (e.key) {
+			case 'Enter': {
+				if (selectedNodeId) {
+					e.preventDefault();
+					goto(`/flow/${selectedNodeId}`);
+				}
+				break;
+			}
+			case '+':
+			case '=': {
+				e.preventDefault();
+				// Zoom in — dispatch custom event handled by flow controls
+				// We can't use useSvelteFlow here since we're not inside the
+				// SvelteFlow context. Use the xyflow controls button directly.
+				const zoomInBtn = document.querySelector(
+					'.svelte-flow__controls button[title="zoom in"]',
+				) as HTMLButtonElement;
+				zoomInBtn?.click();
+				break;
+			}
+			case '-': {
+				e.preventDefault();
+				const zoomOutBtn = document.querySelector(
+					'.svelte-flow__controls button[title="zoom out"]',
+				) as HTMLButtonElement;
+				zoomOutBtn?.click();
+				break;
+			}
+			case '0': {
+				e.preventDefault();
+				const fitViewBtn = document.querySelector(
+					'.svelte-flow__controls button[title="fit view"]',
+				) as HTMLButtonElement;
+				fitViewBtn?.click();
+				break;
+			}
+		}
+	}
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col overflow-hidden">
 	<!-- Graph header -->

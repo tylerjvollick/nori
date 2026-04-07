@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
@@ -7,6 +8,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import { RefreshCw, AlertCircle } from 'lucide-svelte';
+	import { isEditableTarget, showToast } from '$lib/utils/keyboard';
 	import KanbanColumn from './KanbanColumn.svelte';
 	import TaskCard from './TaskCard.svelte';
 
@@ -27,6 +29,43 @@
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	let stationMap = $state<Map<string, string>>(new Map());
+
+	// ---- Keyboard selection state ----
+	// [columnIndex, cardIndex] — -1 means nothing selected
+	let selCol = $state(-1);
+	let selCard = $state(-1);
+
+	/** Get the tasks array for a given column index. */
+	function columnTasks(col: number): TaskResponse[] {
+		switch (col) {
+			case 0: return blockedTasks;
+			case 1: return readyTasks;
+			case 2: return inProgressTasks;
+			case 3: return doneTasks;
+			default: return [];
+		}
+	}
+
+	const COLUMN_COUNT = 4;
+
+	/** Get the currently selected task, or null. */
+	let selectedTask = $derived.by(() => {
+		if (selCol < 0 || selCard < 0) return null;
+		const tasks = columnTasks(selCol);
+		return tasks[selCard] ?? null;
+	});
+
+	/** Clamp the card index to the column's bounds. */
+	function clampCard(col: number, card: number): number {
+		const len = columnTasks(col).length;
+		if (len === 0) return -1;
+		return Math.max(0, Math.min(card, len - 1));
+	}
+
+	function clearSelection(): void {
+		selCol = -1;
+		selCard = -1;
+	}
 
 	// ---- Derived filters from URL ----
 
@@ -126,6 +165,24 @@
 			doneTasks = filterByPriority(allDone.slice(0, DONE_LIMIT));
 
 			lastRefreshed = new Date();
+
+			// After data refresh, clamp selection to stay in bounds
+			if (selCol >= 0) {
+				selCard = clampCard(selCol, selCard);
+				if (selCard < 0) {
+					// Column is now empty, try to find a non-empty column
+					let found = false;
+					for (let i = 0; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = 0;
+							found = true;
+							break;
+						}
+					}
+					if (!found) clearSelection();
+				}
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load board data';
 		} finally {
@@ -185,11 +242,182 @@
 	function handleTaskAction(): void {
 		fetchAllColumns({ silent: true });
 	}
+
+	// ---- Keyboard navigation ----
+
+	function handleKeydown(e: KeyboardEvent): void {
+		if (isEditableTarget(e)) return;
+
+		switch (e.key) {
+			case 'h': {
+				// Move selection left (previous column)
+				e.preventDefault();
+				if (selCol <= 0) {
+					// Not selected yet or at leftmost — select first card of first non-empty column
+					for (let i = 0; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = 0;
+							break;
+						}
+					}
+				} else {
+					// Move left, find previous non-empty column
+					for (let i = selCol - 1; i >= 0; i--) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = clampCard(i, selCard);
+							break;
+						}
+					}
+				}
+				scrollSelectedIntoView();
+				break;
+			}
+			case 'l': {
+				// Move selection right (next column)
+				// Also consumed here to prevent layout from switching to list view
+				e.preventDefault();
+				e.stopPropagation();
+				if (selCol < 0) {
+					// Not selected — select first card of first non-empty column
+					for (let i = 0; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = 0;
+							break;
+						}
+					}
+				} else {
+					// Move right, find next non-empty column
+					for (let i = selCol + 1; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = clampCard(i, selCard);
+							break;
+						}
+					}
+				}
+				scrollSelectedIntoView();
+				break;
+			}
+			case 'j': {
+				// Move selection down (next card in column)
+				e.preventDefault();
+				if (selCol < 0) {
+					// Not selected — select first card of first non-empty column
+					for (let i = 0; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = 0;
+							break;
+						}
+					}
+				} else {
+					const len = columnTasks(selCol).length;
+					if (selCard < len - 1) {
+						selCard++;
+					}
+				}
+				scrollSelectedIntoView();
+				break;
+			}
+			case 'k': {
+				// Move selection up (previous card in column)
+				e.preventDefault();
+				if (selCol < 0) {
+					// Not selected — select first card of first non-empty column
+					for (let i = 0; i < COLUMN_COUNT; i++) {
+						if (columnTasks(i).length > 0) {
+							selCol = i;
+							selCard = 0;
+							break;
+						}
+					}
+				} else {
+					if (selCard > 0) {
+						selCard--;
+					}
+				}
+				scrollSelectedIntoView();
+				break;
+			}
+			case 'Enter': {
+				// Open selected task detail
+				const task = selectedTask;
+				if (task) {
+					e.preventDefault();
+					goto(`/flow/${task.id}`);
+				}
+				break;
+			}
+			case 'c': {
+				// Claim selected task
+				const task = selectedTask;
+				if (task && task.status === 'open' && !task.assignedToId) {
+					e.preventDefault();
+					claimSelectedTask(task);
+				}
+				break;
+			}
+			case 'd': {
+				// Complete selected task (mark done)
+				const task = selectedTask;
+				if (task && task.status === 'active') {
+					e.preventDefault();
+					completeSelectedTask(task);
+				}
+				break;
+			}
+			case 'Escape': {
+				if (selCol >= 0) {
+					clearSelection();
+				}
+				break;
+			}
+		}
+	}
+
+	async function claimSelectedTask(task: TaskResponse): Promise<void> {
+		try {
+			await taskApi.claimTask(task.id);
+			showToast(`Claimed: ${task.title}`);
+			fetchAllColumns({ silent: true });
+		} catch (err) {
+			console.error('Failed to claim task:', err);
+			showToast('Failed to claim task');
+		}
+	}
+
+	async function completeSelectedTask(task: TaskResponse): Promise<void> {
+		try {
+			await taskApi.completeTask(task.id);
+			showToast(`Completed: ${task.title}`);
+			fetchAllColumns({ silent: true });
+		} catch (err) {
+			console.error('Failed to complete task:', err);
+			showToast('Failed to complete task');
+		}
+	}
+
+	function scrollSelectedIntoView(): void {
+		requestAnimationFrame(() => {
+			const el = document.querySelector('[data-kb-selected="true"]') as HTMLElement;
+			el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+		});
+	}
+
+	/** Check if a specific card in a column is the keyboard-selected one. */
+	function isSelected(colIndex: number, cardIndex: number): boolean {
+		return selCol === colIndex && selCard === cardIndex;
+	}
 </script>
 
 <svelte:head>
 	<title>Flow Board - Nori</title>
 </svelte:head>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col overflow-hidden">
 	<!-- Board header -->
@@ -228,8 +456,13 @@
 			colorClass="bg-red-500"
 			isLoading={isLoading}
 		>
-			{#each blockedTasks as task (task.id)}
-				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+			{#each blockedTasks as task, i (task.id)}
+				<div
+					class="rounded-lg {isSelected(0, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(0, i)}
+				>
+					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+				</div>
 			{/each}
 		</KanbanColumn>
 
@@ -240,8 +473,13 @@
 			colorClass="bg-blue-500"
 			isLoading={isLoading}
 		>
-			{#each readyTasks as task (task.id)}
-				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+			{#each readyTasks as task, i (task.id)}
+				<div
+					class="rounded-lg {isSelected(1, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(1, i)}
+				>
+					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+				</div>
 			{/each}
 		</KanbanColumn>
 
@@ -252,8 +490,13 @@
 			colorClass="bg-yellow-500"
 			isLoading={isLoading}
 		>
-			{#each inProgressTasks as task (task.id)}
-				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+			{#each inProgressTasks as task, i (task.id)}
+				<div
+					class="rounded-lg {isSelected(2, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(2, i)}
+				>
+					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+				</div>
 			{/each}
 		</KanbanColumn>
 
@@ -264,8 +507,13 @@
 			colorClass="bg-green-500"
 			isLoading={isLoading}
 		>
-			{#each doneTasks as task (task.id)}
-				<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+			{#each doneTasks as task, i (task.id)}
+				<div
+					class="rounded-lg {isSelected(3, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(3, i)}
+				>
+					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
+				</div>
 			{/each}
 		</KanbanColumn>
 	</div>

@@ -7,7 +7,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Select from '$lib/components/ui/select';
-	import { LayoutGrid, GitBranch, List, Filter, X } from 'lucide-svelte';
+	import { LayoutGrid, GitBranch, List, Filter, X, Keyboard } from 'lucide-svelte';
+	import { isEditableTarget, getToast, clearToast } from '$lib/utils/keyboard';
+	import KeyboardHelp from '$lib/components/flow/KeyboardHelp.svelte';
 
 	let { children } = $props();
 
@@ -55,6 +57,12 @@
 
 	let showFilters = $state(false);
 
+	// ---- Help overlay ----
+	let showHelp = $state(false);
+
+	// ---- Toast display ----
+	let toastMessage = $derived(getToast());
+
 	// ---- URL helpers ----
 
 	/** Update a URL search param and navigate. Removes param if value is empty. */
@@ -83,27 +91,65 @@
 	// ---- Keyboard shortcuts ----
 
 	function handleKeydown(e: KeyboardEvent): void {
-		// Don't trigger shortcuts when typing in inputs, selects, textareas
-		const target = e.target as HTMLElement;
-		if (
-			target.tagName === 'INPUT' ||
-			target.tagName === 'TEXTAREA' ||
-			target.tagName === 'SELECT' ||
-			target.isContentEditable ||
-			target.closest('[data-slot="select-trigger"]')
-		) {
+		// ? works even in help overlay — toggle it
+		if (e.key === '?' && !isEditableTarget(e)) {
+			e.preventDefault();
+			showHelp = !showHelp;
 			return;
 		}
 
-		switch (e.key.toLowerCase()) {
+		// Esc: close help overlay, close filter bar, or blur focused element
+		if (e.key === 'Escape') {
+			if (showHelp) {
+				showHelp = false;
+				return;
+			}
+			if (showFilters) {
+				showFilters = false;
+				return;
+			}
+			// Blur any focused element so view shortcuts can fire
+			if (document.activeElement instanceof HTMLElement) {
+				document.activeElement.blur();
+			}
+			return;
+		}
+
+		// Don't fire other shortcuts when help overlay is open
+		if (showHelp) return;
+
+		// Don't trigger shortcuts when typing in inputs, selects, textareas
+		if (isEditableTarget(e)) return;
+
+		switch (e.key) {
 			case 'b':
 				setView('board');
 				break;
 			case 'g':
 				setView('graph');
 				break;
+			// Note: 'l' for list view is handled here but also means "move right"
+			// in board view. Board view handles 'l' first; if board doesn't
+			// consume it, it falls through to here. We use 'L' (shift+l) as
+			// a fallback, but the spec says lowercase 'l'. The board view
+			// will stopPropagation when it handles 'l' for column navigation.
+			// Layout only handles view switching, views handle their own keys.
 			case 'l':
-				setView('list');
+				// Only switch view if NOT on the board view (board uses 'l' for navigation)
+				if (currentView !== 'board') {
+					setView('list');
+				}
+				break;
+			case '/':
+				e.preventDefault();
+				showFilters = true;
+				// Focus the first select trigger in the filter bar after it renders
+				requestAnimationFrame(() => {
+					const firstTrigger = document.querySelector(
+						'[data-slot="select-trigger"]',
+					) as HTMLElement;
+					firstTrigger?.focus();
+				});
 				break;
 		}
 	}
@@ -257,4 +303,29 @@
 	<div class="flex-1 overflow-auto">
 		{@render children()}
 	</div>
+
+	<!-- Toast notification (keyboard action confirmations) -->
+	{#if toastMessage}
+		<div class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+			<div class="rounded-lg border bg-background px-4 py-2 shadow-lg text-sm text-foreground">
+				{toastMessage}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Keyboard shortcut hint -->
+	<div class="fixed bottom-4 right-4 z-40">
+		<Button
+			variant="outline"
+			size="sm"
+			class="gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+			onclick={() => (showHelp = true)}
+		>
+			<Keyboard class="size-3.5" />
+			<kbd class="font-mono text-[10px]">?</kbd>
+		</Button>
+	</div>
+
+	<!-- Keyboard help overlay -->
+	<KeyboardHelp open={showHelp} onclose={() => (showHelp = false)} />
 </div>

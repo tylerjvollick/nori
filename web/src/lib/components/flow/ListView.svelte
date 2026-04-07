@@ -17,6 +17,7 @@
 		AlertCircle,
 		Inbox,
 	} from 'lucide-svelte';
+	import { isEditableTarget, showToast } from '$lib/utils/keyboard';
 
 	const POLL_INTERVAL_MS = 30_000;
 	const PAGE_SIZE = 50;
@@ -267,6 +268,108 @@
 		goto(`/flow/${taskId}`);
 	}
 
+	// ---- Keyboard selection ----
+
+	let selectedRow = $state(-1);
+
+	/** Get the currently selected task, or null. */
+	let selectedTask = $derived.by(() => {
+		if (selectedRow < 0 || selectedRow >= sortedTasks.length) return null;
+		return sortedTasks[selectedRow] ?? null;
+	});
+
+	function clearSelection(): void {
+		selectedRow = -1;
+	}
+
+	function scrollSelectedRowIntoView(): void {
+		requestAnimationFrame(() => {
+			const el = document.querySelector('[data-kb-selected="true"]') as HTMLElement;
+			el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+		});
+	}
+
+	function handleKeydown(e: KeyboardEvent): void {
+		if (isEditableTarget(e)) return;
+
+		switch (e.key) {
+			case 'j': {
+				e.preventDefault();
+				if (sortedTasks.length === 0) break;
+				if (selectedRow < 0) {
+					selectedRow = 0;
+				} else if (selectedRow < sortedTasks.length - 1) {
+					selectedRow++;
+				}
+				scrollSelectedRowIntoView();
+				break;
+			}
+			case 'k': {
+				e.preventDefault();
+				if (sortedTasks.length === 0) break;
+				if (selectedRow < 0) {
+					selectedRow = 0;
+				} else if (selectedRow > 0) {
+					selectedRow--;
+				}
+				scrollSelectedRowIntoView();
+				break;
+			}
+			case 'Enter': {
+				const task = selectedTask;
+				if (task) {
+					e.preventDefault();
+					navigateToTask(task.id);
+				}
+				break;
+			}
+			case 'c': {
+				const task = selectedTask;
+				if (task && task.status === 'open' && !task.assignedToId) {
+					e.preventDefault();
+					claimSelectedTask(task);
+				}
+				break;
+			}
+			case 'd': {
+				const task = selectedTask;
+				if (task && task.status === 'active') {
+					e.preventDefault();
+					completeSelectedTask(task);
+				}
+				break;
+			}
+			case 'Escape': {
+				if (selectedRow >= 0) {
+					clearSelection();
+				}
+				break;
+			}
+		}
+	}
+
+	async function claimSelectedTask(task: TaskResponse): Promise<void> {
+		try {
+			await taskApi.claimTask(task.id);
+			showToast(`Claimed: ${task.title}`);
+			fetchTasks({ silent: true });
+		} catch (err) {
+			console.error('Failed to claim task:', err);
+			showToast('Failed to claim task');
+		}
+	}
+
+	async function completeSelectedTask(task: TaskResponse): Promise<void> {
+		try {
+			await taskApi.completeTask(task.id);
+			showToast(`Completed: ${task.title}`);
+			fetchTasks({ silent: true });
+		} catch (err) {
+			console.error('Failed to complete task:', err);
+			showToast('Failed to complete task');
+		}
+	}
+
 	// ---- Helpers ----
 
 	const STATUS_COLORS: Record<string, string> = {
@@ -323,6 +426,8 @@
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col overflow-hidden">
 	<!-- Header -->
@@ -425,19 +530,20 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each sortedTasks as task (task.id)}
-							<tr
-								class="border-b last:border-b-0 cursor-pointer hover:bg-accent/50 transition-colors"
-								onclick={() => navigateToTask(task.id)}
-								role="link"
-								tabindex="0"
-								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										e.preventDefault();
-										navigateToTask(task.id);
-									}
-								}}
-							>
+					{#each sortedTasks as task, i (task.id)}
+						<tr
+							class="border-b last:border-b-0 cursor-pointer transition-colors {selectedRow === i ? 'bg-primary/10 ring-1 ring-inset ring-primary/30' : 'hover:bg-accent/50'}"
+							onclick={() => navigateToTask(task.id)}
+							role="link"
+							tabindex="0"
+							data-kb-selected={selectedRow === i}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									navigateToTask(task.id);
+								}
+							}}
+						>
 								<!-- ID -->
 								<td class="px-3 py-2.5 font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={task.id}>
 									{task.id}
