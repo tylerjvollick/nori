@@ -1,0 +1,273 @@
+# Kitchen Cabinet Painting — refinishing workflow
+#
+# A demo recipe for painting existing kitchen cabinets in place.
+# Two parallel streams converge at reinstall:
+#   1. Doors & drawers: remove → clean → sand → prime → paint → paint 2
+#   2. Boxes (in place): clean → tape/mask → sand → prime → paint → paint 2 → unmask
+#
+# Timer gates enforce dry times between coats.
+#
+# batch_size controls the number of cabinet sets (kitchens). For a single
+# kitchen job, leave at 1. Per-piece steps are not needed here — each step
+# operates on the whole kitchen as one unit.
+#
+# Import:  nori recipe create --from-toml seeds/kitchen-cabinets.toml
+# Pour:    nori recipe pour kitchen-cabinets --var paint_color="White" --var sheen="Semi-Gloss"
+
+formula = "Kitchen Cabinet Painting"
+
+[recipe]
+name = "kitchen-cabinets"
+description = "Paint existing kitchen cabinets — remove doors, prep, prime, paint, reinstall"
+version = 1
+type = "workflow"
+
+[vars]
+paint_color = { description = "Paint color name or code", default = "White" }
+sheen = { description = "Finish sheen", enum = ["Matte", "Satin", "Semi-Gloss", "Gloss"], default = "Semi-Gloss" }
+primer = { description = "Primer type", default = "Shellac-based" }
+num_doors = { description = "Number of cabinet doors", type = "int", default = "20" }
+num_drawers = { description = "Number of drawer fronts", type = "int", default = "10" }
+
+# ── STREAM 1: Doors & Drawer Fronts ────────────────────────────────────
+
+[[steps]]
+id = "label-doors"
+title = "Label all doors and drawers"
+description = "Number each door and drawer front with painter's tape on the back. Photograph the layout for reference. Record hinge positions."
+
+[[steps]]
+id = "remove-doors"
+title = "Remove doors, drawers, and hardware"
+needs = ["label-doors"]
+description = "Remove all {{num_doors}} doors and {{num_drawers}} drawer fronts. Bag and label hardware per cabinet. Remove hinges, pulls, and knobs."
+
+[[steps]]
+id = "clean-doors"
+title = "Degrease doors and drawer fronts"
+needs = ["remove-doors"]
+description = "Clean all surfaces with TSP or Krud Kutter. Kitchen grease builds up heavily near the stove. Rinse and let dry."
+
+[[steps]]
+id = "sand-doors"
+title = "Sand doors and drawer fronts"
+needs = ["clean-doors"]
+description = "Sand all surfaces with 150-grit to scuff the existing finish. Wipe with tack cloth. Fill any dents or holes with wood filler, let dry, re-sand."
+
+[[steps]]
+id = "prime-doors"
+title = "Prime doors and drawer fronts"
+station = "spray-booth"
+needs = ["sand-doors"]
+description = "Apply {{primer}} primer. Spray or roll — spray gives a smoother finish. Do backs first, let dry, flip, do fronts. Check for drips."
+
+  [steps.gate]
+  type = "timer"
+  id = "primer-cure-doors"
+  timeout = "4h"
+
+[[steps]]
+id = "sand-primer-doors"
+title = "Sand primer on doors"
+needs = ["prime-doors"]
+description = "Lightly sand primed surfaces with 220-grit. Wipe with tack cloth. Check for any bare spots and touch up."
+
+[[steps]]
+id = "paint-doors-1"
+title = "First coat — doors and drawers"
+station = "spray-booth"
+needs = ["sand-primer-doors"]
+description = "Apply first coat of {{paint_color}} {{sheen}}. Thin coats — avoid drips. Spray in a dust-free area. Do backs first, let tack up, flip, do fronts."
+
+  [steps.gate]
+  type = "timer"
+  id = "paint1-cure-doors"
+  timeout = "6h"
+
+[[steps]]
+id = "sand-between-doors"
+title = "Sand between coats — doors"
+needs = ["paint-doors-1"]
+description = "Lightly sand with 320-grit. Just knock down any nibs or dust. Wipe with tack cloth."
+
+[[steps]]
+id = "paint-doors-2"
+title = "Second coat — doors and drawers"
+station = "spray-booth"
+needs = ["sand-between-doors"]
+description = "Apply second coat of {{paint_color}} {{sheen}}. Same technique as first coat. This is the finish coat — take your time."
+
+  [steps.gate]
+  type = "timer"
+  id = "paint2-cure-doors"
+  timeout = "24h"
+
+# ── STREAM 2: Cabinet Boxes (in place) ─────────────────────────────────
+
+[[steps]]
+id = "clean-boxes"
+title = "Degrease cabinet boxes"
+needs = ["remove-doors"]
+description = "Clean all box interiors and face frames with TSP. Pay extra attention to areas near stove and above dishwasher."
+
+[[steps]]
+id = "tape-mask"
+title = "Tape and mask the kitchen"
+needs = ["clean-boxes"]
+description = "Mask off walls, countertops, backsplash, appliances, and floors. Use plastic sheeting on counters. Tape edges of face frames cleanly."
+
+[[steps]]
+id = "sand-boxes"
+title = "Sand cabinet boxes and face frames"
+needs = ["tape-mask"]
+description = "Sand face frames and visible box interiors with 150-grit. Wipe with tack cloth. Fill any holes or dents."
+
+[[steps]]
+id = "prime-boxes"
+title = "Prime cabinet boxes"
+needs = ["sand-boxes"]
+description = "Apply {{primer}} primer to face frames and visible box surfaces. Use a mini roller for flat areas and a brush for inside corners."
+
+  [steps.gate]
+  type = "timer"
+  id = "primer-cure-boxes"
+  timeout = "4h"
+
+[[steps]]
+id = "sand-primer-boxes"
+title = "Sand primer on boxes"
+needs = ["prime-boxes"]
+description = "Lightly sand primed surfaces with 220-grit. Wipe with tack cloth."
+
+[[steps]]
+id = "paint-boxes-1"
+title = "First coat — cabinet boxes"
+needs = ["sand-primer-boxes"]
+description = "Apply first coat of {{paint_color}} {{sheen}} to face frames and box interiors. Mini foam roller + brush for corners."
+
+  [steps.gate]
+  type = "timer"
+  id = "paint1-cure-boxes"
+  timeout = "6h"
+
+[[steps]]
+id = "sand-between-boxes"
+title = "Sand between coats — boxes"
+needs = ["paint-boxes-1"]
+description = "Lightly sand with 320-grit. Wipe with tack cloth."
+
+[[steps]]
+id = "paint-boxes-2"
+title = "Second coat — cabinet boxes"
+needs = ["sand-between-boxes"]
+description = "Apply second coat of {{paint_color}} {{sheen}}. Finish coat — check for drips and holidays."
+
+  [steps.gate]
+  type = "timer"
+  id = "paint2-cure-boxes"
+  timeout = "24h"
+
+[[steps]]
+id = "unmask"
+title = "Remove tape and masking"
+needs = ["paint-boxes-2"]
+description = "Carefully remove all tape and plastic. Pull tape at a 45-degree angle while paint is still slightly soft for clean lines."
+
+# ── Convergence: Reinstall ─────────────────────────────────────────────
+
+[[steps]]
+id = "install-hardware"
+title = "Install new hardware"
+needs = ["paint-doors-2"]
+description = "Install new pulls, knobs, and hinges on doors and drawer fronts. Use a jig for consistent placement."
+
+[[steps]]
+id = "reinstall-doors"
+title = "Reinstall doors and drawers"
+needs = ["install-hardware", "unmask"]
+description = "Hang all doors using the labeled reference photos. Adjust hinges for even gaps and alignment. Reinstall drawer fronts. Check that everything opens and closes smoothly."
+
+[[steps]]
+id = "touch-up"
+title = "Touch up and final inspection"
+needs = ["reinstall-doors"]
+description = "Inspect every door and drawer. Touch up any scratches from reinstall, fill any visible nail holes. Check for even color and sheen."
+
+[[steps]]
+id = "cleanup"
+title = "Clean up and client walkthrough"
+needs = ["touch-up"]
+type = "milestone"
+description = "Remove all drop cloths and supplies. Clean the kitchen. Walk the client through the finished work. Note any areas to monitor during cure."
+
+# ── BOM ────────────────────────────────────────────────────────────────
+
+[bom]
+  [[bom.items]]
+  name = "{{primer}} primer"
+  quantity = 2
+  unit = "gallon"
+  step = "prime-doors"
+  notes = "Shellac-based blocks tannin bleed from oak and stains"
+
+  [[bom.items]]
+  name = "{{paint_color}} {{sheen}} cabinet paint"
+  quantity = 3
+  unit = "gallon"
+  step = "paint-doors-1"
+  notes = "Use cabinet-grade paint (Benjamin Moore Advance, SW Emerald Urethane, etc.)"
+
+  [[bom.items]]
+  name = "Sandpaper 150-grit"
+  quantity = 1
+  unit = "pack"
+  step = "sand-doors"
+
+  [[bom.items]]
+  name = "Sandpaper 220-grit"
+  quantity = 1
+  unit = "pack"
+  step = "sand-primer-doors"
+
+  [[bom.items]]
+  name = "Sandpaper 320-grit"
+  quantity = 1
+  unit = "pack"
+  step = "sand-between-doors"
+
+  [[bom.items]]
+  name = "TSP or degreaser"
+  quantity = 1
+  unit = "quart"
+  step = "clean-doors"
+
+  [[bom.items]]
+  name = "Painter's tape (1.5\")"
+  quantity = 6
+  unit = "roll"
+  step = "tape-mask"
+
+  [[bom.items]]
+  name = "Plastic sheeting"
+  quantity = 1
+  unit = "roll"
+  step = "tape-mask"
+
+  [[bom.items]]
+  name = "Tack cloth"
+  quantity = 12
+  unit = "each"
+  step = "sand-doors"
+
+  [[bom.items]]
+  name = "Mini foam rollers (4\")"
+  quantity = 12
+  unit = "each"
+  step = "paint-boxes-1"
+  notes = "Use high-density foam for smooth finish"
+
+  [[bom.items]]
+  name = "Angled brush (2.5\")"
+  quantity = 2
+  unit = "each"
+  step = "paint-boxes-1"
