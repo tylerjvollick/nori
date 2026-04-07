@@ -17,6 +17,18 @@
 
 	import '@xyflow/svelte/dist/style.css';
 
+	/** Optional pre-loaded tasks and deps. When provided, the graph uses these instead of fetching. */
+	interface Props {
+		tasks?: TaskResponse[];
+		deps?: Map<string, TaskDepsResponse>;
+		stationMap?: Map<string, string>;
+	}
+
+	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap }: Props = $props();
+
+	/** Whether we're in scoped mode (tasks provided externally). */
+	let isScoped = $derived(!!externalTasks);
+
 	// ---- Constants ----
 	const POLL_INTERVAL_MS = 30_000;
 	const TASK_LIMIT = 500;
@@ -36,7 +48,8 @@
 	let isRefreshing = $state(false);
 	let lastRefreshed = $state<Date | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
-	let stationMap = $state<Map<string, string>>(new Map());
+	let _internalStationMap = $state<Map<string, string>>(new Map());
+	let stationMap = $derived(externalStationMap ?? _internalStationMap);
 	let taskCount = $state(0);
 	let edgeCount = $state(0);
 
@@ -111,7 +124,7 @@
 			for (const s of stations) {
 				map.set(s.id, s.name);
 			}
-			stationMap = map;
+			_internalStationMap = map;
 		} catch {
 			// Stations endpoint may not exist yet — gracefully degrade.
 		}
@@ -316,14 +329,116 @@
 			prevStatus = st;
 			prevPriority = p;
 			if (lastRefreshed) {
-				fetchGraph({ silent: true });
+				if (isScoped && externalTasks) {
+					buildFromExternalData(externalTasks, externalDeps);
+				} else {
+					fetchGraph({ silent: true });
+				}
 			}
 		}
 	});
 
 	// ---- Lifecycle ----
 
+	/** Build graph from externally-provided tasks and deps. */
+	function buildFromExternalData(tasks: TaskResponse[], depsMap?: Map<string, TaskDepsResponse>): void {
+		// Apply filters
+		let filtered = tasks;
+		if (stationFilter) {
+			filtered = filtered.filter((t) => t.stationId === stationFilter);
+		}
+		if (statusFilter) {
+			filtered = filtered.filter((t) => t.status === statusFilter);
+		}
+		if (priorityFilter) {
+			const p = Number(priorityFilter);
+			filtered = filtered.filter((t) => t.priority === p);
+		}
+
+		if (filtered.length === 0) {
+			nodes = [];
+			edges = [];
+			taskCount = 0;
+			edgeCount = 0;
+			isLoading = false;
+			lastRefreshed = new Date();
+			return;
+		}
+
+		const taskMap = new Map<string, TaskResponse>();
+		for (const t of filtered) {
+			taskMap.set(t.id, t);
+		}
+
+		// Build nodes
+		const newNodes: Node[] = filtered.map((task) => ({
+			id: task.id,
+			type: 'task',
+			position: { x: 0, y: 0 },
+			data: {
+				title: task.title,
+				taskId: task.id,
+				status: task.status,
+				type: task.type,
+				priority: task.priority,
+				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
+			},
+		}));
+
+		// Build edges from provided deps
+		const edgeSet = new Set<string>();
+		const newEdges: Edge[] = [];
+
+		if (depsMap) {
+			for (const [, deps] of depsMap) {
+				for (const dep of [...deps.blockers, ...deps.dependents]) {
+					const edgeId = `${dep.fromTaskId}->${dep.toTaskId}`;
+					if (edgeSet.has(edgeId)) continue;
+					edgeSet.add(edgeId);
+
+					if (!taskMap.has(dep.fromTaskId) || !taskMap.has(dep.toTaskId)) continue;
+
+					const blockerTask = taskMap.get(dep.fromTaskId);
+					const blockerStatus = blockerTask?.status ?? 'open';
+					const isResolved = blockerStatus === 'done' || blockerStatus === 'skipped';
+
+					newEdges.push({
+						id: edgeId,
+						source: dep.fromTaskId,
+						target: dep.toTaskId,
+						type: 'smoothstep',
+						animated: !isResolved,
+						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
+						markerEnd: {
+							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
+							color: STATUS_EDGE_COLORS[blockerStatus],
+						},
+					});
+				}
+			}
+		}
+
+		const layouted = getLayoutedElements(newNodes, newEdges);
+		nodes = layouted.nodes;
+		edges = layouted.edges;
+		taskCount = filtered.length;
+		edgeCount = newEdges.length;
+		isLoading = false;
+		lastRefreshed = new Date();
+	}
+
+	// When external tasks change, rebuild the graph
+	$effect(() => {
+		if (externalTasks) {
+			buildFromExternalData(externalTasks, externalDeps);
+		}
+	});
+
 	onMount(async () => {
+		if (isScoped) {
+			// In scoped mode, tasks are provided externally. No fetching needed.
+			return;
+		}
 		await Promise.all([fetchGraph(), fetchStations()]);
 		startPolling();
 	});

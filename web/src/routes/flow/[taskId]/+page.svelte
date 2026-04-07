@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
 	import type { TaskResponse } from '$lib/types/task';
@@ -8,11 +9,15 @@
 	import type { StationResponse } from '$lib/types/station';
 	import TaskTree from '$lib/components/flow/TaskTree.svelte';
 	import TaskDetailPanel from '$lib/components/flow/TaskDetailPanel.svelte';
+	import BoardView from '$lib/components/flow/BoardView.svelte';
+	import GraphView from '$lib/components/flow/GraphView.svelte';
+	import ListView from '$lib/components/flow/ListView.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { ArrowLeft, AlertCircle } from 'lucide-svelte';
+	import { ArrowLeft, AlertCircle, TreePine, LayoutGrid, GitBranch, List } from 'lucide-svelte';
+	import { isEditableTarget } from '$lib/utils/keyboard';
 
 	let taskId = $derived($page.params.taskId);
 
@@ -21,9 +26,121 @@
 	let error = $state<string | null>(null);
 	let stationMap = $state<Map<string, string>>(new Map());
 
-	// Selection state
+	// Selection state (for tree view)
 	let selectedTask = $state<TaskTreeResponse | null>(null);
 	let selectedDeps = $state<TaskDepsResponse | null>(null);
+
+	// ---- View mode ----
+	type ViewMode = 'tree' | 'board' | 'graph' | 'list';
+	const VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
+		{ value: 'tree', label: 'Tree', icon: TreePine },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
+		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'list', label: 'List', icon: List },
+	];
+
+	let currentView = $derived<ViewMode>(
+		(($page.url.searchParams.get('view') as ViewMode) || 'tree') as ViewMode,
+	);
+
+	function setView(mode: ViewMode): void {
+		const url = new URL($page.url);
+		if (mode === 'tree') {
+			url.searchParams.delete('view');
+		} else {
+			url.searchParams.set('view', mode);
+		}
+		goto(url.toString(), { replaceState: true, keepFocus: true, noScroll: true });
+	}
+
+	// ---- Flatten tree into TaskResponse[] for scoped views ----
+
+	function flattenTree(node: TaskTreeResponse): TaskResponse[] {
+		const result: TaskResponse[] = [];
+		function walk(n: TaskTreeResponse): void {
+			// Add the node as a TaskResponse (strip children)
+			// eslint-disable-next-line @typescript-eslint/no-unused-vars
+			const { children, ...task } = n;
+			result.push(task as TaskResponse);
+			if (n.children) {
+				for (const child of n.children) {
+					walk(child);
+				}
+			}
+		}
+		walk(node);
+		return result;
+	}
+
+	/** Flattened descendants (excludes root) for scoped views. */
+	let flatTasks = $derived.by((): TaskResponse[] => {
+		if (!tree) return [];
+		const all = flattenTree(tree);
+		// Exclude the root task itself — views should show descendants only
+		return all.slice(1);
+	});
+
+	/** Deps map for all descendants — built lazily when graph view is active. */
+	let depsMap = $state<Map<string, TaskDepsResponse>>(new Map());
+	let depsLoaded = $state(false);
+
+	async function loadDepsForDescendants(): Promise<void> {
+		if (depsLoaded || !tree) return;
+		const tasks = flatTasks;
+		const map = new Map<string, TaskDepsResponse>();
+
+		// Fetch deps in batches of 20
+		const BATCH_SIZE = 20;
+		for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
+			const batch = tasks.slice(i, i + BATCH_SIZE);
+			const results = await Promise.all(
+				batch.map(async (t) => {
+					try {
+						const deps = await taskApi.getTaskDeps(t.id);
+						return { id: t.id, deps };
+					} catch {
+						return { id: t.id, deps: { blockers: [], dependents: [] } as TaskDepsResponse };
+					}
+				}),
+			);
+			for (const r of results) {
+				map.set(r.id, r.deps);
+			}
+		}
+		depsMap = map;
+		depsLoaded = true;
+	}
+
+	// Load deps when switching to graph view
+	$effect(() => {
+		if (currentView === 'graph' && !depsLoaded && tree) {
+			loadDepsForDescendants();
+		}
+	});
+
+	// ---- Keyboard shortcuts ----
+
+	function handleKeydown(e: KeyboardEvent): void {
+		if (isEditableTarget(e)) return;
+
+		switch (e.key) {
+			case 't':
+				setView('tree');
+				break;
+			case 'b':
+				setView('board');
+				break;
+			case 'g':
+				setView('graph');
+				break;
+			case 'l':
+				// Only switch if not in board view (board uses 'l' for column navigation)
+				if (currentView !== 'board') {
+					setView('list');
+				}
+				break;
+		}
+	}
 
 	/** Build breadcrumb path from root to the selected task by walking the tree. */
 	function buildBreadcrumb(
@@ -49,7 +166,9 @@
 	}
 
 	let breadcrumbPath = $derived(
-		tree && selectedTask ? buildBreadcrumb(tree, selectedTask.id) : [],
+		tree && selectedTask && currentView === 'tree'
+			? buildBreadcrumb(tree, selectedTask.id)
+			: [],
 	);
 
 	async function handleSelect(task: TaskTreeResponse): Promise<void> {
@@ -70,6 +189,9 @@
 		try {
 			const newTree = await taskApi.getTaskTree(taskId);
 			tree = newTree;
+			// Reset deps cache so graph view re-fetches on next switch
+			depsLoaded = false;
+			depsMap = new Map();
 			// Re-select the same task within the new tree
 			if (selectedTask) {
 				const found = findNode(newTree, selectedTask.id);
@@ -151,8 +273,10 @@
 	<title>{tree?.title ?? 'Task'} - Nori</title>
 </svelte:head>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="flex-1 overflow-hidden flex flex-col">
-	<!-- Top bar: back link + breadcrumb -->
+	<!-- Top bar: back link + view switcher + breadcrumb -->
 	<div class="px-4 sm:px-6 py-3 border-b border-border shrink-0">
 		<div class="flex items-center gap-4">
 			<a
@@ -162,6 +286,23 @@
 				<ArrowLeft class="w-4 h-4" />
 				Back
 			</a>
+
+			<!-- View mode switcher (segmented control) -->
+			<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+				{#each VIEW_MODES as mode (mode.value)}
+					<Button
+						variant={currentView === mode.value ? 'secondary' : 'ghost'}
+						size="sm"
+						class="gap-1.5 rounded-md px-3 {currentView === mode.value
+							? 'bg-background shadow-sm'
+							: 'hover:bg-transparent hover:text-foreground'}"
+						onclick={() => setView(mode.value)}
+					>
+						<mode.icon class="size-4" />
+						{mode.label}
+					</Button>
+				{/each}
+			</div>
 
 			{#if breadcrumbPath.length > 0}
 				<Breadcrumb.Root>
@@ -219,62 +360,74 @@
 			</div>
 		</div>
 
-	<!-- Main split view: tree (left 40%) | detail (right 60%) -->
+	<!-- Content views -->
 	{:else if tree}
-		{@const rootProgress = computeRootProgress(tree)}
+		{#if currentView === 'tree'}
+			<!-- Tree + Detail split view (original) -->
+			{@const rootProgress = computeRootProgress(tree)}
 
-		<div class="flex-1 flex overflow-hidden">
-			<!-- Left: Task tree -->
-			<div class="w-2/5 border-r border-border overflow-y-auto p-4">
-				<div class="mb-4">
-					<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
-					{#if rootProgress.total > 0}
-						<div class="mt-2">
-							<div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
-								<span>{rootProgress.done}/{rootProgress.total} done</span>
-								<span>{Math.round((rootProgress.done / rootProgress.total) * 100)}%</span>
+			<div class="flex-1 flex overflow-hidden">
+				<!-- Left: Task tree -->
+				<div class="w-2/5 border-r border-border overflow-y-auto p-4">
+					<div class="mb-4">
+						<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
+						{#if rootProgress.total > 0}
+							<div class="mt-2">
+								<div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
+									<span>{rootProgress.done}/{rootProgress.total} done</span>
+									<span>{Math.round((rootProgress.done / rootProgress.total) * 100)}%</span>
+								</div>
+								<div class="h-1.5 bg-muted rounded-full overflow-hidden">
+									<div
+										class="h-full bg-green-500 transition-all duration-300"
+										style="width: {(rootProgress.done / rootProgress.total) * 100}%"
+									></div>
+								</div>
 							</div>
-							<div class="h-1.5 bg-muted rounded-full overflow-hidden">
-								<div
-									class="h-full bg-green-500 transition-all duration-300"
-									style="width: {(rootProgress.done / rootProgress.total) * 100}%"
-								></div>
-							</div>
+						{/if}
+					</div>
+
+					<Separator class="mb-3" />
+
+					{#if tree.children && tree.children.length > 0}
+						<TaskTree
+							nodes={tree.children}
+							{stationMap}
+							selectedTaskId={selectedTask?.id}
+							onselect={handleSelect}
+						/>
+					{:else}
+						<div class="border border-border rounded-lg p-6 text-center">
+							<p class="text-sm text-muted-foreground">No child tasks yet.</p>
 						</div>
 					{/if}
 				</div>
 
-				<Separator class="mb-3" />
-
-				{#if tree.children && tree.children.length > 0}
-					<TaskTree
-						nodes={tree.children}
-						{stationMap}
-						selectedTaskId={selectedTask?.id}
-						onselect={handleSelect}
-					/>
-				{:else}
-					<div class="border border-border rounded-lg p-6 text-center">
-						<p class="text-sm text-muted-foreground">No child tasks yet.</p>
-					</div>
-				{/if}
+				<!-- Right: Detail panel -->
+				<div class="w-3/5 overflow-y-auto">
+					{#if selectedTask}
+						<TaskDetailPanel
+							task={selectedTask}
+							{stationMap}
+							deps={selectedDeps}
+							onaction={handleTaskAction}
+						/>
+					{:else}
+						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
+							Select a task to view details
+						</div>
+					{/if}
+				</div>
 			</div>
 
-			<!-- Right: Detail panel -->
-			<div class="w-3/5 overflow-y-auto">
-				{#if selectedTask}
-					<TaskDetailPanel
-						task={selectedTask}
-						{stationMap}
-						deps={selectedDeps}
-						onaction={handleTaskAction}
-					/>
-				{:else}
-					<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
-						Select a task to view details
-					</div>
-				{/if}
-			</div>
-		</div>
+		{:else if currentView === 'board'}
+			<BoardView tasks={flatTasks} {stationMap} />
+
+		{:else if currentView === 'graph'}
+			<GraphView tasks={flatTasks} deps={depsMap} {stationMap} />
+
+		{:else if currentView === 'list'}
+			<ListView tasks={flatTasks} {stationMap} />
+		{/if}
 	{/if}
 </div>

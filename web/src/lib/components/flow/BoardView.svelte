@@ -12,6 +12,17 @@
 	import KanbanColumn from './KanbanColumn.svelte';
 	import TaskCard from './TaskCard.svelte';
 
+	/** Optional pre-loaded tasks. When provided, the board uses these instead of fetching from the API. */
+	interface Props {
+		tasks?: TaskResponse[];
+		stationMap?: Map<string, string>;
+	}
+
+	let { tasks: externalTasks, stationMap: externalStationMap }: Props = $props();
+
+	/** Whether we're in scoped mode (tasks provided externally). */
+	let isScoped = $derived(!!externalTasks);
+
 	const POLL_INTERVAL_MS = 30_000;
 	const DONE_LIMIT = 20;
 
@@ -28,15 +39,25 @@
 	let lastRefreshed = $state<Date | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-	let stationMap = $state<Map<string, string>>(new Map());
+	let _internalStationMap = $state<Map<string, string>>(new Map());
+	let stationMap = $derived(externalStationMap ?? _internalStationMap);
 
 	// ---- Keyboard selection state ----
 	// [columnIndex, cardIndex] — -1 means nothing selected
 	let selCol = $state(-1);
 	let selCard = $state(-1);
 
-	/** Get the tasks array for a given column index. */
+	/** Get the tasks array for a given column index.
+	 *  In scoped mode, there's no Blocked column, so indices shift. */
 	function columnTasks(col: number): TaskResponse[] {
+		if (isScoped) {
+			switch (col) {
+				case 0: return readyTasks;
+				case 1: return inProgressTasks;
+				case 2: return doneTasks;
+				default: return [];
+			}
+		}
 		switch (col) {
 			case 0: return blockedTasks;
 			case 1: return readyTasks;
@@ -46,7 +67,7 @@
 		}
 	}
 
-	const COLUMN_COUNT = 4;
+	let columnCount = $derived(isScoped ? 3 : 4);
 
 	/** Get the currently selected task, or null. */
 	let selectedTask = $derived.by(() => {
@@ -81,7 +102,7 @@
 			for (const s of stations) {
 				map.set(s.id, s.name);
 			}
-			stationMap = map;
+			_internalStationMap = map;
 		} catch {
 			// Stations endpoint may not exist yet — gracefully degrade.
 		}
@@ -95,6 +116,41 @@
 		// and as a query param for listTasks
 		return params;
 	}
+
+	/** Categorize externally-provided tasks into board columns by status. */
+	function categorizeExternalTasks(tasks: TaskResponse[]): void {
+		const pFilter = priorityFilter ? Number(priorityFilter) : null;
+		const filterByPriority = (t: TaskResponse[]): TaskResponse[] => {
+			if (pFilter === null) return t;
+			return t.filter((task) => task.priority === pFilter);
+		};
+
+		let filtered = tasks;
+		if (stationFilter) {
+			filtered = filtered.filter((t) => t.stationId === stationFilter);
+		}
+
+		// In scoped mode, all open tasks go to Ready (no API to distinguish blocked vs ready)
+		readyTasks = filterByPriority(filtered.filter((t) => t.status === 'open'));
+		blockedTasks = []; // Not determinable without deps API in scoped mode
+		inProgressTasks = filterByPriority(
+			filtered.filter((t) => t.status === 'active' || t.status === 'paused'),
+		);
+
+		const allDone = filtered.filter((t) => t.status === 'done' || t.status === 'skipped');
+		allDone.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+		doneTasks = filterByPriority(allDone.slice(0, DONE_LIMIT));
+
+		isLoading = false;
+		lastRefreshed = new Date();
+	}
+
+	// When external tasks change, re-categorize
+	$effect(() => {
+		if (externalTasks) {
+			categorizeExternalTasks(externalTasks);
+		}
+	});
 
 	async function fetchAllColumns(opts?: { silent?: boolean }): Promise<void> {
 		if (!opts?.silent) {
@@ -172,7 +228,7 @@
 				if (selCard < 0) {
 					// Column is now empty, try to find a non-empty column
 					let found = false;
-					for (let i = 0; i < COLUMN_COUNT; i++) {
+					for (let i = 0; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = 0;
@@ -219,12 +275,21 @@
 			prevPriority = p;
 			// Don't refetch on initial mount — onMount handles that
 			if (lastRefreshed) {
-				fetchAllColumns({ silent: true });
+				if (isScoped && externalTasks) {
+					categorizeExternalTasks(externalTasks);
+				} else {
+					fetchAllColumns({ silent: true });
+				}
 			}
 		}
 	});
 
 	onMount(async () => {
+		if (isScoped) {
+			// In scoped mode, tasks are provided externally. No fetching needed.
+			// Station map is also provided externally.
+			return;
+		}
 		await Promise.all([fetchAllColumns(), fetchStations()]);
 		startPolling();
 	});
@@ -240,7 +305,13 @@
 
 	/** After any task action, refresh the board to reflect the new state. */
 	function handleTaskAction(): void {
-		fetchAllColumns({ silent: true });
+		if (isScoped && externalTasks) {
+			// In scoped mode, parent should provide updated tasks via prop
+			// But also re-categorize with current data as a fallback
+			categorizeExternalTasks(externalTasks);
+		} else {
+			fetchAllColumns({ silent: true });
+		}
 	}
 
 	// ---- Keyboard navigation ----
@@ -254,7 +325,7 @@
 				e.preventDefault();
 				if (selCol <= 0) {
 					// Not selected yet or at leftmost — select first card of first non-empty column
-					for (let i = 0; i < COLUMN_COUNT; i++) {
+					for (let i = 0; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = 0;
@@ -281,7 +352,7 @@
 				e.stopPropagation();
 				if (selCol < 0) {
 					// Not selected — select first card of first non-empty column
-					for (let i = 0; i < COLUMN_COUNT; i++) {
+					for (let i = 0; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = 0;
@@ -290,7 +361,7 @@
 					}
 				} else {
 					// Move right, find next non-empty column
-					for (let i = selCol + 1; i < COLUMN_COUNT; i++) {
+					for (let i = selCol + 1; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = clampCard(i, selCard);
@@ -306,7 +377,7 @@
 				e.preventDefault();
 				if (selCol < 0) {
 					// Not selected — select first card of first non-empty column
-					for (let i = 0; i < COLUMN_COUNT; i++) {
+					for (let i = 0; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = 0;
@@ -327,7 +398,7 @@
 				e.preventDefault();
 				if (selCol < 0) {
 					// Not selected — select first card of first non-empty column
-					for (let i = 0; i < COLUMN_COUNT; i++) {
+					for (let i = 0; i < columnCount; i++) {
 						if (columnTasks(i).length > 0) {
 							selCol = i;
 							selCard = 0;
@@ -411,6 +482,11 @@
 	function isSelected(colIndex: number, cardIndex: number): boolean {
 		return selCol === colIndex && selCard === cardIndex;
 	}
+
+	/** Column indices that shift based on whether Blocked column is shown. */
+	let readyColIdx = $derived(isScoped ? 0 : 1);
+	let ipColIdx = $derived(isScoped ? 1 : 2);
+	let doneColIdx = $derived(isScoped ? 2 : 3);
 </script>
 
 <svelte:head>
@@ -449,7 +525,8 @@
 
 	<!-- Kanban columns -->
 	<div class="flex flex-1 gap-4 overflow-x-auto px-4 pb-4">
-		<!-- Blocked -->
+		<!-- Blocked (hidden in scoped mode since we can't determine blocked status) -->
+		{#if !isScoped}
 		<KanbanColumn
 			title="Blocked"
 			count={blockedTasks.length}
@@ -465,6 +542,7 @@
 				</div>
 			{/each}
 		</KanbanColumn>
+		{/if}
 
 		<!-- Ready -->
 		<KanbanColumn
@@ -475,8 +553,8 @@
 		>
 			{#each readyTasks as task, i (task.id)}
 				<div
-					class="rounded-lg {isSelected(1, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
-					data-kb-selected={isSelected(1, i)}
+					class="rounded-lg {isSelected(readyColIdx, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(readyColIdx, i)}
 				>
 					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 				</div>
@@ -492,8 +570,8 @@
 		>
 			{#each inProgressTasks as task, i (task.id)}
 				<div
-					class="rounded-lg {isSelected(2, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
-					data-kb-selected={isSelected(2, i)}
+					class="rounded-lg {isSelected(ipColIdx, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(ipColIdx, i)}
 				>
 					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 				</div>
@@ -509,8 +587,8 @@
 		>
 			{#each doneTasks as task, i (task.id)}
 				<div
-					class="rounded-lg {isSelected(3, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
-					data-kb-selected={isSelected(3, i)}
+					class="rounded-lg {isSelected(doneColIdx, i) ? 'ring-2 ring-primary ring-offset-1' : ''}"
+					data-kb-selected={isSelected(doneColIdx, i)}
 				>
 					<TaskCard {task} {stationMap} onaction={handleTaskAction} />
 				</div>

@@ -19,6 +19,17 @@
 	} from 'lucide-svelte';
 	import { isEditableTarget, showToast } from '$lib/utils/keyboard';
 
+	/** Optional pre-loaded tasks. When provided, the list uses these instead of fetching. */
+	interface Props {
+		tasks?: TaskResponse[];
+		stationMap?: Map<string, string>;
+	}
+
+	let { tasks: externalTasks, stationMap: externalStationMap }: Props = $props();
+
+	/** Whether we're in scoped mode (tasks provided externally). */
+	let isScoped = $derived(!!externalTasks);
+
 	const POLL_INTERVAL_MS = 30_000;
 	const PAGE_SIZE = 50;
 
@@ -67,7 +78,8 @@
 	let lastRefreshed = $state<Date | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-	let stationMap = $state<Map<string, string>>(new Map());
+	let _internalStationMap = $state<Map<string, string>>(new Map());
+	let stationMap = $derived(externalStationMap ?? _internalStationMap);
 
 	let sortKey = $state<SortKey>('priority');
 	let sortDir = $state<SortDir>('asc');
@@ -144,7 +156,7 @@
 			for (const s of stations) {
 				map.set(s.id, s.name);
 			}
-			stationMap = map;
+			_internalStationMap = map;
 		} catch {
 			// Stations endpoint may not exist yet — gracefully degrade.
 		}
@@ -228,6 +240,32 @@
 	let prevStatus = $state('');
 	let prevPriority = $state('');
 
+	/** Load tasks from external data, applying filters client-side. */
+	function loadFromExternalTasks(tasks: TaskResponse[]): void {
+		let filtered = tasks;
+		if (stationFilter) {
+			filtered = filtered.filter((t) => t.stationId === stationFilter);
+		}
+		if (statusFilter) {
+			filtered = filtered.filter((t) => t.status === statusFilter);
+		}
+		if (priorityFilter) {
+			const pNum = Number(priorityFilter);
+			filtered = filtered.filter((t) => t.priority === pNum);
+		}
+		allTasks = filtered;
+		totalCount = filtered.length;
+		isLoading = false;
+		lastRefreshed = new Date();
+	}
+
+	// When external tasks change, reload
+	$effect(() => {
+		if (externalTasks) {
+			loadFromExternalTasks(externalTasks);
+		}
+	});
+
 	$effect(() => {
 		const s = stationFilter;
 		const st = statusFilter;
@@ -237,12 +275,20 @@
 			prevStatus = st;
 			prevPriority = p;
 			if (lastRefreshed) {
-				fetchTasks({ silent: true });
+				if (isScoped && externalTasks) {
+					loadFromExternalTasks(externalTasks);
+				} else {
+					fetchTasks({ silent: true });
+				}
 			}
 		}
 	});
 
 	onMount(async () => {
+		if (isScoped) {
+			// In scoped mode, tasks are provided externally. No fetching needed.
+			return;
+		}
 		await Promise.all([fetchTasks(), fetchStations()]);
 		startPolling();
 	});
