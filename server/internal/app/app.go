@@ -93,7 +93,7 @@ func New(cfg *config.Config) *App {
 	// Add CORS middleware
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     "http://localhost:5173,http://localhost:5174",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Content-Length, X-Requested-With, X-Space-ID",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Content-Length, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
 		AllowCredentials: true,
 	}))

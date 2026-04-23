@@ -35,7 +35,7 @@ type SpaceMemberRepositoryInterface interface {
 // NewAuthMiddleware creates a consolidated auth middleware that:
 // - Supports JWT from Authorization header or auth_token cookie
 // - Supports API keys with "nori_" prefix
-// - Extracts active Space from X-Space-ID header or token claims
+// - Extracts active Space from token claims or user's recent spaces
 // - Stores authDTO in c.Locals("authDTO") for consistent access
 func NewAuthMiddleware(
 	userRepo UserRepositoryInterface,

@@ -23,7 +23,7 @@ func NewTestHandler(db *gorm.DB) *TestHandler {
 // RegisterTestRoutes registers test routes. Only call this when NORI_ENV=development.
 func (h *TestHandler) RegisterTestRoutes(app *fiber.App, middlewares ...fiber.Handler) {
 	group := app.Group("/api/test", middlewares...)
-	group.Post("/reset", h.ResetSpace)
+	group.Post("/:spaceId/reset", h.ResetSpace)
 }
 
 // baselineStations defines the default stations re-seeded after a reset.
@@ -48,18 +48,23 @@ func (h *TestHandler) ResetSpace(c *fiber.Ctx) error {
 		})
 	}
 
-	authDTO, err := requireAuth(c)
+	_, err := requireAuth(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
+	spaceIDParam := c.Params("spaceId")
+	if spaceIDParam == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
+			"error": "space ID is required in path",
 		})
 	}
-
-	spaceID := *authDTO.ActiveSpaceID
+	spaceID, err := uuid.Parse(spaceIDParam)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid space ID format",
+		})
+	}
 
 	err = h.db.Transaction(func(tx *gorm.DB) error {
 		// Delete in FK-safe order. Tables without space_id use subqueries

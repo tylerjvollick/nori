@@ -66,8 +66,7 @@ func RequirePasswordChanged() fiber.Handler {
 // Regular users must have a SpaceMember record for the space
 // The spaceID can come from:
 // 1. The route parameter (e.g., /api/spaces/:spaceID/...)
-// 2. The X-Space-ID header
-// 3. The active space in authDTO
+// 2. The active space in authDTO
 func RequireSpaceAccess(spaceMemberRepo SpaceMemberRepositoryInterface) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		authDTO, ok := c.Locals("authDTO").(*dtos.AuthDTO)

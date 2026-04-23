@@ -32,11 +32,10 @@ export async function resetSpace(page: Page): Promise<void> {
     );
   }
 
-  const res = await fetch(`${env.apiURL}/api/test/reset`, {
+  const res = await fetch(`${env.apiURL}/api/test/${spaceId}/reset`, {
     method: 'POST',
     headers: {
       Cookie: `nori_token=${token}`,
-      'X-Space-ID': spaceId,
     },
   });
 
