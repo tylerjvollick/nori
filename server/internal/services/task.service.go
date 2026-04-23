@@ -32,13 +32,19 @@ type TaskDepRepositoryInterface interface {
 	GetAllForTask(taskID string) ([]models.TaskDep, error)
 }
 
-type TaskService struct {
-	taskRepo    TaskRepositoryInterface
-	taskDepRepo TaskDepRepositoryInterface
+// TimeEventRepositoryInterface defines the methods needed to create time events.
+type TimeEventRepositoryInterface interface {
+	Create(event *models.TimeEvent) error
 }
 
-func NewTaskService(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface) *TaskService {
-	return &TaskService{taskRepo: taskRepo, taskDepRepo: taskDepRepo}
+type TaskService struct {
+	taskRepo      TaskRepositoryInterface
+	taskDepRepo   TaskDepRepositoryInterface
+	timeEventRepo TimeEventRepositoryInterface
+}
+
+func NewTaskService(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface, timeEventRepo TimeEventRepositoryInterface) *TaskService {
+	return &TaskService{taskRepo: taskRepo, taskDepRepo: taskDepRepo, timeEventRepo: timeEventRepo}
 }
 
 // CreateTask creates a new task in the given space.
@@ -171,6 +177,8 @@ func (s *TaskService) StartTask(taskID string, userID uuid.UUID) (*models.Task, 
 		return nil, err
 	}
 
+	s.emitTimeEvent(task, userID, models.TimeEventTypeCheckIn, now)
+
 	return task, nil
 }
 
@@ -234,6 +242,8 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSe
 	if err := s.taskRepo.Update(task); err != nil {
 		return nil, err
 	}
+
+	s.emitTimeEvent(task, userID, models.TimeEventTypeCheckOut, now)
 
 	// Auto-complete parent if all siblings are done.
 	if task.ParentID != nil {
@@ -342,6 +352,25 @@ func (s *TaskService) maybeCompleteParent(parentID string) error {
 	parent.UpdatedAt = now
 
 	return s.taskRepo.Update(parent)
+}
+
+// emitTimeEvent creates a TimeEvent with source=system for automatic task transitions.
+// Errors are logged but not propagated — the task transition itself is the critical path.
+func (s *TaskService) emitTimeEvent(task *models.Task, userID uuid.UUID, eventType models.TimeEventType, ts time.Time) {
+	if s.timeEventRepo == nil {
+		return
+	}
+	event := &models.TimeEvent{
+		SpaceID:   task.SpaceID,
+		UserID:    userID,
+		TaskID:    &task.ID,
+		StationID: task.StationID,
+		EventType: eventType,
+		Source:    models.TimeEventSourceSystem,
+		Timestamp: ts,
+	}
+	// Best-effort: don't fail the transition if event creation fails.
+	_ = s.timeEventRepo.Create(event)
 }
 
 // isTerminalStatus returns true if the status indicates the task is finished.
@@ -469,6 +498,8 @@ func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task,
 		return nil, err
 	}
 
+	s.emitTimeEvent(task, userID, models.TimeEventTypeResume, now)
+
 	return task, nil
 }
 
@@ -485,6 +516,9 @@ func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, e
 		return nil, fmt.Errorf("task %q cannot be skipped: status is %q (already terminal)", taskID, task.Status)
 	}
 
+	// Remember previous status so we know whether to emit a check_out event.
+	wasTracking := task.Status == models.TaskStatusActive || task.Status == models.TaskStatusPaused
+
 	now := time.Now()
 	task.Status = models.TaskStatusSkipped
 	task.CompletedAt = &now
@@ -492,6 +526,10 @@ func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, e
 
 	if err := s.taskRepo.Update(task); err != nil {
 		return nil, err
+	}
+
+	if wasTracking {
+		s.emitTimeEvent(task, userID, models.TimeEventTypeCheckOut, now)
 	}
 
 	// Skipped is a terminal status — check if parent can be auto-completed.
@@ -524,6 +562,8 @@ func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, 
 	if err := s.taskRepo.Update(task); err != nil {
 		return nil, err
 	}
+
+	s.emitTimeEvent(task, userID, models.TimeEventTypePause, now)
 
 	return task, nil
 }

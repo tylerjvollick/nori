@@ -124,9 +124,23 @@ func (m *MockTaskDepRepository) GetAllForTask(taskID string) ([]models.TaskDep, 
 	return nil, nil
 }
 
+// MockTimeEventRepository is a mock implementation of TimeEventRepositoryInterface.
+type MockTimeEventRepository struct {
+	createFunc func(*models.TimeEvent) error
+	Events     []models.TimeEvent // captured events for assertions
+}
+
+func (m *MockTimeEventRepository) Create(event *models.TimeEvent) error {
+	m.Events = append(m.Events, *event)
+	if m.createFunc != nil {
+		return m.createFunc(event)
+	}
+	return nil
+}
+
 // newTestTaskService creates a TaskService with the given mocks.
 func newTestTaskService(taskRepo *MockTaskRepository, taskDepRepo *MockTaskDepRepository) *TaskService {
-	return NewTaskService(taskRepo, taskDepRepo)
+	return NewTaskService(taskRepo, taskDepRepo, &MockTimeEventRepository{})
 }
 
 // --- StartTask Tests ---
