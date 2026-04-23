@@ -66,9 +66,10 @@ func NewRecipeHandler(
 	}
 }
 
-// RegisterRecipeRoutes registers recipe API routes on the Fiber app.
-func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/recipes", middlewares...)
+// RegisterRecipeRoutes registers recipe API routes on a router group.
+// The router should already be scoped to /api/v1/spaces/:spaceId.
+func (h *RecipeHandler) RegisterRecipeRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/recipes", middlewares...)
 
 	group.Get("", h.ListRecipes)
 	group.Post("", h.CreateRecipe)
@@ -84,27 +85,22 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 }
 
 // RegisterRecipeVersionRoutes registers the flat recipe-version API routes.
-func (h *RecipeHandler) RegisterRecipeVersionRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/recipe-versions", middlewares...)
+// The router should already be scoped to /api/v1/spaces/:spaceId.
+func (h *RecipeHandler) RegisterRecipeVersionRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/recipe-versions", middlewares...)
 
 	group.Post("/:id/publish", h.PublishVersionFlat)
 }
 
 // ListRecipes returns a paginated list of recipes for the active space.
 func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
 	filter := repositories.RecipeFilter{
-		SpaceID: authDTO.ActiveSpaceID,
+		SpaceID: &spaceID,
 	}
 
 	// Parse optional query parameters.
@@ -164,10 +160,9 @@ func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	var dto dtos.CreateRecipeRequest
@@ -184,7 +179,7 @@ func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
 	}
 
 	recipe, _, err := h.authoringService.CreateRecipeWithTaskTree(
-		*authDTO.ActiveSpaceID,
+		spaceID,
 		authDTO.User.ID,
 		dto.Name,
 		dto.Description,
@@ -208,13 +203,12 @@ func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
 }
 
 // getRecipeInSpace fetches a recipe by ID and verifies it belongs to the
-// requester's active space. Returns 404 on mismatch (not 403) to avoid
+// space from the URL path. Returns 404 on mismatch (not 403) to avoid
 // leaking existence of recipes in other spaces.
-func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, recipeID uuid.UUID) (*models.Recipe, error) {
-	if authDTO.ActiveSpaceID == nil {
-		return nil, c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, recipeID uuid.UUID) (*models.Recipe, error) {
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return nil, err
 	}
 
 	recipe, err := h.recipeRepo.GetByID(recipeID)
@@ -224,7 +218,7 @@ func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, re
 		})
 	}
 
-	if recipe.SpaceID != *authDTO.ActiveSpaceID {
+	if recipe.SpaceID != spaceID {
 		return nil, c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "recipe not found",
 		})
@@ -235,11 +229,6 @@ func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, re
 
 // GetRecipe returns a single recipe by ID, including the current version's task tree.
 func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -247,7 +236,7 @@ func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 		})
 	}
 
-	recipe, err := h.getRecipeInSpace(c, authDTO, id)
+	recipe, err := h.getRecipeInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -268,11 +257,6 @@ func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 
 // GetRecipeTasks returns the task tree for the recipe's current version.
 func (h *RecipeHandler) GetRecipeTasks(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -280,7 +264,7 @@ func (h *RecipeHandler) GetRecipeTasks(c *fiber.Ctx) error {
 		})
 	}
 
-	recipe, err := h.getRecipeInSpace(c, authDTO, id)
+	recipe, err := h.getRecipeInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -312,11 +296,6 @@ func (h *RecipeHandler) GetRecipeTasks(c *fiber.Ctx) error {
 
 // UpdateRecipe updates an existing recipe.
 func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -325,7 +304,7 @@ func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
 	}
 
 	// Verify recipe belongs to the requester's space before updating.
-	recipe, err := h.getRecipeInSpace(c, authDTO, id)
+	recipe, err := h.getRecipeInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -363,11 +342,6 @@ func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
 
 // DeleteRecipe soft-deletes a recipe by ID.
 func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -376,7 +350,7 @@ func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
 	}
 
 	// Verify recipe belongs to the requester's space before deleting.
-	if _, err := h.getRecipeInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getRecipeInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -391,11 +365,6 @@ func (h *RecipeHandler) DeleteRecipe(c *fiber.Ctx) error {
 
 // ListVersions returns all versions for a recipe.
 func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	recipeID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -404,7 +373,7 @@ func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
 	}
 
 	// Verify the recipe exists and belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+	if _, err := h.getRecipeInSpace(c, recipeID); err != nil {
 		return err
 	}
 
@@ -442,7 +411,7 @@ func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
 	}
 
 	// Verify the recipe exists and belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+	if _, err := h.getRecipeInSpace(c, recipeID); err != nil {
 		return err
 	}
 
@@ -474,6 +443,11 @@ func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
 		return err
 	}
 
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
+	}
+
 	recipeID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -482,7 +456,7 @@ func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
 	}
 
 	// Verify the recipe exists and belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+	if _, err := h.getRecipeInSpace(c, recipeID); err != nil {
 		return err
 	}
 
@@ -495,7 +469,7 @@ func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
 
 	rootTask, err := h.pourService.PourRecipe(
 		recipeID,
-		*authDTO.ActiveSpaceID,
+		spaceID,
 		authDTO.User.ID,
 		dto.Vars,
 		dto.OrderID,
@@ -516,6 +490,11 @@ func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
 		return err
 	}
 
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
+	}
+
 	recipeID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -524,7 +503,7 @@ func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
 	}
 
 	// Verify the recipe exists and belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+	if _, err := h.getRecipeInSpace(c, recipeID); err != nil {
 		return err
 	}
 
@@ -544,7 +523,7 @@ func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
 
 	rootTask, err := h.rollService.RollRecipe(
 		recipeID,
-		*authDTO.ActiveSpaceID,
+		spaceID,
 		authDTO.User.ID,
 		opts,
 	)
@@ -561,11 +540,6 @@ func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
 // The draft task tree is cloned into a frozen snapshot, then the version is
 // marked as published.
 func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	recipeID, err := uuid.Parse(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -574,7 +548,7 @@ func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
 	}
 
 	// Verify the recipe exists and belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+	if _, err := h.getRecipeInSpace(c, recipeID); err != nil {
 		return err
 	}
 
@@ -590,13 +564,8 @@ func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
 
 // PublishVersionFlat publishes a recipe version by its ID alone, without
 // requiring the recipe ID in the URL path. Used by the flat
-// POST /api/v1/recipe-versions/:id/publish route.
+// POST /api/v1/spaces/:spaceId/recipe-versions/:id/publish route.
 func (h *RecipeHandler) PublishVersionFlat(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	versionID, err := strconv.Atoi(c.Params("id"))
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -612,8 +581,8 @@ func (h *RecipeHandler) PublishVersionFlat(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify the recipe belongs to the requester's space.
-	if _, err := h.getRecipeInSpace(c, authDTO, version.RecipeID); err != nil {
+	// Verify the recipe belongs to the space from the URL path.
+	if _, err := h.getRecipeInSpace(c, version.RecipeID); err != nil {
 		return err
 	}
 
