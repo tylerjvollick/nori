@@ -36,7 +36,6 @@ func (h *CostHandler) RegisterCostRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Get("/tasks/:id", h.GetTaskCosts)
 	group.Post("/tasks/:id/compute-labor", h.ComputeTaskLaborCost)
 	group.Post("/jobs/:id/compute-labor", h.ComputeJobLaborCost)
-	group.Get("/jobs/:id/cost-summary", h.GetJobCostSummary)
 	group.Get("/recipes/:rootTaskId/estimate-labor", h.EstimateRecipeLaborCost)
 }
 

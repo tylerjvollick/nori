@@ -125,7 +125,7 @@ func init() {
 
 	taskAddCmd.Flags().StringVar(&taskAddStation, "station", "", "Station name for the new task")
 	taskAddCmd.Flags().StringVar(&taskAddAfter, "after", "", "Task ID to add as a dependency (new task runs after this one)")
-	taskAddCmd.Flags().StringVar(&taskAddType, "type", "task", "Task type: task, gate, milestone")
+	taskAddCmd.Flags().StringVar(&taskAddType, "type", "task", "Task type: task, job, recipe")
 	taskAddCmd.Flags().StringVar(&taskAddParentID, "parent", "", "Parent task ID (defaults to current job)")
 
 	taskCmd.AddCommand(taskStartCmd)

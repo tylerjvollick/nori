@@ -27,8 +27,11 @@ var terminalStatuses = []models.TaskStatus{
 
 // ReadyTaskFilter holds optional filters for the ready-work query.
 type ReadyTaskFilter struct {
-	StationID    *uuid.UUID
-	AssignedToID *uuid.UUID
+	StationID                 *uuid.UUID
+	AssignedToID              *uuid.UUID
+	Type                      *models.TaskType
+	ExcludeTypes              []models.TaskType
+	ExcludeDescendantsOfTypes []models.TaskType
 }
 
 // GetReadyTasks returns open tasks in the given space that are not blocked
@@ -53,6 +56,18 @@ func (s *ReadyWorkService) GetReadyTasks(spaceID uuid.UUID, filter *ReadyTaskFil
 		}
 		if filter.AssignedToID != nil {
 			query = query.Where("assigned_to_id = ?", *filter.AssignedToID)
+		}
+		if filter.Type != nil {
+			query = query.Where("type = ?", *filter.Type)
+		}
+		if len(filter.ExcludeTypes) > 0 {
+			query = query.Where("type NOT IN ?", filter.ExcludeTypes)
+		}
+		if len(filter.ExcludeDescendantsOfTypes) > 0 {
+			query = query.Where(
+				"NOT EXISTS (SELECT 1 FROM task AS ancestor WHERE ancestor.type IN ? AND task.id LIKE ancestor.id || '.%')",
+				filter.ExcludeDescendantsOfTypes,
+			)
 		}
 	}
 	if err := query.Find(&allOpen).Error; err != nil {

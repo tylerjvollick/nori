@@ -75,6 +75,7 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 	group.Get("/:id", h.GetRecipe)
 	group.Put("/:id", h.UpdateRecipe)
 	group.Delete("/:id", h.DeleteRecipe)
+	group.Get("/:id/tasks", h.GetRecipeTasks)
 	group.Get("/:id/versions", h.ListVersions)
 	group.Post("/:id/versions", h.CreateVersion)
 	group.Post("/:id/pour", h.PourRecipe)
@@ -263,6 +264,50 @@ func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 	}
 
 	return c.Status(http.StatusOK).JSON(resp)
+}
+
+// GetRecipeTasks returns the task tree for the recipe's current version.
+func (h *RecipeHandler) GetRecipeTasks(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	recipe, err := h.getRecipeInSpace(c, authDTO, id)
+	if err != nil {
+		return err
+	}
+
+	if recipe.CurrentVersion == nil || recipe.CurrentVersion.RootTaskID == nil {
+		return c.Status(http.StatusOK).JSON(fiber.Map{
+			"items": []any{},
+			"total": 0,
+		})
+	}
+
+	_, tasks, err := h.recipeRepo.GetVersionWithTaskTree(recipe.CurrentVersion.ID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	items := make([]dtos.TaskResponse, len(tasks))
+	for i := range tasks {
+		items[i] = dtos.TaskResponseFromModel(&tasks[i])
+	}
+
+	return c.Status(http.StatusOK).JSON(fiber.Map{
+		"items": items,
+		"total": len(items),
+	})
 }
 
 // UpdateRecipe updates an existing recipe.

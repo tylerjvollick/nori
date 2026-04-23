@@ -4,6 +4,7 @@
   import { page } from "$app/stores";
   import { taskApi } from "$lib/api/task";
   import type { TaskTreeResponse } from "$lib/api/task";
+  import { jobApi } from "$lib/api/job";
   import { stationApi } from "$lib/api/station";
   import type { TaskResponse } from "$lib/types/task";
   import type { StationResponse } from "$lib/types/station";
@@ -232,11 +233,6 @@
     return params;
   }
 
-  /** Filter out job-type tasks — jobs have their own board mode. */
-  function excludeJobs(tasks: TaskResponse[]): TaskResponse[] {
-    return tasks.filter((t) => t.type !== "job");
-  }
-
   /** Categorize externally-provided tasks into board columns by status. */
   function categorizeExternalTasks(tasks: TaskResponse[]): void {
     const pFilter = priorityFilter ? Number(priorityFilter) : null;
@@ -245,8 +241,7 @@
       return t.filter((task) => task.priority === pFilter);
     };
 
-    // Exclude jobs — they have their own board mode
-    let filtered = excludeJobs(tasks);
+    let filtered = tasks;
     if (stationFilter) {
       filtered = filtered.filter((t) => t.stationId === stationFilter);
     }
@@ -333,13 +328,12 @@
         }),
       ]);
 
-      // Exclude jobs — they have their own board mode
-      const readyItems = excludeJobs(readyResult);
-      const openItems = excludeJobs(openResult.items);
-      const activeItems = excludeJobs(activeResult.items);
-      const pausedItems = excludeJobs(pausedResult.items);
-      const doneItems = excludeJobs(doneResult.items);
-      const skippedItems = excludeJobs(skippedResult.items);
+      const readyItems = readyResult;
+      const openItems = openResult.items;
+      const activeItems = activeResult.items;
+      const pausedItems = pausedResult.items;
+      const doneItems = doneResult.items;
+      const skippedItems = skippedResult.items;
 
       // Build a set of ready task IDs to exclude from "open" → "blocked"
       const readyIds = new Set(readyItems.map((t) => t.id));
@@ -431,15 +425,12 @@
     try {
       const filters = filterParams();
 
-      // Fetch all jobs (type=job) in the space
-      const jobsResult = await taskApi.listTasks({
-        type: "job",
-        stationId: filters.stationId,
+      // Fetch root-level jobs from the dedicated jobs endpoint
+      const jobsResult = await jobApi.listJobs({
         limit: 200,
       });
 
-      // Filter to root-level jobs only (no parent)
-      const rootJobs = jobsResult.items.filter((j) => !j.parentId);
+      const rootJobs = jobsResult.items;
 
       // Apply client-side priority filter
       const pFilter = priorityFilter ? Number(priorityFilter) : null;
@@ -452,7 +443,7 @@
       const jobTrees = await Promise.all(
         filteredJobs.map(async (job) => {
           try {
-            const tree = await taskApi.getTaskTree(job.id);
+            const tree = await jobApi.getJobTasks(job.id);
             return { job, tree };
           } catch {
             // If tree fetch fails, use job's own data

@@ -253,11 +253,6 @@ func createChildTasks(
 		ticketCount := orderQty / batchSize
 
 		taskType := models.TaskTypeTask
-		if step.Type == "milestone" {
-			taskType = models.TaskTypeMilestone
-		} else if step.Type == "gate" {
-			taskType = models.TaskTypeGate
-		}
 
 		priority := 0
 		if step.Priority != nil {

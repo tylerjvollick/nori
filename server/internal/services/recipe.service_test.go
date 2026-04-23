@@ -1628,8 +1628,8 @@ depends_on = ["cut"]
 	if !ok {
 		t.Fatalf("expected milestone task at %q", milestoneID)
 	}
-	if milestone.Type != models.TaskTypeMilestone {
-		t.Errorf("expected milestone type %q, got %q", models.TaskTypeMilestone, milestone.Type)
+	if milestone.Type != models.TaskTypeTask {
+		t.Errorf("expected milestone type %q, got %q", models.TaskTypeTask, milestone.Type)
 	}
 
 	// Both are batch steps (batch_size=6, order_qty=6 → 1 ticket each).
@@ -2204,8 +2204,8 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 	if done.title != "6 Chairs complete" {
 		t.Errorf("done: expected title %q, got %q", "6 Chairs complete", done.title)
 	}
-	if done.taskType != models.TaskTypeMilestone {
-		t.Errorf("done: expected type %q, got %q", models.TaskTypeMilestone, done.taskType)
+	if done.taskType != models.TaskTypeTask {
+		t.Errorf("done: expected type %q, got %q", models.TaskTypeTask, done.taskType)
 	}
 
 	// ── Dependency edge count ────────────────────────────────────────

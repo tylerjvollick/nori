@@ -14,11 +14,9 @@ import (
 type TaskType string
 
 const (
-	TaskTypeJob       TaskType = "job"
-	TaskTypeTask      TaskType = "task"
-	TaskTypeMilestone TaskType = "milestone"
-	TaskTypeGate      TaskType = "gate"
-	TaskTypeRecipe    TaskType = "recipe"
+	TaskTypeJob    TaskType = "job"
+	TaskTypeTask   TaskType = "task"
+	TaskTypeRecipe TaskType = "recipe"
 )
 
 // TaskStatus represents the current state of a task.

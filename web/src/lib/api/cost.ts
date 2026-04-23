@@ -31,6 +31,6 @@ export interface CostSummary {
 
 export const costApi = {
 	getJobCostSummary(jobId: string): Promise<CostSummary> {
-		return apiClient.get<CostSummary>(`/api/v1/costs/jobs/${jobId}/cost-summary`);
+		return apiClient.get<CostSummary>(`/api/v1/jobs/${jobId}/cost-summary`);
 	},
 };

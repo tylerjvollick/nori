@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
+	import { jobApi } from '$lib/api/job';
 	import type { TaskResponse } from '$lib/types/task';
 	import type { CompleteTaskResponse } from '$lib/types/task';
 	import { stationApi } from '$lib/api/station';
@@ -360,7 +361,7 @@
 		if (!tree || !recipeName.trim()) return;
 		isSavingAsRecipe = true;
 		try {
-			const recipe = await taskApi.saveAsRecipe(tree.id, {
+			const recipe = await jobApi.saveAsRecipe(tree.id, {
 				name: recipeName.trim(),
 				description: recipeDescription.trim() || undefined,
 				backfillEstimatedFromActual: backfillEstimates,

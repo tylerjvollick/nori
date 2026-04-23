@@ -74,13 +74,14 @@ func New(cfg *config.Config) *App {
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
 	spaceHandler := handlers.NewSpaceHandler(spaceService, spaceMemberRepo)
-	taskHandler := handlers.NewTaskHandler(taskService, readyWorkService, recipeService)
+	taskHandler := handlers.NewTaskHandler(taskService, readyWorkService)
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
 	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService, recipeService, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	costHandler := handlers.NewCostHandler(costService)
+	jobHandler := handlers.NewJobHandler(taskService, costService, recipeService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
 	customerHandler := handlers.NewCustomerHandler(customerRepo)
 
@@ -113,6 +114,7 @@ func New(cfg *config.Config) *App {
 	// ── Fully guarded routes (auth + password changed) ─────────────────
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
 	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
+	jobHandler.RegisterJobRoutes(app, authMiddleware, requirePasswordChanged)
 	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
 	recipeHandler.RegisterRecipeVersionRoutes(app, authMiddleware, requirePasswordChanged)
 	stationHandler.RegisterStationRoutes(app, authMiddleware, requirePasswordChanged)

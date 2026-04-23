@@ -34,21 +34,15 @@ type ReadyWorkServiceInterface interface {
 	GetReadyTasks(spaceID uuid.UUID, filter *services.ReadyTaskFilter) ([]models.Task, error)
 }
 
-// SaveAsRecipeServiceInterface defines the save-as-recipe method from RecipeService.
-type SaveAsRecipeServiceInterface interface {
-	SaveAsRecipe(jobID string, spaceID uuid.UUID, createdByID uuid.UUID, name string, opts services.SaveAsRecipeOptions) (*models.Recipe, error)
-}
-
 // TaskHandler handles HTTP requests for tasks.
 type TaskHandler struct {
-	taskService         TaskServiceInterface
-	readyWorkService    ReadyWorkServiceInterface
-	saveAsRecipeService SaveAsRecipeServiceInterface
+	taskService      TaskServiceInterface
+	readyWorkService ReadyWorkServiceInterface
 }
 
 // NewTaskHandler creates a new TaskHandler.
-func NewTaskHandler(taskService TaskServiceInterface, readyWorkService ReadyWorkServiceInterface, saveAsRecipeService SaveAsRecipeServiceInterface) *TaskHandler {
-	return &TaskHandler{taskService: taskService, readyWorkService: readyWorkService, saveAsRecipeService: saveAsRecipeService}
+func NewTaskHandler(taskService TaskServiceInterface, readyWorkService ReadyWorkServiceInterface) *TaskHandler {
+	return &TaskHandler{taskService: taskService, readyWorkService: readyWorkService}
 }
 
 // RegisterTaskRoutes registers task API routes on the Fiber app.
@@ -69,7 +63,6 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Post("/:id/skip", h.SkipTask)
 	group.Post("/:id/children", h.AddChildTask)
 	group.Post("/:id/notes", h.AddNote)
-	group.Post("/:id/save-as-recipe", h.SaveAsRecipe)
 }
 
 // ListTasks returns a paginated list of tasks for the active space.
@@ -97,6 +90,12 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 	if taskType := c.Query("type"); taskType != "" {
 		t := models.TaskType(taskType)
 		filter.Type = &t
+	} else {
+		// By default, exclude job and recipe root tasks and their descendants
+		// from the tasks list. Use GET /api/v1/jobs for jobs and
+		// GET /api/v1/recipes/:id/tasks for recipe trees.
+		filter.ExcludeTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
+		filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
 	}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
@@ -503,7 +502,12 @@ func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 		})
 	}
 
+	// By default, ready work returns only type=task and excludes descendants
+	// of job/recipe roots.
+	taskType := models.TaskTypeTask
 	var filter services.ReadyTaskFilter
+	filter.Type = &taskType
+	filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
 			filter.StationID = &id
@@ -617,58 +621,3 @@ func (h *TaskHandler) AddNote(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }
 
-// SaveAsRecipe saves a job as a new recipe by cloning its task tree.
-func (h *TaskHandler) SaveAsRecipe(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
-	id := c.Params("id")
-	if id == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "task ID is required",
-		})
-	}
-
-	var dto dtos.SaveAsRecipeRequest
-	if err := c.BodyParser(&dto); err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid request body",
-		})
-	}
-
-	if dto.Name == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "name is required",
-		})
-	}
-
-	opts := services.SaveAsRecipeOptions{
-		Description: dto.Description,
-	}
-	if dto.BackfillEstimatedFromActual != nil && *dto.BackfillEstimatedFromActual {
-		opts.BackfillEstimatedFromActual = true
-	}
-
-	recipe, err := h.saveAsRecipeService.SaveAsRecipe(
-		id,
-		*authDTO.ActiveSpaceID,
-		authDTO.User.ID,
-		dto.Name,
-		opts,
-	)
-	if err != nil {
-		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(http.StatusCreated).JSON(dtos.RecipeResponseFromModel(recipe))
-}
