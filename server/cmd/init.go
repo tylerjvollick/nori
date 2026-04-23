@@ -61,15 +61,179 @@ This command walks you through the full setup:
   7. Creates the admin account, space, and stations via the API
   8. Generates a CLI API key and saves credentials
 
-Must be run from the repository root (docker/docker-compose.dev.yml must exist).`,
+Must be run from the repository root (docker/docker-compose.dev.yml must exist).
+
+Use --dev for non-interactive seeding with test account defaults (useful for CI
+and Playwright tests).`,
 	RunE: runInit,
 }
 
 func init() {
+	initCmd.Flags().Bool("dev", false, "Non-interactive mode with test account defaults")
 	rootCmd.AddCommand(initCmd)
 }
 
+// Dev mode defaults for non-interactive test account seeding.
+const (
+	devAccountName = "Test Shop"
+	devAdminEmail  = "test@nori.dev"
+	devAdminPass   = "testpass123"
+	devSpaceName   = "Test Workshop"
+)
+
+// devDefaultStations returns the standard set of stations for --dev mode.
+func devDefaultStations() []stationInput {
+	return []stationInput{
+		{Name: "Cutting", WIPLimit: 3},
+		{Name: "Assembly", WIPLimit: 2},
+		{Name: "Finishing", WIPLimit: 2},
+		{Name: "Quality Check", WIPLimit: 5},
+	}
+}
+
 func runInit(cmd *cobra.Command, args []string) error {
+	devMode, _ := cmd.Flags().GetBool("dev")
+
+	if devMode {
+		return runInitDev(cmd)
+	}
+	return runInitInteractive(cmd)
+}
+
+func runInitDev(cmd *cobra.Command) error {
+	accountName := devAccountName
+	adminEmail := devAdminEmail
+	adminPassword := devAdminPass
+	spaceName := devSpaceName
+	stations := devDefaultStations()
+
+	fmt.Println("=== Nori Dev Setup (non-interactive) ===")
+	fmt.Println()
+
+	// Step 1: Check docker / docker compose available
+	fmt.Println("Checking prerequisites...")
+	if err := checkDocker(); err != nil {
+		return err
+	}
+	fmt.Println("  Docker: OK")
+	fmt.Println("  Docker Compose: OK")
+	fmt.Println()
+
+	// Step 2: Stop any existing containers without prompting
+	stopExistingContainers()
+
+	// Step 3: Verify docker-compose file exists
+	composePath := "docker/docker-compose.dev.yml"
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		return fmt.Errorf("docker/docker-compose.dev.yml not found — run 'nori init' from the repository root")
+	}
+
+	// Step 4: Generate secrets
+	jwtSecret, err := generateJWTSecret()
+	if err != nil {
+		return fmt.Errorf("failed to generate JWT secret: %w", err)
+	}
+
+	dbPassword, err := generateRandomHex(16)
+	if err != nil {
+		return fmt.Errorf("failed to generate database password: %w", err)
+	}
+
+	// Step 5: Write docker/.env (idempotent — always overwrites)
+	fmt.Println("Writing docker/.env...")
+	if err := writeEnvFile(accountName, adminEmail, adminPassword, jwtSecret, dbPassword); err != nil {
+		return fmt.Errorf("failed to write docker/.env: %w", err)
+	}
+	fmt.Println("  docker/.env written.")
+
+	// Step 6: Build and start containers
+	fmt.Println()
+	fmt.Println("Building and starting Docker containers...")
+	if err := dockerComposeUp(); err != nil {
+		return fmt.Errorf("failed to start Docker containers: %w", err)
+	}
+	fmt.Println("  Containers started.")
+
+	// Step 7: Wait for healthy
+	fmt.Println()
+	fmt.Print("Waiting for server to become healthy...")
+	port := os.Getenv("NORI_HOST_PORT")
+	if port == "" {
+		port = "8081"
+	}
+	serverURL := "http://localhost:" + port
+	if err := waitForHealthy(serverURL, 30*time.Second, 1*time.Second); err != nil {
+		return fmt.Errorf("server did not become healthy: %w", err)
+	}
+	fmt.Println(" ready!")
+
+	// Step 8: Login
+	fmt.Println()
+	fmt.Println("Configuring Nori via API...")
+	client := cli.NewClientWithURL(serverURL)
+
+	loginResp, err := doLogin(client, adminEmail, adminPassword)
+	if err != nil {
+		return fmt.Errorf("failed to log in: %w", err)
+	}
+	client.Token = loginResp.AccessToken
+
+	// Step 9: Create space (idempotent — ignore "already exists" errors)
+	spaceResp, err := createSpaceIdempotent(client, spaceName)
+	if err != nil {
+		return fmt.Errorf("failed to create space: %w", err)
+	}
+	fmt.Printf("  Space: %s (%s)\n", spaceResp.Name, spaceResp.ID)
+	client.SpaceID = spaceResp.ID
+
+	// Step 10: Create stations (idempotent — ignore "already exists" errors)
+	for _, s := range stations {
+		stationResp, err := createStationIdempotent(client, s.Name, s.WIPLimit)
+		if err != nil {
+			return fmt.Errorf("failed to create station %q: %w", s.Name, err)
+		}
+		if stationResp != nil {
+			fmt.Printf("  Station created: %s (WIP limit: %d)\n", stationResp.Name, stationResp.WIPLimit)
+		} else {
+			fmt.Printf("  Station exists: %s\n", s.Name)
+		}
+	}
+
+	// Step 11: Generate API key
+	apiKeyResp, err := createAPIKey(client)
+	if err != nil {
+		return fmt.Errorf("failed to create API key: %w", err)
+	}
+	fmt.Println("  API key generated.")
+
+	// Step 12: Save credentials
+	creds := &cli.Credentials{
+		ServerURL: serverURL,
+		APIKey:    apiKeyResp.RawKey,
+		UserID:    loginResp.UserID,
+		UserEmail: loginResp.UserEmail,
+		SpaceID:   spaceResp.ID,
+	}
+	if err := cli.SaveCredentials(creds); err != nil {
+		return fmt.Errorf("failed to save credentials: %w", err)
+	}
+
+	// Step 13: Print credentials to stdout for CI/Playwright consumption
+	fmt.Println()
+	fmt.Println("=== Dev Setup Complete ===")
+	fmt.Println()
+	fmt.Printf("NORI_SERVER_URL=%s\n", serverURL)
+	fmt.Printf("NORI_ADMIN_EMAIL=%s\n", adminEmail)
+	fmt.Printf("NORI_ADMIN_PASSWORD=%s\n", adminPassword)
+	fmt.Printf("NORI_API_KEY=%s\n", apiKeyResp.RawKey)
+	fmt.Printf("NORI_SPACE_ID=%s\n", spaceResp.ID)
+	fmt.Printf("NORI_USER_ID=%s\n", loginResp.UserID)
+	fmt.Println()
+
+	return nil
+}
+
+func runInitInteractive(cmd *cobra.Command) error {
 	reader := bufio.NewReader(os.Stdin)
 
 	fmt.Println("=== Nori Setup Wizard ===")
@@ -250,6 +414,32 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	return nil
+}
+
+// stopExistingContainers silently stops any running nori-* containers (used by --dev mode).
+func stopExistingContainers() {
+	out, err := execCommand("docker", "ps", "--filter", "name=nori-", "--format", "{{.Names}}").Output()
+	if err != nil {
+		return
+	}
+	names := strings.TrimSpace(string(out))
+	if names == "" {
+		return
+	}
+
+	fmt.Println("Stopping existing containers...")
+	cmd := execCommand("docker", "compose", "-f", "docker/docker-compose.dev.yml", "--env-file", "docker/.env", "down")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		for _, name := range strings.Split(names, "\n") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				_ = execCommand("docker", "stop", name).Run()
+			}
+		}
+	}
+	fmt.Println()
 }
 
 // checkDocker verifies that docker and docker compose are available.
@@ -488,6 +678,91 @@ func createStation(client *cli.Client, name string, wipLimit int) (*initStationR
 	}
 
 	return &stationResp, nil
+}
+
+// createSpaceIdempotent creates a space, returning existing space data on conflict.
+func createSpaceIdempotent(client *cli.Client, name string) (*initSpaceResponse, error) {
+	resp, err := client.Post("/api/spaces", map[string]interface{}{
+		"name": name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	// 201 Created — new space
+	if resp.StatusCode == http.StatusCreated {
+		var spaceResp initSpaceResponse
+		if err := cli.ReadJSON(resp, &spaceResp); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		return &spaceResp, nil
+	}
+
+	// 409 Conflict — space already exists; fetch it from the list
+	if resp.StatusCode == http.StatusConflict {
+		resp.Body.Close()
+		return fetchSpaceByName(client, name)
+	}
+
+	var errResp errorResponse
+	if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+		return nil, fmt.Errorf("server error: %s", errResp.Error)
+	}
+	return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
+}
+
+// fetchSpaceByName retrieves a space by name from GET /api/spaces.
+func fetchSpaceByName(client *cli.Client, name string) (*initSpaceResponse, error) {
+	resp, err := client.Get("/api/spaces")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list spaces: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list spaces: status %d", resp.StatusCode)
+	}
+
+	var spaces []initSpaceResponse
+	if err := cli.ReadJSON(resp, &spaces); err != nil {
+		return nil, fmt.Errorf("failed to parse spaces list: %w", err)
+	}
+
+	for _, s := range spaces {
+		if s.Name == name {
+			return &s, nil
+		}
+	}
+	return nil, fmt.Errorf("space %q not found after conflict", name)
+}
+
+// createStationIdempotent creates a station, returning nil (not error) if it already exists.
+func createStationIdempotent(client *cli.Client, name string, wipLimit int) (*initStationResponse, error) {
+	resp, err := client.Post("/api/v1/stations", map[string]interface{}{
+		"name":     name,
+		"wipLimit": wipLimit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusCreated {
+		var stationResp initStationResponse
+		if err := cli.ReadJSON(resp, &stationResp); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		return &stationResp, nil
+	}
+
+	// 409 Conflict — station already exists, that's fine for idempotent mode
+	if resp.StatusCode == http.StatusConflict {
+		resp.Body.Close()
+		return nil, nil
+	}
+
+	var errResp errorResponse
+	if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+		return nil, fmt.Errorf("server error: %s", errResp.Error)
+	}
+	return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
 }
 
 // createAPIKey generates a CLI API key via the admin endpoint.
