@@ -12,6 +12,7 @@ import (
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
+	"github.com/tylerjvollick/nori/internal/services"
 )
 
 // RecipeRepoInterface defines the repository methods needed by RecipeHandler.
@@ -32,15 +33,21 @@ type RecipePourServiceInterface interface {
 	PourRecipe(recipeID uuid.UUID, spaceID uuid.UUID, createdByID uuid.UUID, vars map[string]string, orderID *uuid.UUID) (*models.Task, error)
 }
 
+// RecipeRollServiceInterface defines the roll method from RecipeService.
+type RecipeRollServiceInterface interface {
+	RollRecipe(recipeID uuid.UUID, spaceID uuid.UUID, createdByID uuid.UUID, opts services.RollRecipeOptions) (*models.Task, error)
+}
+
 // RecipeHandler handles HTTP requests for recipes.
 type RecipeHandler struct {
 	recipeRepo  RecipeRepoInterface
 	pourService RecipePourServiceInterface
+	rollService RecipeRollServiceInterface
 }
 
 // NewRecipeHandler creates a new RecipeHandler.
-func NewRecipeHandler(recipeRepo RecipeRepoInterface, pourService RecipePourServiceInterface) *RecipeHandler {
-	return &RecipeHandler{recipeRepo: recipeRepo, pourService: pourService}
+func NewRecipeHandler(recipeRepo RecipeRepoInterface, pourService RecipePourServiceInterface, rollService RecipeRollServiceInterface) *RecipeHandler {
+	return &RecipeHandler{recipeRepo: recipeRepo, pourService: pourService, rollService: rollService}
 }
 
 // RegisterRecipeRoutes registers recipe API routes on the Fiber app.
@@ -55,6 +62,7 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 	group.Get("/:id/versions", h.ListVersions)
 	group.Post("/:id/versions", h.CreateVersion)
 	group.Post("/:id/pour", h.PourRecipe)
+	group.Post("/:id/roll", h.RollRecipe)
 	group.Post("/:id/versions/:vid/publish", h.PublishVersion)
 }
 
@@ -443,6 +451,54 @@ func (h *RecipeHandler) PourRecipe(c *fiber.Ctx) error {
 		authDTO.User.ID,
 		dto.Vars,
 		dto.OrderID,
+	)
+	if err != nil {
+		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(rootTask))
+}
+
+// RollRecipe rolls a published recipe into a new job task tree.
+func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	recipeID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid recipe ID",
+		})
+	}
+
+	// Verify the recipe exists and belongs to the requester's space.
+	if _, err := h.getRecipeInSpace(c, authDTO, recipeID); err != nil {
+		return err
+	}
+
+	var dto dtos.RollRecipeRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	opts := services.RollRecipeOptions{
+		Title:      dto.Title,
+		CustomerID: dto.CustomerID,
+		DueDate:    dto.DueDate,
+		OrderQty:   dto.OrderQty,
+	}
+
+	rootTask, err := h.rollService.RollRecipe(
+		recipeID,
+		*authDTO.ActiveSpaceID,
+		authDTO.User.ID,
+		opts,
 	)
 	if err != nil {
 		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{

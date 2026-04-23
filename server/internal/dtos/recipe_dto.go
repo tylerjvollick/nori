@@ -34,6 +34,14 @@ type PourRecipeRequest struct {
 	OrderID *uuid.UUID        `json:"orderId,omitempty"`
 }
 
+// RollRecipeRequest represents the request body for rolling a recipe into a job.
+type RollRecipeRequest struct {
+	OrderQty   *int       `json:"order_qty,omitempty"`
+	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
+	DueDate    *time.Time `json:"due_date,omitempty"`
+	Title      *string    `json:"title,omitempty"`
+}
+
 // RecipeResponse represents a single recipe in API responses.
 type RecipeResponse struct {
 	ID               uuid.UUID              `json:"id"`
