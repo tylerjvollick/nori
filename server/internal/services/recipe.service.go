@@ -426,6 +426,8 @@ type TaskTreeCloneOptions struct {
 	RecipeID        *uuid.UUID // Set RecipeID on all cloned tasks.
 	RecipeVersionID *int       // Set RecipeVersionID on all cloned tasks.
 	ResetStatus     bool       // If true, reset all cloned tasks to "open".
+	ClearAssignedTo bool       // If true, nil out AssignedToID on all cloned tasks.
+	BackfillEstimatedFromActual bool // If true, populate EstimatedTimeSecs from ActualTimeSecs when estimated is nil.
 }
 
 // DeepCloneTaskTree clones an entire task tree (root + descendants) and all
@@ -514,6 +516,13 @@ func (s *RecipeService) DeepCloneTaskTree(
 				clone.PausedAt = nil
 				clone.CompletedAt = nil
 				clone.ActualTimeSecs = 0
+			}
+			if opts.ClearAssignedTo {
+				clone.AssignedToID = nil
+			}
+			if opts.BackfillEstimatedFromActual && clone.EstimatedTimeSecs == nil && src.ActualTimeSecs > 0 {
+				est := src.ActualTimeSecs
+				clone.EstimatedTimeSecs = &est
 			}
 
 			// Clear GORM relation pointers to avoid accidental nested creates.
@@ -1619,6 +1628,131 @@ func wireSourceDependencies(
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Save As Recipe (clone job tree → new recipe)
+// ---------------------------------------------------------------------------
+
+// SaveAsRecipeOptions configures optional fields when saving a job as a recipe.
+type SaveAsRecipeOptions struct {
+	Description *string    // Recipe description.
+	CategoryID  *uuid.UUID // Recipe category.
+	BackfillEstimatedFromActual bool // If true, populate EstimatedTimeSecs from ActualTimeSecs when estimated is nil.
+}
+
+// SaveAsRecipe clones a job's task tree into a brand-new recipe. This is the
+// "I just built something — save this as a template" flow.
+//
+// Steps:
+//  1. Load and validate the job root task.
+//  2. Create a new Recipe record.
+//  3. Deep-clone the job tree into a new root with Type='recipe', stripping
+//     runtime fields (status, assigned_to, times) and optionally back-filling
+//     estimated_time_secs from actual_time_secs.
+//  4. Create a draft RecipeVersion pointing to the cloned root.
+//  5. Return the new Recipe.
+func (s *RecipeService) SaveAsRecipe(
+	jobID string,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	name string,
+	opts SaveAsRecipeOptions,
+) (*models.Recipe, error) {
+	if name == "" {
+		return nil, fmt.Errorf("recipe name is required")
+	}
+
+	// 1. Load job root and validate.
+	rootTask, err := s.taskRepo.GetByID(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("loading job %q: %w", jobID, err)
+	}
+	if rootTask.Type != models.TaskTypeJob {
+		return nil, fmt.Errorf("task %q is not a job (type=%s)", jobID, rootTask.Type)
+	}
+
+	// 2. Prepare IDs and timestamps.
+	recipeID := uuid.New()
+	rootTaskUUID := uuid.New()
+	newRootID := rootTaskUUID.String()
+	now := time.Now()
+
+	// 3. Create Recipe record.
+	recipe := &models.Recipe{
+		ID:          recipeID,
+		SpaceID:     spaceID,
+		Name:        name,
+		Slug:        serviceSlugify(name),
+		Description: opts.Description,
+		CategoryID:  opts.CategoryID,
+		CreatedByID: createdByID,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// 4. Deep-clone the job tree, stripping runtime fields.
+	clonedRoot, err := s.DeepCloneTaskTree(jobID, TaskTreeCloneOptions{
+		NewRootID:                   newRootID,
+		SpaceID:                     &spaceID,
+		CreatedByID:                 &createdByID,
+		RecipeID:                    &recipeID,
+		ResetStatus:                 true,
+		ClearAssignedTo:             true,
+		BackfillEstimatedFromActual: opts.BackfillEstimatedFromActual,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning job task tree: %w", err)
+	}
+
+	// 5. Update root to recipe type.
+	clonedRoot.Type = models.TaskTypeRecipe
+	clonedRoot.Title = name
+	clonedRoot.Description = opts.Description
+	clonedRoot.CustomerID = nil
+	clonedRoot.DueDate = nil
+	if err := s.taskRepo.Update(clonedRoot); err != nil {
+		return nil, fmt.Errorf("updating cloned root to recipe: %w", err)
+	}
+
+	// 6. Create draft RecipeVersion.
+	version := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: 1,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &rootTaskUUID,
+		AuthorID:      createdByID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	// 7. Persist recipe + version.
+	createFn := func(recipeRepo RecipeRepositoryInterface) error {
+		if err := recipeRepo.Create(recipe); err != nil {
+			return fmt.Errorf("creating recipe: %w", err)
+		}
+		if err := recipeRepo.CreateVersion(version); err != nil {
+			return fmt.Errorf("creating draft version: %w", err)
+		}
+		return nil
+	}
+
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txRecipeRepo := repositories.NewRecipeRepository(tx)
+			return createFn(txRecipeRepo)
+		})
+	} else {
+		err = createFn(s.recipeRepo)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	recipe.CurrentVersionID = nil // Draft, not yet published.
+	return recipe, nil
 }
 
 // ---------------------------------------------------------------------------

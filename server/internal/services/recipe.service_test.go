@@ -3981,3 +3981,413 @@ func TestRollRecipe_BatchExpansion_AllStatusOpen(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Save As Recipe
+// ---------------------------------------------------------------------------
+
+// setupJobFromRecipe creates a published recipe, rolls it into a job, and
+// simulates some work (assign, start, complete with actual times).
+func setupJobFromRecipe(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, string) {
+	t.Helper()
+	svc, recipeRepo, taskRepo, depRepo, recipeID := setupPublishedRecipe(t)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+	assigneeID := uuid.New()
+
+	job, err := svc.RollRecipe(recipeID, spaceID, userID, RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Simulate work: assign and set actual times on children.
+	children, _ := taskRepo.GetChildren(job.ID)
+	for i := range children {
+		child := children[i]
+		child.AssignedToID = &assigneeID
+		child.Status = models.TaskStatusDone
+		child.ActualTimeSecs = (i + 1) * 3600 // 1h, 2h
+		if err := taskRepo.Update(&child); err != nil {
+			t.Fatalf("updating child: %v", err)
+		}
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, job.ID
+}
+
+func TestSaveAsRecipe_CreatesRecipe(t *testing.T) {
+	svc, recipeRepo, _, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "My Template", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	if recipe.Name != "My Template" {
+		t.Errorf("Name = %q, want %q", recipe.Name, "My Template")
+	}
+	if recipe.Slug != "my-template" {
+		t.Errorf("Slug = %q, want %q", recipe.Slug, "my-template")
+	}
+	if !recipe.IsActive {
+		t.Error("expected IsActive=true")
+	}
+
+	// Recipe should exist in repo.
+	stored, err := recipeRepo.GetByID(recipe.ID)
+	if err != nil {
+		t.Fatalf("recipe not found in repo: %v", err)
+	}
+	if stored.Name != "My Template" {
+		t.Errorf("stored Name = %q, want %q", stored.Name, "My Template")
+	}
+}
+
+func TestSaveAsRecipe_ClonesTaskTree(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	tasksBefore := len(taskRepo.tasks)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Cloned Recipe", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	// Should have created 3 new tasks (root + 2 steps).
+	tasksAfter := len(taskRepo.tasks)
+	if tasksAfter != tasksBefore+3 {
+		t.Errorf("expected %d tasks after save-as-recipe, got %d", tasksBefore+3, tasksAfter)
+	}
+
+	// Verify recipe has a draft version with a root task.
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(versions))
+	}
+	if versions[0].Status != models.RecipeVersionStatusDraft {
+		t.Errorf("version status = %s, want draft", versions[0].Status)
+	}
+	if versions[0].RootTaskID == nil {
+		t.Fatal("version RootTaskID is nil")
+	}
+
+	// Root task should exist.
+	rootID := versions[0].RootTaskID.String()
+	root, err := taskRepo.GetByID(rootID)
+	if err != nil {
+		t.Fatalf("root task %q not found: %v", rootID, err)
+	}
+	if root.Type != models.TaskTypeRecipe {
+		t.Errorf("root Type = %s, want %s", root.Type, models.TaskTypeRecipe)
+	}
+}
+
+func TestSaveAsRecipe_RootIsRecipeType(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Recipe Type Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	root, err := taskRepo.GetByID(rootID)
+	if err != nil {
+		t.Fatalf("root not found: %v", err)
+	}
+	if root.Type != models.TaskTypeRecipe {
+		t.Errorf("root Type = %s, want %s", root.Type, models.TaskTypeRecipe)
+	}
+	if root.Title != "Recipe Type Test" {
+		t.Errorf("root Title = %q, want %q", root.Title, "Recipe Type Test")
+	}
+}
+
+func TestSaveAsRecipe_ChildrenAreTaskType(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Children Type Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	children, _ := taskRepo.GetChildren(rootID)
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children, got %d", len(children))
+	}
+	for _, child := range children {
+		if child.Type != models.TaskTypeTask {
+			t.Errorf("child %q Type = %s, want %s", child.ID, child.Type, models.TaskTypeTask)
+		}
+	}
+}
+
+func TestSaveAsRecipe_ResetsRuntimeFields(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Reset Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	children, _ := taskRepo.GetChildren(rootID)
+	for _, child := range children {
+		if child.Status != models.TaskStatusOpen {
+			t.Errorf("child %q Status = %s, want open", child.ID, child.Status)
+		}
+		if child.AssignedToID != nil {
+			t.Errorf("child %q AssignedToID should be nil", child.ID)
+		}
+		if child.ActualTimeSecs != 0 {
+			t.Errorf("child %q ActualTimeSecs = %d, want 0", child.ID, child.ActualTimeSecs)
+		}
+		if child.StartedAt != nil {
+			t.Errorf("child %q StartedAt should be nil", child.ID)
+		}
+		if child.CompletedAt != nil {
+			t.Errorf("child %q CompletedAt should be nil", child.ID)
+		}
+	}
+}
+
+func TestSaveAsRecipe_ClearsDueDateAndCustomerOnRoot(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	// Set customer and due date on job root.
+	jobRoot, _ := taskRepo.GetByID(jobID)
+	customerID := uuid.New()
+	dueDate := time.Now().Add(24 * time.Hour)
+	jobRoot.CustomerID = &customerID
+	jobRoot.DueDate = &dueDate
+	_ = taskRepo.Update(jobRoot)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Clear Runtime Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	root, _ := taskRepo.GetByID(rootID)
+	if root.CustomerID != nil {
+		t.Error("expected CustomerID to be nil on recipe root")
+	}
+	if root.DueDate != nil {
+		t.Error("expected DueDate to be nil on recipe root")
+	}
+}
+
+func TestSaveAsRecipe_ClonesDependencies(t *testing.T) {
+	svc, _, _, depRepo, jobID := setupJobFromRecipe(t)
+
+	depsBefore := len(depRepo.deps)
+
+	_, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Deps Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	// The source recipe had 1 dep (step2→step1), cloned into the job,
+	// and now cloned again into the recipe. So we expect 1 new dep.
+	depsAfter := len(depRepo.deps)
+	if depsAfter != depsBefore+1 {
+		t.Errorf("expected %d deps after save-as-recipe, got %d", depsBefore+1, depsAfter)
+	}
+}
+
+func TestSaveAsRecipe_BackfillsEstimatedFromActual(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Backfill Test", SaveAsRecipeOptions{
+		BackfillEstimatedFromActual: true,
+	})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	children, _ := taskRepo.GetChildren(rootID)
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children, got %d", len(children))
+	}
+
+	// Sort by display order for deterministic checking.
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].DisplayOrder < children[j].DisplayOrder
+	})
+
+	// Children had ActualTimeSecs of 3600 and 7200, no EstimatedTimeSecs.
+	for i, child := range children {
+		expectedSecs := (i + 1) * 3600
+		if child.EstimatedTimeSecs == nil {
+			t.Errorf("child %q: EstimatedTimeSecs is nil, want %d", child.ID, expectedSecs)
+		} else if *child.EstimatedTimeSecs != expectedSecs {
+			t.Errorf("child %q: EstimatedTimeSecs = %d, want %d", child.ID, *child.EstimatedTimeSecs, expectedSecs)
+		}
+	}
+}
+
+func TestSaveAsRecipe_NoBackfillWhenEstimatedExists(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	// Set an existing estimated time on one child.
+	children, _ := taskRepo.GetChildren(jobID)
+	existingEstimate := 999
+	children[0].EstimatedTimeSecs = &existingEstimate
+	_ = taskRepo.Update(&children[0])
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "No Overwrite Test", SaveAsRecipeOptions{
+		BackfillEstimatedFromActual: true,
+	})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	recipeChildren, _ := taskRepo.GetChildren(rootID)
+
+	// Find the child that corresponds to the one with existing estimate.
+	for _, child := range recipeChildren {
+		if child.EstimatedTimeSecs != nil && *child.EstimatedTimeSecs == existingEstimate {
+			return // Found the preserved estimate — test passes.
+		}
+	}
+	t.Error("expected one child to preserve its existing EstimatedTimeSecs=999")
+}
+
+func TestSaveAsRecipe_SetsSpaceAndCreatedBy(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, err := svc.SaveAsRecipe(jobID, spaceID, userID, "Space Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	if recipe.SpaceID != spaceID {
+		t.Errorf("recipe SpaceID = %s, want %s", recipe.SpaceID, spaceID)
+	}
+	if recipe.CreatedByID != userID {
+		t.Errorf("recipe CreatedByID = %s, want %s", recipe.CreatedByID, userID)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	root, _ := taskRepo.GetByID(rootID)
+	if root.SpaceID != spaceID {
+		t.Errorf("root SpaceID = %s, want %s", root.SpaceID, spaceID)
+	}
+	if root.CreatedByID != userID {
+		t.Errorf("root CreatedByID = %s, want %s", root.CreatedByID, userID)
+	}
+}
+
+func TestSaveAsRecipe_SetsRecipeIDOnClonedTasks(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Traceability Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+
+	// Check root and children have RecipeID set.
+	root, _ := taskRepo.GetByID(rootID)
+	if root.RecipeID == nil || *root.RecipeID != recipe.ID {
+		t.Errorf("root RecipeID = %v, want %s", root.RecipeID, recipe.ID)
+	}
+
+	children, _ := taskRepo.GetChildren(rootID)
+	for _, child := range children {
+		if child.RecipeID == nil || *child.RecipeID != recipe.ID {
+			t.Errorf("child %q RecipeID = %v, want %s", child.ID, child.RecipeID, recipe.ID)
+		}
+	}
+}
+
+func TestSaveAsRecipe_PreservesStationAssignments(t *testing.T) {
+	svc, _, taskRepo, _, jobID := setupJobFromRecipe(t)
+
+	// Set station on job children.
+	stationID := uuid.New()
+	children, _ := taskRepo.GetChildren(jobID)
+	for i := range children {
+		children[i].StationID = &stationID
+		_ = taskRepo.Update(&children[i])
+	}
+
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Station Test", SaveAsRecipeOptions{})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
+	rootID := versions[0].RootTaskID.String()
+	recipeChildren, _ := taskRepo.GetChildren(rootID)
+	for _, child := range recipeChildren {
+		if child.StationID == nil || *child.StationID != stationID {
+			t.Errorf("child %q StationID = %v, want %s", child.ID, child.StationID, stationID)
+		}
+	}
+}
+
+func TestSaveAsRecipe_ErrorOnNonJob(t *testing.T) {
+	svc, _, taskRepo, _, _ := setupJobFromRecipe(t)
+
+	// Create a regular task (not a job).
+	taskID := "nori-test123"
+	task := &models.Task{
+		ID:   taskID,
+		Type: models.TaskTypeTask,
+	}
+	_ = taskRepo.Create(task)
+
+	_, err := svc.SaveAsRecipe(taskID, uuid.New(), uuid.New(), "Should Fail", SaveAsRecipeOptions{})
+	if err == nil {
+		t.Fatal("expected error for non-job task")
+	}
+	if !strings.Contains(err.Error(), "not a job") {
+		t.Errorf("error = %q, want it to mention 'not a job'", err.Error())
+	}
+}
+
+func TestSaveAsRecipe_ErrorOnEmptyName(t *testing.T) {
+	svc, _, _, _, jobID := setupJobFromRecipe(t)
+
+	_, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "", SaveAsRecipeOptions{})
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("error = %q, want it to mention 'name is required'", err.Error())
+	}
+}
+
+func TestSaveAsRecipe_WithDescription(t *testing.T) {
+	svc, recipeRepo, _, _, jobID := setupJobFromRecipe(t)
+
+	desc := "A recipe from a completed job"
+	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Described Recipe", SaveAsRecipeOptions{
+		Description: &desc,
+	})
+	if err != nil {
+		t.Fatalf("SaveAsRecipe: %v", err)
+	}
+
+	stored, _ := recipeRepo.GetByID(recipe.ID)
+	if stored.Description == nil || *stored.Description != desc {
+		t.Errorf("Description = %v, want %q", stored.Description, desc)
+	}
+}
