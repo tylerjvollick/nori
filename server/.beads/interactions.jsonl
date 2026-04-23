@@ -1,0 +1,1 @@
+{"id":"int-8daa82fb","kind":"field_change","created_at":"2026-04-23T06:01:35.262733Z","actor":"Tyler Vollick","issue_id":"nori-40n.7.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Added migration 000042 with batch_size/estimated_time_secs columns and recipe enum value. Updated Task model struct."}}

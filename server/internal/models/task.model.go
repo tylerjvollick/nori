@@ -18,6 +18,7 @@ const (
 	TaskTypeTask      TaskType = "task"
 	TaskTypeMilestone TaskType = "milestone"
 	TaskTypeGate      TaskType = "gate"
+	TaskTypeRecipe    TaskType = "recipe"
 )
 
 // TaskStatus represents the current state of a task.
@@ -79,8 +80,10 @@ type Task struct {
 	StartedAt       *time.Time `json:"startedAt,omitempty"`
 	PausedAt        *time.Time `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time `json:"completedAt,omitempty"`
-	ActualTimeSecs  int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
-	DeviationNotes  *string    `json:"deviationNotes,omitempty"`
+	ActualTimeSecs    int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
+	BatchSize         *int       `json:"batchSize,omitempty"`
+	EstimatedTimeSecs *int       `json:"estimatedTimeSecs,omitempty"`
+	DeviationNotes    *string    `json:"deviationNotes,omitempty"`
 	Metadata        JSONB      `gorm:"type:jsonb" json:"metadata,omitempty"`
 	CreatedAt       time.Time  `gorm:"default:now()" json:"createdAt"`
 	UpdatedAt       time.Time  `gorm:"default:now()" json:"updatedAt"`
