@@ -124,6 +124,10 @@ func (m *MockTaskDepRepository) GetAllForTask(taskID string) ([]models.TaskDep, 
 	return nil, nil
 }
 
+func (m *MockTaskDepRepository) GetDepsAmongTasks(_ []string) ([]models.TaskDep, error) {
+	return nil, nil
+}
+
 // MockTimeEventRepository is a mock implementation of TimeEventRepositoryInterface.
 type MockTimeEventRepository struct {
 	createFunc func(*models.TimeEvent) error

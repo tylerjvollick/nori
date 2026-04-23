@@ -62,6 +62,18 @@ func (m *mockRecipeRepo) ListVersions(recipeID uuid.UUID) ([]models.RecipeVersio
 	return result, nil
 }
 
+func (m *mockRecipeRepo) GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error) {
+	v, ok := m.versions[id]
+	if !ok {
+		return nil, nil, errNotFound("recipe version not found")
+	}
+	return v, nil, nil
+}
+
+func (m *mockRecipeRepo) PublishVersion(_ int) error {
+	return nil
+}
+
 type mockTaskRepo struct {
 	tasks map[string]*models.Task
 }
@@ -174,6 +186,20 @@ func (m *mockTaskDepRepo) GetAllForTask(taskID string) ([]models.TaskDep, error)
 	var result []models.TaskDep
 	for _, d := range m.deps {
 		if d.FromTaskID == taskID || d.ToTaskID == taskID {
+			result = append(result, d)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockTaskDepRepo) GetDepsAmongTasks(taskIDs []string) ([]models.TaskDep, error) {
+	idSet := make(map[string]bool, len(taskIDs))
+	for _, id := range taskIDs {
+		idSet[id] = true
+	}
+	var result []models.TaskDep
+	for _, d := range m.deps {
+		if idSet[d.FromTaskID] && idSet[d.ToTaskID] {
 			result = append(result, d)
 		}
 	}

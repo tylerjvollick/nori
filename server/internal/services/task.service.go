@@ -30,6 +30,7 @@ type TaskDepRepositoryInterface interface {
 	GetBlockers(taskID string) ([]models.TaskDep, error)
 	GetDependents(taskID string) ([]models.TaskDep, error)
 	GetAllForTask(taskID string) ([]models.TaskDep, error)
+	GetDepsAmongTasks(taskIDs []string) ([]models.TaskDep, error)
 }
 
 // TimeEventRepositoryInterface defines the methods needed to create time events.

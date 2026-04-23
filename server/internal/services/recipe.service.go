@@ -20,8 +20,10 @@ import (
 type RecipeRepositoryInterface interface {
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
+	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
 	CreateVersion(version *models.RecipeVersion) error
 	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
+	PublishVersion(versionID int) error
 }
 
 // RecipeService handles recipe operations including pouring recipes into task graphs.
@@ -406,6 +408,168 @@ func wireDependencies(taskDepRepo TaskDepRepositoryInterface, downstreamIDs, ups
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Deep Clone Task Tree
+// ---------------------------------------------------------------------------
+
+// TaskTreeCloneOptions controls how a task tree is cloned. Fields left nil
+// inherit values from the source tasks.
+type TaskTreeCloneOptions struct {
+	NewRootID       string     // Required: the ID for the cloned root task.
+	SpaceID         *uuid.UUID // Override SpaceID on all cloned tasks.
+	CreatedByID     *uuid.UUID // Override CreatedByID on all cloned tasks.
+	RecipeID        *uuid.UUID // Set RecipeID on all cloned tasks.
+	RecipeVersionID *int       // Set RecipeVersionID on all cloned tasks.
+	ResetStatus     bool       // If true, reset all cloned tasks to "open".
+}
+
+// DeepCloneTaskTree clones an entire task tree (root + descendants) and all
+// internal dependency edges. It generates new hierarchical IDs rooted at
+// opts.NewRootID while preserving the tree structure.
+//
+// This is the shared utility used by:
+//  1. Publishing a recipe version (clone draft tree → frozen snapshot)
+//  2. Rolling a recipe (clone published tree → new job)
+//  3. Save-as-recipe (clone job tree → recipe draft tree)
+//
+// The function wraps all writes in a transaction when a real DB handle is
+// available (production), or uses the injected repos directly (tests).
+func (s *RecipeService) DeepCloneTaskTree(
+	sourceRootID string,
+	opts TaskTreeCloneOptions,
+) (*models.Task, error) {
+	if opts.NewRootID == "" {
+		return nil, fmt.Errorf("NewRootID is required")
+	}
+
+	// 1. Load all source tasks using the hierarchical ID prefix.
+	sourceTasks, err := s.taskRepo.GetDescendants(sourceRootID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source task tree: %w", err)
+	}
+	if len(sourceTasks) == 0 {
+		return nil, fmt.Errorf("no tasks found for root %q", sourceRootID)
+	}
+
+	// 2. Build the old→new ID mapping. The root maps to NewRootID, and
+	//    descendants have their prefix replaced: "oldRoot.1.2" → "newRoot.1.2".
+	idMap := make(map[string]string, len(sourceTasks))
+	for _, t := range sourceTasks {
+		if t.ID == sourceRootID {
+			idMap[t.ID] = opts.NewRootID
+		} else {
+			suffix := t.ID[len(sourceRootID):]
+			idMap[t.ID] = opts.NewRootID + suffix
+		}
+	}
+
+	// 3. Load internal dependency edges (both endpoints within this tree).
+	taskIDs := make([]string, len(sourceTasks))
+	for i, t := range sourceTasks {
+		taskIDs[i] = t.ID
+	}
+	sourceDeps, err := s.taskDepRepo.GetDepsAmongTasks(taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("loading source dependencies: %w", err)
+	}
+
+	// 4. Clone tasks and deps within a transaction.
+	now := time.Now()
+	var clonedRoot *models.Task
+
+	cloneFn := func(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface) error {
+		for _, src := range sourceTasks {
+			clone := src // copy all fields
+			clone.ID = idMap[src.ID]
+			clone.CreatedAt = now
+			clone.UpdatedAt = now
+
+			// Remap ParentID.
+			if src.ParentID != nil {
+				newParent := idMap[*src.ParentID]
+				clone.ParentID = &newParent
+			}
+
+			// Apply overrides.
+			if opts.SpaceID != nil {
+				clone.SpaceID = *opts.SpaceID
+			}
+			if opts.CreatedByID != nil {
+				clone.CreatedByID = *opts.CreatedByID
+			}
+			if opts.RecipeID != nil {
+				clone.RecipeID = opts.RecipeID
+			}
+			if opts.RecipeVersionID != nil {
+				clone.RecipeVersionID = opts.RecipeVersionID
+			}
+			if opts.ResetStatus {
+				clone.Status = models.TaskStatusOpen
+				clone.StartedAt = nil
+				clone.PausedAt = nil
+				clone.CompletedAt = nil
+				clone.ActualTimeSecs = 0
+			}
+
+			// Clear GORM relation pointers to avoid accidental nested creates.
+			clone.Space = nil
+			clone.Parent = nil
+			clone.Children = nil
+			clone.Station = nil
+			clone.Customer = nil
+			clone.AssignedTo = nil
+			clone.CreatedBy = nil
+			clone.Tags = nil
+
+			if err := taskRepo.Create(&clone); err != nil {
+				return fmt.Errorf("cloning task %q → %q: %w", src.ID, clone.ID, err)
+			}
+
+			if src.ID == sourceRootID {
+				saved := clone
+				clonedRoot = &saved
+			}
+		}
+
+		// Clone dependency edges with remapped IDs.
+		for _, dep := range sourceDeps {
+			newFrom, ok1 := idMap[dep.FromTaskID]
+			newTo, ok2 := idMap[dep.ToTaskID]
+			if !ok1 || !ok2 {
+				continue // skip deps referencing tasks outside the tree
+			}
+
+			cloneDep := &models.TaskDep{
+				ID:         uuid.New(),
+				FromTaskID: newFrom,
+				ToTaskID:   newTo,
+				Type:       dep.Type,
+			}
+			if err := taskDepRepo.AddDep(cloneDep); err != nil {
+				return fmt.Errorf("cloning dep %s→%s: %w", newFrom, newTo, err)
+			}
+		}
+
+		return nil
+	}
+
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txTaskRepo := repositories.NewTaskRepository(tx)
+			txTaskDepRepo := repositories.NewTaskDepRepository(tx)
+			return cloneFn(txTaskRepo, txTaskDepRepo)
+		})
+	} else {
+		err = cloneFn(s.taskRepo, s.taskDepRepo)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return clonedRoot, nil
 }
 
 // ---------------------------------------------------------------------------

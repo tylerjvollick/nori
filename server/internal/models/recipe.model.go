@@ -61,8 +61,9 @@ type RecipeVersion struct {
 	UpdatedAt     time.Time           `gorm:"default:now()" json:"updatedAt"`
 
 	// Relations
-	Recipe *Recipe `gorm:"foreignKey:RecipeID" json:"recipe,omitempty"`
-	Author *User   `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
+	Recipe   *Recipe `gorm:"foreignKey:RecipeID" json:"recipe,omitempty"`
+	Author   *User   `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
+	RootTask *Task   `gorm:"foreignKey:RootTaskID" json:"rootTask,omitempty"`
 }
 
 func (RecipeVersion) TableName() string {
