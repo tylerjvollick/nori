@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -3442,5 +3443,541 @@ func TestRollRecipe_PreservesStationAssignments(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected rolled job to preserve station assignment from published tree")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Roll Recipe — Batch Expansion Tests
+// ---------------------------------------------------------------------------
+
+// setupPublishedRecipeWithBatchSizes creates a recipe with steps that have
+// different batch sizes, publishes it, and returns the service + fixtures.
+// Tree structure: root → [cut (batch_size=6), sand (batch_size=1)]
+// Dependency: sand depends on cut.
+func setupPublishedRecipeWithBatchSizes(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	// Create recipe with task tree.
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Batch Test Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := version.RootTaskID.String()
+
+	// Add step "Cut" with batch_size=6 (batch step).
+	batchSize6 := 6
+	cut, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut all parts", AddStepOptions{
+		BatchSize: &batchSize6,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep cut: %v", err)
+	}
+
+	// Add step "Sand" with batch_size=1 (per-piece step).
+	batchSize1 := 1
+	sand, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand piece {{n}} of {{batch_count}}", AddStepOptions{
+		BatchSize: &batchSize1,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep sand: %v", err)
+	}
+
+	// Sand depends on Cut.
+	if err := svc.AddStepDependency(recipe.ID, sand.ID, cut.ID); err != nil {
+		t.Fatalf("AddStepDependency: %v", err)
+	}
+
+	// Publish.
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipe.ID
+}
+
+func TestRollRecipe_BatchExpansion_PerPieceStep(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// cut (batch_size=6, orderQty=6): 1 ticket
+	// sand (batch_size=1, orderQty=6): 6 tickets
+	// Total children: 7
+	if len(children) != 7 {
+		t.Fatalf("expected 7 children (1 cut + 6 sand), got %d", len(children))
+	}
+
+	// Count sand tasks (title contains "Sand piece").
+	sandCount := 0
+	for _, c := range children {
+		if strings.Contains(c.Title, "Sand piece") {
+			sandCount++
+		}
+	}
+	if sandCount != 6 {
+		t.Errorf("expected 6 sand tasks, got %d", sandCount)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_BatchStep(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// Find the batch step (cut) — should be 1 task with Quantity=6.
+	cutCount := 0
+	for _, c := range children {
+		if c.Title == "Cut all parts" {
+			cutCount++
+			if c.Quantity != 6 {
+				t.Errorf("cut task Quantity = %d, want 6", c.Quantity)
+			}
+		}
+	}
+	if cutCount != 1 {
+		t.Errorf("expected 1 cut task, got %d", cutCount)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_TitleSubstitution(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// Collect sand task titles.
+	var sandTitles []string
+	for _, c := range children {
+		if strings.Contains(c.Title, "Sand piece") {
+			sandTitles = append(sandTitles, c.Title)
+		}
+	}
+
+	expectedTitles := []string{
+		"Sand piece 1 of 6",
+		"Sand piece 2 of 6",
+		"Sand piece 3 of 6",
+		"Sand piece 4 of 6",
+		"Sand piece 5 of 6",
+		"Sand piece 6 of 6",
+	}
+
+	if len(sandTitles) != len(expectedTitles) {
+		t.Fatalf("expected %d sand titles, got %d", len(expectedTitles), len(sandTitles))
+	}
+
+	// Sort both for comparison.
+	sort.Strings(sandTitles)
+	sort.Strings(expectedTitles)
+	for i, got := range sandTitles {
+		if got != expectedTitles[i] {
+			t.Errorf("sand title[%d] = %q, want %q", i, got, expectedTitles[i])
+		}
+	}
+}
+
+func TestRollRecipe_BatchExpansion_FanOutDependencies(t *testing.T) {
+	svc, _, _, depRepo, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	depsBefore := len(depRepo.deps)
+
+	orderQty := 6
+	_, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Sand (6 tasks) depends on Cut (1 task) → fan-out: 6 edges.
+	newDeps := len(depRepo.deps) - depsBefore
+	if newDeps != 6 {
+		t.Errorf("expected 6 new dependency edges (fan-out), got %d", newDeps)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_RootIsJob(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.Type != models.TaskTypeJob {
+		t.Errorf("expected root Type=%s, got %s", models.TaskTypeJob, job.Type)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_SetsTraceability(t *testing.T) {
+	svc, recipeRepo, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	recipe := recipeRepo.recipes[recipeID]
+
+	// Root should have traceability.
+	if job.RecipeID == nil || *job.RecipeID != recipeID {
+		t.Errorf("job RecipeID = %v, want %s", job.RecipeID, recipeID)
+	}
+
+	// All children should have traceability.
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.RecipeID == nil || *child.RecipeID != recipeID {
+			t.Errorf("child %q RecipeID = %v, want %s", child.ID, child.RecipeID, recipeID)
+		}
+		if child.RecipeVersionID == nil || *child.RecipeVersionID != *recipe.CurrentVersionID {
+			t.Errorf("child %q RecipeVersionID = %v, want %d", child.ID, child.RecipeVersionID, *recipe.CurrentVersionID)
+		}
+	}
+}
+
+func TestRollRecipe_BatchExpansion_ErrorNotDivisible(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	// orderQty=5 is not divisible by batch_size=6.
+	orderQty := 5
+	_, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err == nil {
+		t.Fatal("expected error for order_qty not divisible by batch_size")
+	}
+	if !strings.Contains(err.Error(), "not evenly divisible") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_PreservesStationID(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	// Set a station on one of the published steps.
+	recipe := svc.recipeRepo.(*mockRecipeRepo).recipes[recipeID]
+	version := svc.recipeRepo.(*mockRecipeRepo).versions[*recipe.CurrentVersionID]
+	publishedRootID := version.RootTaskID.String()
+	pubChildren, _ := taskRepo.GetChildren(publishedRootID)
+
+	stationID := uuid.New()
+	for i, c := range pubChildren {
+		if c.Title == "Cut all parts" {
+			pubChildren[i].StationID = &stationID
+			taskRepo.tasks[c.ID] = &pubChildren[i]
+			break
+		}
+	}
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+	found := false
+	for _, child := range children {
+		if child.Title == "Cut all parts" && child.StationID != nil && *child.StationID == stationID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected batch-expanded task to preserve station assignment")
+	}
+}
+
+func TestRollRecipe_BatchExpansion_OrderQtyOneUsesClone(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	// OrderQty=1 should use the 1:1 clone path (same as no OrderQty).
+	orderQty := 1
+	tasksBefore := len(taskRepo.tasks)
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Should have cloned 3 tasks (root + 2 steps), same as 1:1 path.
+	tasksAfter := len(taskRepo.tasks)
+	if tasksAfter != tasksBefore+3 {
+		t.Errorf("expected %d tasks after roll with orderQty=1, got %d", tasksBefore+3, tasksAfter)
+	}
+
+	if job.Type != models.TaskTypeJob {
+		t.Errorf("expected root Type=%s, got %s", models.TaskTypeJob, job.Type)
+	}
+}
+
+// setupPublishedRecipeForPositionalDeps creates a recipe where two steps
+// have the same batch_size, so dependencies wire 1:1 positionally.
+// Tree: root → [step-a (batch_size=1), step-b (batch_size=1)]
+// Dependency: step-b depends on step-a.
+func setupPublishedRecipeForPositionalDeps(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Positional Dep Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := version.RootTaskID.String()
+
+	batchSize1 := 1
+	stepA, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step A {{n}}", AddStepOptions{
+		BatchSize: &batchSize1,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep A: %v", err)
+	}
+
+	stepB, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step B {{n}}", AddStepOptions{
+		BatchSize: &batchSize1,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep B: %v", err)
+	}
+
+	if err := svc.AddStepDependency(recipe.ID, stepB.ID, stepA.ID); err != nil {
+		t.Fatalf("AddStepDependency: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipe.ID
+}
+
+func TestRollRecipe_BatchExpansion_PositionalDeps(t *testing.T) {
+	svc, _, taskRepo, depRepo, recipeID := setupPublishedRecipeForPositionalDeps(t)
+
+	depsBefore := len(depRepo.deps)
+
+	orderQty := 3
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Both steps have batch_size=1, orderQty=3 → 3 tickets each.
+	// 1:1 positional wiring → 3 edges.
+	newDeps := len(depRepo.deps) - depsBefore
+	if newDeps != 3 {
+		t.Errorf("expected 3 positional dependency edges, got %d", newDeps)
+	}
+
+	// Verify positional wiring: Step B.1 depends on Step A.1, etc.
+	children, _ := taskRepo.GetChildren(job.ID)
+	stepAIDs := []string{}
+	stepBIDs := []string{}
+	for _, c := range children {
+		if strings.Contains(c.Title, "Step A") {
+			stepAIDs = append(stepAIDs, c.ID)
+		} else if strings.Contains(c.Title, "Step B") {
+			stepBIDs = append(stepBIDs, c.ID)
+		}
+	}
+	sort.Strings(stepAIDs)
+	sort.Strings(stepBIDs)
+
+	for i, bID := range stepBIDs {
+		blockers, _ := depRepo.GetBlockers(bID)
+		if len(blockers) != 1 {
+			t.Errorf("Step B task %q: expected 1 blocker, got %d", bID, len(blockers))
+			continue
+		}
+		if blockers[0].ToTaskID != stepAIDs[i] {
+			t.Errorf("Step B task %q: expected blocker %q, got %q", bID, stepAIDs[i], blockers[0].ToTaskID)
+		}
+	}
+}
+
+func TestRollRecipe_BatchExpansion_FanInDeps(t *testing.T) {
+	// Recipe: root → [step-a (batch_size=1), step-b (batch_size=3)]
+	// step-b depends on step-a. With orderQty=3:
+	// step-a: 3 tickets, step-b: 1 ticket → fan-in: 3 edges
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Fan-In Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := version.RootTaskID.String()
+
+	batchSize1 := 1
+	stepA, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Part A", AddStepOptions{
+		BatchSize: &batchSize1,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep A: %v", err)
+	}
+
+	batchSize3 := 3
+	stepB, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Final Assembly", AddStepOptions{
+		BatchSize: &batchSize3,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep B: %v", err)
+	}
+
+	if err := svc.AddStepDependency(recipe.ID, stepB.ID, stepA.ID); err != nil {
+		t.Fatalf("AddStepDependency: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	depsBefore := len(depRepo.deps)
+
+	orderQty := 3
+	_, err = svc.RollRecipe(recipe.ID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Fan-in: 1 downstream (batch step) depends on 3 upstream (per-piece) → 3 edges.
+	newDeps := len(depRepo.deps) - depsBefore
+	if newDeps != 3 {
+		t.Errorf("expected 3 fan-in dependency edges, got %d", newDeps)
+	}
+}
+
+func TestRollRecipe_BatchExpansion_HierarchicalIDs(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// All children should have hierarchical IDs: jobID.1, jobID.2, ...
+	for _, child := range children {
+		if !strings.HasPrefix(child.ID, job.ID+".") {
+			t.Errorf("child ID %q does not have prefix %q", child.ID, job.ID+".")
+		}
+	}
+
+	// Child IDs should be sequential: .1 through .7
+	expectedIDs := make(map[string]bool)
+	for i := 1; i <= 7; i++ {
+		expectedIDs[fmt.Sprintf("%s.%d", job.ID, i)] = true
+	}
+	for _, child := range children {
+		if !expectedIDs[child.ID] {
+			t.Errorf("unexpected child ID %q", child.ID)
+		}
+	}
+}
+
+func TestRollRecipe_BatchExpansion_ChildrenAreTaskType(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.Type != models.TaskTypeTask {
+			t.Errorf("child %q: expected Type=%s, got %s", child.ID, models.TaskTypeTask, child.Type)
+		}
+	}
+}
+
+func TestRollRecipe_BatchExpansion_AllStatusOpen(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.Status != models.TaskStatusOpen {
+		t.Errorf("job Status = %s, want %s", job.Status, models.TaskStatusOpen)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.Status != models.TaskStatusOpen {
+			t.Errorf("child %q Status = %s, want %s", child.ID, child.Status, models.TaskStatusOpen)
+		}
 	}
 }
