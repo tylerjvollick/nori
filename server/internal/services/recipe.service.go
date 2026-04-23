@@ -20,6 +20,7 @@ import (
 // RecipeRepositoryInterface defines the methods needed from a recipe repository.
 type RecipeRepositoryInterface interface {
 	Create(recipe *models.Recipe) error
+	Update(recipe *models.Recipe) error
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
 	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
@@ -669,6 +670,11 @@ func (s *RecipeService) CreateRecipeWithTaskTree(
 		}
 		if err := recipeRepo.CreateVersion(version); err != nil {
 			return fmt.Errorf("creating draft version: %w", err)
+		}
+		// Link the recipe to its initial draft version.
+		recipe.CurrentVersionID = &version.ID
+		if err := recipeRepo.Update(recipe); err != nil {
+			return fmt.Errorf("linking recipe to draft version: %w", err)
 		}
 		return nil
 	}

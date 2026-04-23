@@ -164,6 +164,29 @@ async function globalSetup(_config: FullConfig) {
     throw new Error('Test user login succeeded but no nori_token cookie was returned.');
   }
 
+  // Resolve activeSpaceId: use login response, or fall back to /auth/me
+  let activeSpaceId: string = loginData.activeSpaceId ?? '';
+  if (!activeSpaceId) {
+    const meRes = await fetch(`${env.apiURL}/auth/me`, {
+      headers: { Cookie: `nori_token=${token}` },
+    });
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      if (meData.activeSpaceId) {
+        activeSpaceId = meData.activeSpaceId;
+      } else if (meData.accessibleSpaces?.length > 0) {
+        activeSpaceId = meData.accessibleSpaces[0].id;
+      }
+    }
+  }
+
+  if (!activeSpaceId) {
+    throw new Error(
+      'Could not determine activeSpaceId from login or /auth/me. ' +
+        'Ensure the test user is a member of at least one space.',
+    );
+  }
+
   const browser = await chromium.launch();
   const context = await browser.newContext();
 
@@ -186,13 +209,11 @@ async function globalSetup(_config: FullConfig) {
   await page.evaluate(
     ({ accessToken, activeSpaceId }) => {
       localStorage.setItem('accessToken', accessToken);
-      if (activeSpaceId) {
-        localStorage.setItem('activeSpaceId', activeSpaceId);
-      }
+      localStorage.setItem('activeSpaceId', activeSpaceId);
     },
     {
       accessToken: loginData.accessToken,
-      activeSpaceId: loginData.activeSpaceId ?? '',
+      activeSpaceId,
     },
   );
 

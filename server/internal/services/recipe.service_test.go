@@ -34,6 +34,11 @@ func (m *mockRecipeRepo) Create(recipe *models.Recipe) error {
 	return nil
 }
 
+func (m *mockRecipeRepo) Update(recipe *models.Recipe) error {
+	m.recipes[recipe.ID] = recipe
+	return nil
+}
+
 func (m *mockRecipeRepo) GetByID(id uuid.UUID) (*models.Recipe, error) {
 	r, ok := m.recipes[id]
 	if !ok {
@@ -2427,6 +2432,12 @@ func TestCreateRecipeWithTaskTree_Basic(t *testing.T) {
 	if !recipe.IsActive {
 		t.Error("expected recipe to be active")
 	}
+	if recipe.CurrentVersionID == nil {
+		t.Fatal("expected CurrentVersionID to be set on recipe")
+	}
+	if *recipe.CurrentVersionID != version.ID {
+		t.Errorf("expected CurrentVersionID %d, got %d", version.ID, *recipe.CurrentVersionID)
+	}
 
 	// Version should be a draft with RootTaskID set.
 	if version.Status != models.RecipeVersionStatusDraft {
@@ -2443,7 +2454,7 @@ func TestCreateRecipeWithTaskTree_Basic(t *testing.T) {
 	}
 
 	// Root task should exist with Type='recipe'.
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	rootTask, ok := taskRepo.tasks[rootTaskID]
 	if !ok {
 		t.Fatalf("expected root task at %q", rootTaskID)
@@ -2479,7 +2490,7 @@ func TestAddRecipeStep_Basic(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	desc := "Cut the wood"
 	batchSize := 6
 	estTime := 300
@@ -2526,7 +2537,7 @@ func TestAddRecipeStep_NestedChild(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	// Add parent step.
 	parent, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Assembly", AddStepOptions{})
@@ -2586,7 +2597,7 @@ func TestRemoveRecipeStep_Basic(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	// Add two steps.
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
@@ -2609,7 +2620,7 @@ func TestRemoveRecipeStep_CascadesChildren(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	// Add parent and child steps.
 	parent, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Assembly", AddStepOptions{})
@@ -2634,7 +2645,7 @@ func TestRemoveRecipeStep_CleansUpDeps(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
@@ -2662,7 +2673,7 @@ func TestRemoveRecipeStep_CannotRemoveRoot(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	err := svc.RemoveRecipeStep(recipe.ID, rootTaskID)
 	if err == nil {
@@ -2674,7 +2685,7 @@ func TestReorderRecipeSteps_Basic(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
@@ -2702,7 +2713,7 @@ func TestUpdateRecipeStep_Basic(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 
@@ -2744,7 +2755,7 @@ func TestUpdateRecipeStep_PartialUpdate(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	origDesc := "Original description"
 	step, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{Description: &origDesc})
@@ -2768,7 +2779,7 @@ func TestAddStepDependency_Basic(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
@@ -2799,7 +2810,7 @@ func TestRemoveStepDependency_Basic(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
@@ -2825,7 +2836,7 @@ func TestAddStepDependency_TaskNotInTree(t *testing.T) {
 	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
 
@@ -2891,7 +2902,7 @@ func setupRecipeWithDraftTree(t *testing.T) (*RecipeService, *mockRecipeRepo, *m
 	}
 
 	// Add child steps under the root.
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	step1, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step 1", AddStepOptions{})
 	if err != nil {
 		t.Fatalf("AddRecipeStep 1: %v", err)
@@ -2939,7 +2950,7 @@ func TestPublishVersion_ClonesTaskTree(t *testing.T) {
 	if published.RootTaskID == nil {
 		t.Fatal("published version has no RootTaskID")
 	}
-	clonedRootID := published.RootTaskID.String()
+	clonedRootID := *published.RootTaskID
 	if _, err := taskRepo.GetByID(clonedRootID); err != nil {
 		t.Errorf("cloned root task %q not found: %v", clonedRootID, err)
 	}
@@ -2994,12 +3005,12 @@ func TestPublishVersion_ArchivesPreviouslyPublished(t *testing.T) {
 	draftVersion := versions[0] // The existing draft
 	// We need a new draft. Since the original draft was just published,
 	// create a new one manually.
-	rootUUID := uuid.New()
+	rootStr := uuid.New().String()
 	newDraft := &models.RecipeVersion{
 		RecipeID:      recipeID,
 		VersionNumber: 2,
 		Status:        models.RecipeVersionStatusDraft,
-		RootTaskID:    &rootUUID,
+		RootTaskID:    &rootStr,
 		AuthorID:      v1.AuthorID,
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
@@ -3011,7 +3022,7 @@ func TestPublishVersion_ArchivesPreviouslyPublished(t *testing.T) {
 
 	// Create a root task for the new draft.
 	rootTask := &models.Task{
-		ID:      rootUUID.String(),
+		ID:      rootStr,
 		SpaceID: uuid.New(),
 		Type:    models.TaskTypeRecipe,
 		Status:  models.TaskStatusOpen,
@@ -3055,7 +3066,7 @@ func TestPublishVersion_DraftTreeRemainsEditable(t *testing.T) {
 			break
 		}
 	}
-	draftRootID := draftVersion.RootTaskID.String()
+	draftRootID := *draftVersion.RootTaskID
 
 	_, err := svc.PublishVersion(recipeID)
 	if err != nil {
@@ -3109,7 +3120,7 @@ func TestPublishVersion_PreservesClonedTaskFields(t *testing.T) {
 		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Detailed Step", AddStepOptions{
 		StationID:         &stationID,
 		EstimatedTimeSecs: &estTime,
@@ -3125,7 +3136,7 @@ func TestPublishVersion_PreservesClonedTaskFields(t *testing.T) {
 	}
 
 	// Find the cloned child task.
-	clonedRootID := published.RootTaskID.String()
+	clonedRootID := *published.RootTaskID
 	clonedChildren, err := taskRepo.GetChildren(clonedRootID)
 	if err != nil {
 		t.Fatalf("GetChildren: %v", err)
@@ -3416,7 +3427,7 @@ func TestRollRecipe_PreservesStationAssignments(t *testing.T) {
 	// We need to find a child task in the published tree.
 	recipe := svc.recipeRepo.(*mockRecipeRepo).recipes[recipeID]
 	version := svc.recipeRepo.(*mockRecipeRepo).versions[*recipe.CurrentVersionID]
-	publishedRootID := version.RootTaskID.String()
+	publishedRootID := *version.RootTaskID
 	pubChildren, _ := taskRepo.GetChildren(publishedRootID)
 	if len(pubChildren) == 0 {
 		t.Fatal("published tree has no children")
@@ -3470,7 +3481,7 @@ func setupPublishedRecipeWithBatchSizes(t *testing.T) (*RecipeService, *mockReci
 		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	// Add step "Cut" with batch_size=6 (batch step).
 	batchSize6 := 6
@@ -3696,7 +3707,7 @@ func TestRollRecipe_BatchExpansion_PreservesStationID(t *testing.T) {
 	// Set a station on one of the published steps.
 	recipe := svc.recipeRepo.(*mockRecipeRepo).recipes[recipeID]
 	version := svc.recipeRepo.(*mockRecipeRepo).versions[*recipe.CurrentVersionID]
-	publishedRootID := version.RootTaskID.String()
+	publishedRootID := *version.RootTaskID
 	pubChildren, _ := taskRepo.GetChildren(publishedRootID)
 
 	stationID := uuid.New()
@@ -3772,7 +3783,7 @@ func setupPublishedRecipeForPositionalDeps(t *testing.T) (*RecipeService, *mockR
 		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	batchSize1 := 1
 	stepA, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step A {{n}}", AddStepOptions{
@@ -3864,7 +3875,7 @@ func TestRollRecipe_BatchExpansion_FanInDeps(t *testing.T) {
 		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 
 	batchSize1 := 1
 	stepA, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Part A", AddStepOptions{
@@ -4073,7 +4084,7 @@ func TestSaveAsRecipe_ClonesTaskTree(t *testing.T) {
 	}
 
 	// Root task should exist.
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	root, err := taskRepo.GetByID(rootID)
 	if err != nil {
 		t.Fatalf("root task %q not found: %v", rootID, err)
@@ -4092,7 +4103,7 @@ func TestSaveAsRecipe_RootIsRecipeType(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	root, err := taskRepo.GetByID(rootID)
 	if err != nil {
 		t.Fatalf("root not found: %v", err)
@@ -4114,7 +4125,7 @@ func TestSaveAsRecipe_ChildrenAreTaskType(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	children, _ := taskRepo.GetChildren(rootID)
 	if len(children) != 2 {
 		t.Fatalf("expected 2 children, got %d", len(children))
@@ -4135,7 +4146,7 @@ func TestSaveAsRecipe_ResetsRuntimeFields(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	children, _ := taskRepo.GetChildren(rootID)
 	for _, child := range children {
 		if child.Status != models.TaskStatusOpen {
@@ -4173,7 +4184,7 @@ func TestSaveAsRecipe_ClearsDueDateAndCustomerOnRoot(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	root, _ := taskRepo.GetByID(rootID)
 	if root.CustomerID != nil {
 		t.Error("expected CustomerID to be nil on recipe root")
@@ -4212,7 +4223,7 @@ func TestSaveAsRecipe_BackfillsEstimatedFromActual(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	children, _ := taskRepo.GetChildren(rootID)
 	if len(children) != 2 {
 		t.Fatalf("expected 2 children, got %d", len(children))
@@ -4251,7 +4262,7 @@ func TestSaveAsRecipe_NoBackfillWhenEstimatedExists(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	recipeChildren, _ := taskRepo.GetChildren(rootID)
 
 	// Find the child that corresponds to the one with existing estimate.
@@ -4282,7 +4293,7 @@ func TestSaveAsRecipe_SetsSpaceAndCreatedBy(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	root, _ := taskRepo.GetByID(rootID)
 	if root.SpaceID != spaceID {
 		t.Errorf("root SpaceID = %s, want %s", root.SpaceID, spaceID)
@@ -4301,7 +4312,7 @@ func TestSaveAsRecipe_SetsRecipeIDOnClonedTasks(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 
 	// Check root and children have RecipeID set.
 	root, _ := taskRepo.GetByID(rootID)
@@ -4334,7 +4345,7 @@ func TestSaveAsRecipe_PreservesStationAssignments(t *testing.T) {
 	}
 
 	versions, _ := svc.recipeRepo.ListVersions(recipe.ID)
-	rootID := versions[0].RootTaskID.String()
+	rootID := *versions[0].RootTaskID
 	recipeChildren, _ := taskRepo.GetChildren(rootID)
 	for _, child := range recipeChildren {
 		if child.StationID == nil || *child.StationID != stationID {
