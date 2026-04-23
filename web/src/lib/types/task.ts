@@ -31,6 +31,7 @@ export interface TaskResponse {
 	pausedAt?: string | null;
 	completedAt?: string | null;
 	actualTimeSeconds: number;
+	estimatedTimeSeconds?: number | null;
 	deviationNotes?: string | null;
 	metadata?: Record<string, unknown> | null;
 	createdAt: string;

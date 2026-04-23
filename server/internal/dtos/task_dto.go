@@ -76,8 +76,9 @@ type TaskResponse struct {
 	StartedAt       *time.Time        `json:"startedAt,omitempty"`
 	PausedAt        *time.Time        `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time        `json:"completedAt,omitempty"`
-	ActualTimeSecs  int               `json:"actualTimeSeconds"`
-	DeviationNotes  *string           `json:"deviationNotes,omitempty"`
+	ActualTimeSecs     int               `json:"actualTimeSeconds"`
+	EstimatedTimeSecs  *int              `json:"estimatedTimeSeconds,omitempty"`
+	DeviationNotes     *string           `json:"deviationNotes,omitempty"`
 	Metadata        models.JSONB      `json:"metadata,omitempty"`
 	CreatedAt       string            `json:"createdAt"`
 	UpdatedAt       string            `json:"updatedAt"`
@@ -154,8 +155,9 @@ func TaskResponseFromModel(t *models.Task) TaskResponse {
 		StartedAt:       t.StartedAt,
 		PausedAt:        t.PausedAt,
 		CompletedAt:     t.CompletedAt,
-		ActualTimeSecs:  t.ActualTimeSecs,
-		DeviationNotes:  t.DeviationNotes,
+		ActualTimeSecs:     t.ActualTimeSecs,
+		EstimatedTimeSecs:  t.EstimatedTimeSecs,
+		DeviationNotes:     t.DeviationNotes,
 		Metadata:        t.Metadata,
 		CreatedAt:       t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:       t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),

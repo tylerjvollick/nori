@@ -14,11 +14,12 @@
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 	import GraphView from '$lib/components/flow/GraphView.svelte';
 	import ListView from '$lib/components/flow/ListView.svelte';
+	import JobCostSummary from '$lib/components/flow/JobCostSummary.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List } from '@lucide/svelte';
+	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 
 	let slug = $derived($page.params.slug);
@@ -37,12 +38,13 @@
 	let rootDepsAttempted = $state(false);
 
 	// ---- View mode ----
-	type ViewMode = 'tree' | 'board' | 'graph' | 'list';
+	type ViewMode = 'tree' | 'board' | 'graph' | 'list' | 'cost';
 	const ALL_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
 		{ value: 'tree', label: 'Tree', icon: TreePine },
 		{ value: 'board', label: 'Board', icon: LayoutGrid },
 		{ value: 'graph', label: 'Graph', icon: GitBranch },
 		{ value: 'list', label: 'List', icon: List },
+		{ value: 'cost', label: 'Cost', icon: DollarSign },
 	];
 
 	/** Whether the root is a non-job leaf task (no children). */
@@ -223,6 +225,9 @@
 				if (currentView !== 'board') {
 					setView('list');
 				}
+				break;
+			case 'c':
+				setView('cost');
 				break;
 		}
 	}
@@ -521,6 +526,11 @@
 
 		{:else if currentView === 'list'}
 			<ListView tasks={flatTasks} deps={depsMap} {stationMap} />
+
+		{:else if currentView === 'cost'}
+			<div class="flex-1 overflow-y-auto">
+				<JobCostSummary jobId={tree.id} {tree} {stationMap} />
+			</div>
 		{/if}
 	{/if}
 </div>
