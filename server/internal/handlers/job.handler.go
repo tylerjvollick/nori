@@ -33,9 +33,9 @@ func NewJobHandler(taskService TaskServiceInterface, costService CostServiceInte
 	}
 }
 
-// RegisterJobRoutes registers job API routes on the Fiber app.
-func (h *JobHandler) RegisterJobRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/jobs", middlewares...)
+// RegisterJobRoutes registers job API routes on a Fiber router (space-scoped group).
+func (h *JobHandler) RegisterJobRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/jobs", middlewares...)
 
 	group.Get("", h.ListJobs)
 	group.Get("/:id", h.GetJob)
@@ -46,20 +46,14 @@ func (h *JobHandler) RegisterJobRoutes(app *fiber.App, middlewares ...fiber.Hand
 
 // ListJobs returns a paginated list of root job tasks for the active space.
 func (h *JobHandler) ListJobs(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
 	jobType := models.TaskTypeJob
 	filter := repositories.TaskFilter{
-		SpaceID:  authDTO.ActiveSpaceID,
+		SpaceID:  &spaceID,
 		Type:     &jobType,
 		RootOnly: true,
 	}
@@ -102,13 +96,12 @@ func (h *JobHandler) ListJobs(c *fiber.Ctx) error {
 	})
 }
 
-// getJobInSpace fetches a job by ID and verifies it belongs to the requester's
+// getJobInSpace fetches a job by ID and verifies it belongs to the path-scoped
 // space and is of type "job".
-func (h *JobHandler) getJobInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, jobID string) (*models.Task, error) {
-	if authDTO.ActiveSpaceID == nil {
-		return nil, c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+func (h *JobHandler) getJobInSpace(c *fiber.Ctx, jobID string) (*models.Task, error) {
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return nil, err
 	}
 
 	task, err := h.taskService.GetTaskByID(jobID)
@@ -118,7 +111,7 @@ func (h *JobHandler) getJobInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, jobID st
 		})
 	}
 
-	if task.SpaceID != *authDTO.ActiveSpaceID {
+	if task.SpaceID != spaceID {
 		return nil, c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "job not found",
 		})
@@ -135,11 +128,6 @@ func (h *JobHandler) getJobInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, jobID st
 
 // GetJob returns a single job by ID.
 func (h *JobHandler) GetJob(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id := c.Params("id")
 	if id == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -147,7 +135,7 @@ func (h *JobHandler) GetJob(c *fiber.Ctx) error {
 		})
 	}
 
-	job, err := h.getJobInSpace(c, authDTO, id)
+	job, err := h.getJobInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -157,11 +145,6 @@ func (h *JobHandler) GetJob(c *fiber.Ctx) error {
 
 // GetJobTasks returns the task tree for a job.
 func (h *JobHandler) GetJobTasks(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id := c.Params("id")
 	if id == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -169,7 +152,7 @@ func (h *JobHandler) GetJobTasks(c *fiber.Ctx) error {
 		})
 	}
 
-	job, err := h.getJobInSpace(c, authDTO, id)
+	job, err := h.getJobInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -187,11 +170,6 @@ func (h *JobHandler) GetJobTasks(c *fiber.Ctx) error {
 
 // GetJobCostSummary returns the aggregated cost summary for a job.
 func (h *JobHandler) GetJobCostSummary(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
 	id := c.Params("id")
 	if id == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
@@ -199,7 +177,7 @@ func (h *JobHandler) GetJobCostSummary(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := h.getJobInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getJobInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -220,10 +198,9 @@ func (h *JobHandler) SaveJobAsRecipe(c *fiber.Ctx) error {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	id := c.Params("id")
@@ -233,7 +210,7 @@ func (h *JobHandler) SaveJobAsRecipe(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := h.getJobInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getJobInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -259,7 +236,7 @@ func (h *JobHandler) SaveJobAsRecipe(c *fiber.Ctx) error {
 
 	recipe, err := h.saveAsRecipeService.SaveAsRecipe(
 		id,
-		*authDTO.ActiveSpaceID,
+		spaceID,
 		authDTO.User.ID,
 		dto.Name,
 		opts,
