@@ -3,8 +3,6 @@ import type { TaskTreeResponse } from './task';
 import type { RecipeResponse } from '$lib/types/recipe';
 import { apiClient } from './client';
 
-const BASE = '/api/v1/jobs';
-
 export interface ListJobsParams {
 	status?: string;
 	offset?: number;
@@ -24,27 +22,28 @@ function toQueryString(params?: Record<string, unknown>): string {
 }
 
 class JobApi {
-	async listJobs(params?: ListJobsParams): Promise<TaskListResponse> {
-		return apiClient.get<TaskListResponse>(`${BASE}${toQueryString(params && { ...params })}`);
+	async listJobs(spaceId: string, params?: ListJobsParams): Promise<TaskListResponse> {
+		return apiClient.get<TaskListResponse>(`/api/v1/spaces/${spaceId}/jobs${toQueryString(params && { ...params })}`);
 	}
 
-	async getJob(id: string): Promise<TaskResponse> {
-		return apiClient.get<TaskResponse>(`${BASE}/${id}`);
+	async getJob(spaceId: string, id: string): Promise<TaskResponse> {
+		return apiClient.get<TaskResponse>(`/api/v1/spaces/${spaceId}/jobs/${id}`);
 	}
 
-	async getJobTasks(id: string): Promise<TaskTreeResponse> {
-		return apiClient.get<TaskTreeResponse>(`${BASE}/${id}/tasks`);
+	async getJobTasks(spaceId: string, id: string): Promise<TaskTreeResponse> {
+		return apiClient.get<TaskTreeResponse>(`/api/v1/spaces/${spaceId}/jobs/${id}/tasks`);
 	}
 
-	async getJobCostSummary(id: string): Promise<unknown> {
-		return apiClient.get(`${BASE}/${id}/cost-summary`);
+	async getJobCostSummary(spaceId: string, id: string): Promise<unknown> {
+		return apiClient.get(`/api/v1/spaces/${spaceId}/jobs/${id}/cost-summary`);
 	}
 
 	async saveAsRecipe(
+		spaceId: string,
 		jobId: string,
 		data: { name: string; description?: string; backfillEstimatedFromActual?: boolean },
 	): Promise<RecipeResponse> {
-		return apiClient.post<RecipeResponse>(`${BASE}/${jobId}/save-as-recipe`, data);
+		return apiClient.post<RecipeResponse>(`/api/v1/spaces/${spaceId}/jobs/${jobId}/save-as-recipe`, data);
 	}
 }
 

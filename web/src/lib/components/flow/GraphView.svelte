@@ -7,6 +7,7 @@
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
+	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse, TaskStatus } from '$lib/types/task';
 	import type { TaskDepsResponse } from '$lib/api/task';
 	import type { StationResponse } from '$lib/types/station';
@@ -31,6 +32,8 @@
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
+
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// ---- Constants ----
 	const POLL_INTERVAL_MS = 30_000;
@@ -142,7 +145,7 @@
 
 	async function fetchStations(): Promise<void> {
 		try {
-			const stations: StationResponse[] = await stationApi.listStations();
+			const stations: StationResponse[] = await stationApi.listStations(spaceId);
 			const map = new Map<string, string>();
 			for (const s of stations) {
 				map.set(s.id, s.name);
@@ -167,7 +170,7 @@
 			if (statusFilter) params.status = statusFilter;
 
 			// Fetch all tasks
-			const result = await taskApi.listTasks(params as Parameters<typeof taskApi.listTasks>[0]);
+			const result = await taskApi.listTasks(spaceId, params as Parameters<typeof taskApi.listTasks>[1]);
 			let tasks = result.items;
 
 			// Apply priority filter client-side
@@ -200,7 +203,7 @@
 				const batchResults = await Promise.all(
 					batch.map(async (t) => {
 						try {
-							const deps = await taskApi.getTaskDeps(t.id);
+							const deps = await taskApi.getTaskDeps(spaceId, t.id);
 							return { taskId: t.id, deps };
 						} catch {
 							return { taskId: t.id, deps: { blockers: [], dependents: [] } };

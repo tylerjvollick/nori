@@ -4,6 +4,7 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
+	import { spaceStore } from '$lib/stores/space';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import * as Avatar from '$lib/components/ui/avatar';
@@ -25,6 +26,7 @@
 	let { task, stationMap, onaction, isDragging = false }: Props = $props();
 
 	let slug = $derived($page.params.slug);
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// --- Running timer for active tasks ---
 
@@ -107,7 +109,7 @@
 		if (isAssigning) return;
 		isAssigning = true;
 		try {
-			const updated = await taskApi.updateTask(task.id, { assignedToId: userId });
+			const updated = await taskApi.updateTask(spaceId, task.id, { assignedToId: userId });
 			onaction?.(updated);
 		} catch (err) {
 			console.error('Failed to assign user:', err);
@@ -120,7 +122,7 @@
 		if (isAssigning) return;
 		isAssigning = true;
 		try {
-			const updated = await taskApi.updateTask(task.id, { assignedToId: '' });
+			const updated = await taskApi.updateTask(spaceId, task.id, { assignedToId: '' });
 			onaction?.(updated);
 		} catch (err) {
 			console.error('Failed to unassign user:', err);

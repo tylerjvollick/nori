@@ -10,8 +10,6 @@ import type {
 } from '$lib/types/recipe';
 import type { TaskResponse } from '$lib/types/task';
 
-const BASE = '/api/v1/recipes';
-
 /** Build a query string from an object of optional params. */
 function toQueryString(params?: Record<string, unknown>): string {
 	if (!params) return '';
@@ -34,40 +32,40 @@ export interface ListRecipesParams {
 }
 
 class RecipeApi {
-	async listRecipes(params?: ListRecipesParams): Promise<RecipeListResponse> {
-		return apiClient.get<RecipeListResponse>(`${BASE}${toQueryString(params && { ...params })}`);
+	async listRecipes(spaceId: string, params?: ListRecipesParams): Promise<RecipeListResponse> {
+		return apiClient.get<RecipeListResponse>(`/api/v1/spaces/${spaceId}/recipes${toQueryString(params && { ...params })}`);
 	}
 
-	async getRecipe(id: string): Promise<RecipeResponse> {
-		return apiClient.get<RecipeResponse>(`${BASE}/${id}`);
+	async getRecipe(spaceId: string, id: string): Promise<RecipeResponse> {
+		return apiClient.get<RecipeResponse>(`/api/v1/spaces/${spaceId}/recipes/${id}`);
 	}
 
-	async createRecipe(data: CreateRecipeRequest): Promise<RecipeResponse> {
-		return apiClient.post<RecipeResponse>(BASE, data);
+	async createRecipe(spaceId: string, data: CreateRecipeRequest): Promise<RecipeResponse> {
+		return apiClient.post<RecipeResponse>(`/api/v1/spaces/${spaceId}/recipes`, data);
 	}
 
-	async updateRecipe(id: string, data: UpdateRecipeRequest): Promise<RecipeResponse> {
-		return apiClient.put<RecipeResponse>(`${BASE}/${id}`, data);
+	async updateRecipe(spaceId: string, id: string, data: UpdateRecipeRequest): Promise<RecipeResponse> {
+		return apiClient.put<RecipeResponse>(`/api/v1/spaces/${spaceId}/recipes/${id}`, data);
 	}
 
-	async deleteRecipe(id: string): Promise<void> {
-		return apiClient.delete<void>(`${BASE}/${id}`);
+	async deleteRecipe(spaceId: string, id: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/recipes/${id}`);
 	}
 
-	async listVersions(recipeId: string): Promise<RecipeVersionResponse[]> {
-		return apiClient.get<RecipeVersionResponse[]>(`${BASE}/${recipeId}/versions`);
+	async listVersions(spaceId: string, recipeId: string): Promise<RecipeVersionResponse[]> {
+		return apiClient.get<RecipeVersionResponse[]>(`/api/v1/spaces/${spaceId}/recipes/${recipeId}/versions`);
 	}
 
-	async createVersion(recipeId: string, data?: CreateRecipeVersionRequest): Promise<RecipeVersionResponse> {
-		return apiClient.post<RecipeVersionResponse>(`${BASE}/${recipeId}/versions`, data);
+	async createVersion(spaceId: string, recipeId: string, data?: CreateRecipeVersionRequest): Promise<RecipeVersionResponse> {
+		return apiClient.post<RecipeVersionResponse>(`/api/v1/spaces/${spaceId}/recipes/${recipeId}/versions`, data);
 	}
 
-	async publishVersion(recipeId: string): Promise<RecipeVersionResponse> {
-		return apiClient.post<RecipeVersionResponse>(`${BASE}/${recipeId}/publish`);
+	async publishVersion(spaceId: string, recipeId: string): Promise<RecipeVersionResponse> {
+		return apiClient.post<RecipeVersionResponse>(`/api/v1/spaces/${spaceId}/recipes/${recipeId}/publish`);
 	}
 
-	async rollRecipe(recipeId: string, data?: RollRecipeRequest): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${recipeId}/roll`, data);
+	async rollRecipe(spaceId: string, recipeId: string, data?: RollRecipeRequest): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/recipes/${recipeId}/roll`, data);
 	}
 }
 

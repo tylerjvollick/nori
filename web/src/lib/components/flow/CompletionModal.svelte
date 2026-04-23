@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskResponse, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -22,6 +23,8 @@
 	}
 
 	let { task, open = $bindable(), oncomplete, oncancel }: Props = $props();
+
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// --- Time editing state ---
 
@@ -66,7 +69,7 @@
 		phase = 'submitting';
 		errorMessage = null;
 		try {
-			const response = await taskApi.completeTask(task.id, {
+			const response = await taskApi.completeTask(spaceId, task.id, {
 				actualTimeSeconds: editedTotalSeconds,
 			});
 			completionResponse = response;

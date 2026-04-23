@@ -2,27 +2,6 @@ import { browser } from '$app/environment';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081';
 
-/**
- * Get the active space ID from localStorage.
- * The auth store writes this value when a space is selected.
- */
-function getActiveSpaceID(): string | null {
-  if (!browser) return null;
-  return localStorage.getItem('activeSpaceId');
-}
-
-/**
- * Set the active space ID in localStorage.
- */
-export function setActiveSpaceID(spaceId: string | null): void {
-  if (!browser) return;
-  if (spaceId) {
-    localStorage.setItem('activeSpaceId', spaceId);
-  } else {
-    localStorage.removeItem('activeSpaceId');
-  }
-}
-
 export class ApiClient {
   private baseURL: string;
 
@@ -39,12 +18,6 @@ export class ApiClient {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-    }
-
-    // Space scoping header
-    const spaceId = getActiveSpaceID();
-    if (spaceId) {
-      headers['X-Space-ID'] = spaceId;
     }
 
     return headers;
@@ -72,7 +45,6 @@ export class ApiClient {
       if (response.status === 401) {
         if (browser) {
           localStorage.removeItem('accessToken');
-          localStorage.removeItem('activeSpaceId');
           const path = window.location.pathname;
           if (path !== '/login' && path !== '/change-password') {
             window.location.href = '/login';
@@ -152,7 +124,6 @@ export class ApiClient {
       if (response.status === 401) {
         if (browser) {
           localStorage.removeItem('accessToken');
-          localStorage.removeItem('activeSpaceId');
           const path = window.location.pathname;
           if (path !== '/login' && path !== '/change-password') {
             window.location.href = '/login';

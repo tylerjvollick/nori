@@ -8,8 +8,8 @@ export interface CustomerResponse {
 }
 
 class CustomerApi {
-	async listCustomers(): Promise<CustomerResponse[]> {
-		return apiClient.get<CustomerResponse[]>('/api/v1/customers');
+	async listCustomers(spaceId: string): Promise<CustomerResponse[]> {
+		return apiClient.get<CustomerResponse[]>(`/api/v1/spaces/${spaceId}/customers`);
 	}
 }
 

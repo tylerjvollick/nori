@@ -31,6 +31,7 @@
 	let slug = $derived($page.params.slug);
 	let taskId = $derived($page.params.taskId);
 	let currentSpace = $derived($spaceStore.currentSpace);
+	let spaceId = $derived(currentSpace?.id ?? '');
 
 	let tree = $state<TaskTreeResponse | null>(null);
 	let isLoading = $state(true);
@@ -127,7 +128,7 @@
 		const neighborResults = await Promise.all(
 			[...neighborIds].map(async (id) => {
 				try {
-					return await taskApi.getTask(id);
+					return await taskApi.getTask(spaceId, id);
 				} catch {
 					return null;
 				}
@@ -166,7 +167,7 @@
 			const results = await Promise.all(
 				batch.map(async (t) => {
 					try {
-						const deps = await taskApi.getTaskDeps(t.id);
+						const deps = await taskApi.getTaskDeps(spaceId, t.id);
 						return { id: t.id, deps };
 					} catch {
 						return { id: t.id, deps: { blockers: [], dependents: [] } as TaskDepsResponse };
@@ -254,7 +255,7 @@
 		// Load deps for the selected task
 		selectedDeps = null;
 		try {
-			selectedDeps = await taskApi.getTaskDeps(task.id);
+			selectedDeps = await taskApi.getTaskDeps(spaceId, task.id);
 		} catch {
 			// Deps endpoint may fail — degrade gracefully
 			selectedDeps = null;
@@ -265,7 +266,7 @@
 	async function handleTaskAction(updated: TaskResponse): Promise<void> {
 		if (!taskId) return;
 		try {
-			const newTree = await taskApi.getTaskTree(taskId);
+			const newTree = await taskApi.getTaskTree(spaceId, taskId);
 			tree = newTree;
 			// Reset deps cache so graph view re-fetches on next switch
 			depsLoaded = false;
@@ -279,7 +280,7 @@
 				if (found) {
 					selectedTask = found;
 					try {
-						selectedDeps = await taskApi.getTaskDeps(found.id);
+						selectedDeps = await taskApi.getTaskDeps(spaceId, found.id);
 					} catch {
 						selectedDeps = null;
 					}
@@ -319,8 +320,8 @@
 		try {
 			// Fetch tree and stations in parallel
 			const [treeData, stations] = await Promise.all([
-				taskApi.getTaskTree(taskId),
-				stationApi.listStations().catch(() => [] as StationResponse[]),
+				taskApi.getTaskTree(spaceId, taskId),
+				stationApi.listStations(spaceId).catch(() => [] as StationResponse[]),
 			]);
 
 			tree = treeData;
@@ -335,7 +336,7 @@
 			// Auto-select root task and load its deps
 			selectedTask = tree;
 			try {
-				selectedDeps = await taskApi.getTaskDeps(tree.id);
+				selectedDeps = await taskApi.getTaskDeps(spaceId, tree.id);
 			} catch {
 				selectedDeps = null;
 			}
@@ -361,7 +362,7 @@
 		if (!tree || !recipeName.trim()) return;
 		isSavingAsRecipe = true;
 		try {
-			const recipe = await jobApi.saveAsRecipe(tree.id, {
+			const recipe = await jobApi.saveAsRecipe(spaceId, tree.id, {
 				name: recipeName.trim(),
 				description: recipeDescription.trim() || undefined,
 				backfillEstimatedFromActual: backfillEstimates,

@@ -28,10 +28,10 @@ function createRecipeStore() {
 	return {
 		subscribe,
 
-		async loadRecipes() {
+		async loadRecipes(spaceId: string) {
 			update((state) => ({ ...state, loading: true, error: null }));
 			try {
-				const result = await recipeApi.listRecipes({ limit: 100 });
+				const result = await recipeApi.listRecipes(spaceId, { limit: 100 });
 				update((state) => ({
 					...state,
 					recipes: result.items || [],
@@ -44,10 +44,10 @@ function createRecipeStore() {
 			}
 		},
 
-		async loadRecipe(id: string) {
+		async loadRecipe(spaceId: string, id: string) {
 			update((state) => ({ ...state, loading: true, error: null }));
 			try {
-				const recipe = await recipeApi.getRecipe(id);
+				const recipe = await recipeApi.getRecipe(spaceId, id);
 				update((state) => ({ ...state, currentRecipe: recipe, loading: false }));
 				return recipe;
 			} catch (error) {
@@ -57,9 +57,9 @@ function createRecipeStore() {
 			}
 		},
 
-		async loadVersions(recipeId: string) {
+		async loadVersions(spaceId: string, recipeId: string) {
 			try {
-				const versions = await recipeApi.listVersions(recipeId);
+				const versions = await recipeApi.listVersions(spaceId, recipeId);
 				update((state) => ({ ...state, versions }));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Failed to load versions';
@@ -67,10 +67,10 @@ function createRecipeStore() {
 			}
 		},
 
-		async createRecipe(data: CreateRecipeRequest) {
+		async createRecipe(spaceId: string, data: CreateRecipeRequest) {
 			update((state) => ({ ...state, loading: true, error: null }));
 			try {
-				const recipe = await recipeApi.createRecipe(data);
+				const recipe = await recipeApi.createRecipe(spaceId, data);
 				update((state) => ({
 					...state,
 					recipes: [...state.recipes, recipe],
@@ -84,11 +84,11 @@ function createRecipeStore() {
 			}
 		},
 
-		async publishVersion(recipeId: string) {
+		async publishVersion(spaceId: string, recipeId: string) {
 			try {
-				await recipeApi.publishVersion(recipeId);
+				await recipeApi.publishVersion(spaceId, recipeId);
 				// Reload recipe to get updated state
-				const recipe = await recipeApi.getRecipe(recipeId);
+				const recipe = await recipeApi.getRecipe(spaceId, recipeId);
 				update((state) => ({ ...state, currentRecipe: recipe }));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Failed to publish version';
@@ -97,11 +97,11 @@ function createRecipeStore() {
 			}
 		},
 
-		async createNewVersion(recipeId: string, changeSummary?: string) {
+		async createNewVersion(spaceId: string, recipeId: string, changeSummary?: string) {
 			try {
-				await recipeApi.createVersion(recipeId, { changeSummary });
+				await recipeApi.createVersion(spaceId, recipeId, { changeSummary });
 				// Reload recipe to get updated state with new draft
-				const recipe = await recipeApi.getRecipe(recipeId);
+				const recipe = await recipeApi.getRecipe(spaceId, recipeId);
 				update((state) => ({ ...state, currentRecipe: recipe }));
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'Failed to create new version';

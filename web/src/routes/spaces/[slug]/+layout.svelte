@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onMount, onDestroy } from 'svelte';
 	import { spaceStore } from '$lib/stores/space';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
 	import { stationApi } from '$lib/api/station';
@@ -179,13 +178,14 @@
 
 	// ---- Data loading ----
 
-	onMount(async () => {
-		try {
-			stations = await stationApi.listStations();
-		} catch {
-			// Stations endpoint may not exist yet — degrade gracefully.
-		} finally {
-			stationsLoaded = true;
+	// Load stations when the current space becomes available
+	$effect(() => {
+		const space = currentSpace;
+		if (space && !stationsLoaded) {
+			stationApi.listStations(space.id)
+				.then((s) => { stations = s; })
+				.catch(() => {})
+				.finally(() => { stationsLoaded = true; });
 		}
 	});
 </script>

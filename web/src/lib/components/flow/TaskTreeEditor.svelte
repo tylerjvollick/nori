@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
 	import { taskApi } from '$lib/api/task';
+	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse, TaskDep } from '$lib/types/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Badge } from '$lib/components/ui/badge';
@@ -64,6 +65,8 @@
 		onselect,
 		selectedTaskId = null,
 	}: Props = $props();
+
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// ---- State ----
 
@@ -207,7 +210,7 @@
 			} else if (editingField === 'description') {
 				update.description = editValue;
 			}
-			await taskApi.updateTask(editingTaskId, update as { title?: string; description?: string });
+			await taskApi.updateTask(spaceId, editingTaskId, update as { title?: string; description?: string });
 			cancelEdit();
 			onmutate?.();
 		} catch (err) {
@@ -237,7 +240,7 @@
 	async function updateStation(taskId: string, stationId: string | undefined): Promise<void> {
 		isSaving = true;
 		try {
-			await taskApi.updateTask(taskId, { stationId: stationId || undefined } as { stationId?: string });
+			await taskApi.updateTask(spaceId, taskId, { stationId: stationId || undefined } as { stationId?: string });
 			onmutate?.();
 		} catch (err) {
 			console.error('Failed to update station:', err);
@@ -258,7 +261,7 @@
 		if (!addChildParentId || !addChildTitle.trim()) return;
 		isSaving = true;
 		try {
-			await taskApi.addChildTask(addChildParentId, {
+			await taskApi.addChildTask(spaceId, addChildParentId, {
 				title: addChildTitle.trim(),
 				type: context === 'recipe' ? 'task' : 'task',
 			});
@@ -286,7 +289,7 @@
 		if (!deleteTaskId) return;
 		isSaving = true;
 		try {
-			await taskApi.deleteTask(deleteTaskId);
+			await taskApi.deleteTask(spaceId, deleteTaskId);
 			deleteOpen = false;
 			deleteTaskId = null;
 			onmutate?.();
@@ -342,7 +345,7 @@
 		isSaving = true;
 		try {
 			// blockerId blocks depTaskId: POST /tasks/{blockerId}/deps with targetTaskId=depTaskId
-			await taskApi.addDep(blockerId, depTaskId);
+			await taskApi.addDep(spaceId, blockerId, depTaskId);
 			onmutate?.();
 		} catch (err) {
 			console.error('Failed to add dependency:', err);
@@ -355,7 +358,7 @@
 		if (!depTaskId) return;
 		isSaving = true;
 		try {
-			await taskApi.removeDep(dep.toTaskId, dep.id);
+			await taskApi.removeDep(spaceId, dep.toTaskId, dep.id);
 			onmutate?.();
 		} catch (err) {
 			console.error('Failed to remove dependency:', err);

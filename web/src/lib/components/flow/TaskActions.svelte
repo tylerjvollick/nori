@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskResponse, TaskStatus, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -25,6 +26,8 @@
 	}
 
 	let { task, layout = 'bar', onaction, oncomplete }: Props = $props();
+
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	let loadingAction = $state<ActionType | null>(null);
 	let showSkipDialog = $state(false);
@@ -104,16 +107,16 @@
 			let updated: TaskResponse;
 			switch (action) {
 				case 'start':
-					updated = await taskApi.startTask(task.id);
+					updated = await taskApi.startTask(spaceId, task.id);
 					break;
 				case 'pause':
-					updated = await taskApi.pauseTask(task.id);
+					updated = await taskApi.pauseTask(spaceId, task.id);
 					break;
 				case 'resume':
-					updated = await taskApi.resumeTask(task.id);
+					updated = await taskApi.resumeTask(spaceId, task.id);
 					break;
 				case 'skip':
-					updated = await taskApi.skipTask(task.id);
+					updated = await taskApi.skipTask(spaceId, task.id);
 					break;
 				default:
 					return; // 'complete' handled by modal

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { recipeStore } from '$lib/stores/recipe';
+	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -13,6 +14,7 @@
 	import { CircleAlert } from '@lucide/svelte';
 
 	let searchQuery = $state('');
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 	let showCreateDialog = $state(false);
 	let newRecipeName = $state('');
 	let newRecipeDescription = $state('');
@@ -20,7 +22,7 @@
 	let createError = $state('');
 
 	onMount(() => {
-		recipeStore.loadRecipes();
+		if (spaceId) recipeStore.loadRecipes(spaceId);
 	});
 
 	const filteredRecipes = $derived(
@@ -51,7 +53,7 @@
 		isCreating = true;
 		createError = '';
 		try {
-			const recipe = await recipeStore.createRecipe({
+			const recipe = await recipeStore.createRecipe(spaceId, {
 				name: newRecipeName.trim(),
 				description: newRecipeDescription.trim() || undefined,
 			});

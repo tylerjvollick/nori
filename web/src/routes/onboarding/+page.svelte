@@ -2,7 +2,6 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { spaceApi } from '$lib/api/space';
-	import { setActiveSpaceID } from '$lib/api/client';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -56,9 +55,6 @@
 			const space = await spaceApi.create({
 				name: spaceName.trim(),
 			});
-
-			// Set the new space as the active space
-			setActiveSpaceID(space.id);
 
 			// Redirect to the new space
 			goto(`/spaces/${space.slug}`);

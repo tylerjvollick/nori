@@ -6,6 +6,7 @@
   import type { TaskTreeResponse } from "$lib/api/task";
   import { jobApi } from "$lib/api/job";
   import { stationApi } from "$lib/api/station";
+  import { spaceStore } from "$lib/stores/space";
   import type { TaskResponse } from "$lib/types/task";
   import type { StationResponse } from "$lib/types/station";
   import { Button } from "$lib/components/ui/button";
@@ -195,6 +196,7 @@
   // ---- Derived filters from URL ----
 
   let slug = $derived($page.params.slug);
+  let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
   let stationFilter = $derived($page.url.searchParams.get("station") || "");
   let priorityFilter = $derived($page.url.searchParams.get("priority") || "");
 
@@ -213,7 +215,7 @@
 
   async function fetchStations(): Promise<void> {
     try {
-      const stations: StationResponse[] = await stationApi.listStations();
+      const stations: StationResponse[] = await stationApi.listStations(spaceId);
       const map = new Map<string, string>();
       for (const s of stations) {
         map.set(s.id, s.name);
@@ -293,35 +295,35 @@
         skippedResult,
       ] = await Promise.all([
         // Ready tasks
-        taskApi.getReadyTasks({
+        taskApi.getReadyTasks(spaceId, {
           stationId: filters.stationId,
         }),
         // Open tasks (to compute blocked = open minus ready)
-        taskApi.listTasks({
+        taskApi.listTasks(spaceId, {
           status: "open",
           stationId: filters.stationId,
           limit: 200,
         }),
         // Active tasks
-        taskApi.listTasks({
+        taskApi.listTasks(spaceId, {
           status: "active",
           stationId: filters.stationId,
           limit: 200,
         }),
         // Paused tasks
-        taskApi.listTasks({
+        taskApi.listTasks(spaceId, {
           status: "paused",
           stationId: filters.stationId,
           limit: 200,
         }),
         // Done tasks
-        taskApi.listTasks({
+        taskApi.listTasks(spaceId, {
           status: "done",
           stationId: filters.stationId,
           limit: DONE_LIMIT,
         }),
         // Skipped tasks
-        taskApi.listTasks({
+        taskApi.listTasks(spaceId, {
           status: "skipped",
           stationId: filters.stationId,
           limit: DONE_LIMIT,
@@ -426,7 +428,7 @@
       const filters = filterParams();
 
       // Fetch root-level jobs from the dedicated jobs endpoint
-      const jobsResult = await jobApi.listJobs({
+      const jobsResult = await jobApi.listJobs(spaceId, {
         limit: 200,
       });
 
@@ -443,7 +445,7 @@
       const jobTrees = await Promise.all(
         filteredJobs.map(async (job) => {
           try {
-            const tree = await jobApi.getJobTasks(job.id);
+            const tree = await jobApi.getJobTasks(spaceId, job.id);
             return { job, tree };
           } catch {
             // If tree fetch fails, use job's own data
@@ -729,7 +731,7 @@
 
   async function startSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.startTask(task.id);
+      await taskApi.startTask(spaceId, task.id);
       showToast(`Started: ${task.title}`);
       fetchAllColumns({ silent: true });
     } catch (err) {
@@ -740,7 +742,7 @@
 
   async function completeSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.completeTask(task.id);
+      await taskApi.completeTask(spaceId, task.id);
       showToast(`Completed: ${task.title}`);
       fetchAllColumns({ silent: true });
     } catch (err) {
@@ -886,11 +888,11 @@
 
       if (targetColumn === "inProgress" && prevStatus === "open") {
         // Ready -> In Progress: start
-        apiCall = taskApi.startTask(task.id);
+        apiCall = taskApi.startTask(spaceId, task.id);
         description = `Started: ${task.title}`;
         revertCall = async () => {
           // Revert: set status back to open
-          await taskApi.updateTask(task.id, { status: "open" });
+          await taskApi.updateTask(spaceId, task.id, { status: "open" });
           fetchCurrentMode({ silent: true });
         };
       } else if (
@@ -898,11 +900,11 @@
         (prevStatus === "active" || prevStatus === "paused")
       ) {
         // In Progress -> Done: complete
-        apiCall = taskApi.completeTask(task.id);
+        apiCall = taskApi.completeTask(spaceId, task.id);
         description = `Completed: ${task.title}`;
         revertCall = async () => {
           // Revert: resume the task (done -> active isn't a direct API, use update)
-          await taskApi.updateTask(task.id, { status: "active" });
+          await taskApi.updateTask(spaceId, task.id, { status: "active" });
           fetchCurrentMode({ silent: true });
         };
       } else if (
@@ -910,11 +912,11 @@
         (prevStatus === "active" || prevStatus === "paused")
       ) {
         // In Progress -> Ready: revert to open
-        apiCall = taskApi.updateTask(task.id, { status: "open" });
+        apiCall = taskApi.updateTask(spaceId, task.id, { status: "open" });
         description = `Reverted to open: ${task.title}`;
         revertCall = async () => {
           // Revert: start the task again
-          await taskApi.startTask(task.id);
+          await taskApi.startTask(spaceId, task.id);
           fetchCurrentMode({ silent: true });
         };
       } else {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { costApi, type CostSummary } from '$lib/api/cost';
+	import { spaceStore } from '$lib/stores/space';
 	import type { TaskTreeResponse } from '$lib/api/task';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
@@ -28,6 +29,8 @@
 	}
 
 	let { jobId, tree, stationMap }: Props = $props();
+
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	let costSummary = $state<CostSummary | null>(null);
 	let isLoading = $state(true);
@@ -147,7 +150,7 @@
 
 	onMount(async () => {
 		try {
-			costSummary = await costApi.getJobCostSummary(jobId);
+			costSummary = await costApi.getJobCostSummary(spaceId, jobId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load cost data';
 		} finally {

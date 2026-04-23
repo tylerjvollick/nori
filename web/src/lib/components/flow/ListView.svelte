@@ -4,6 +4,7 @@
   import { onMount, onDestroy } from "svelte";
   import { taskApi, type ListTasksParams, type TaskDepsResponse } from "$lib/api/task";
   import { stationApi } from "$lib/api/station";
+  import { spaceStore } from "$lib/stores/space";
   import type { TaskResponse, TaskStatus, TaskType } from "$lib/types/task";
   import type { StationResponse } from "$lib/types/station";
   import { Badge } from "$lib/components/ui/badge";
@@ -37,6 +38,8 @@
 
   /** Whether we're in scoped mode (tasks provided externally). */
   let isScoped = $derived(!!externalTasks);
+
+  let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
   const POLL_INTERVAL_MS = 30_000;
   const PAGE_SIZE = 200; // Fetch more to build complete chains
@@ -359,7 +362,7 @@
 
   async function fetchStations(): Promise<void> {
     try {
-      const stations: StationResponse[] = await stationApi.listStations();
+      const stations: StationResponse[] = await stationApi.listStations(spaceId);
       const map = new Map<string, string>();
       for (const s of stations) {
         map.set(s.id, s.name);
@@ -400,7 +403,7 @@
 
     try {
       const offset = opts?.append ? allTasks.length : 0;
-      const result = await taskApi.listTasks(buildParams(offset));
+      const result = await taskApi.listTasks(spaceId, buildParams(offset));
 
       let items = result.items;
 
@@ -447,7 +450,7 @@
       const results = await Promise.all(
         batch.map(async (t) => {
           try {
-            const deps = await taskApi.getTaskDeps(t.id);
+            const deps = await taskApi.getTaskDeps(spaceId, t.id);
             return { id: t.id, deps };
           } catch {
             return {
@@ -688,7 +691,7 @@
 
   async function startSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.startTask(task.id);
+      await taskApi.startTask(spaceId, task.id);
       showToast(`Started: ${task.title}`);
       fetchTasks({ silent: true });
     } catch (err) {
@@ -699,7 +702,7 @@
 
   async function completeSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.completeTask(task.id);
+      await taskApi.completeTask(spaceId, task.id);
       showToast(`Completed: ${task.title}`);
       fetchTasks({ silent: true });
     } catch (err) {

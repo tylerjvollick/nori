@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { recipeStore } from '$lib/stores/recipe';
 	import { recipeApi } from '$lib/api/recipe';
+	import { spaceStore } from '$lib/stores/space';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
 	import type { TaskResponse } from '$lib/types/task';
@@ -36,6 +37,7 @@
 	import { toast } from 'svelte-sonner';
 
 	let recipeId = $derived($page.params.id);
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 	let recipe = $derived($recipeStore.currentRecipe);
 	let loading = $derived($recipeStore.loading);
 	let storeError = $derived($recipeStore.error);
@@ -82,7 +84,7 @@
 		const id = $page.params.id;
 		if (id && id !== lastLoadedId) {
 			lastLoadedId = id;
-			recipeStore.loadRecipe(id);
+			recipeStore.loadRecipe(spaceId, id);
 		}
 	});
 
@@ -102,7 +104,7 @@
 
 	async function loadStations() {
 		try {
-			stations = await stationApi.listStations();
+			stations = await stationApi.listStations(spaceId);
 			const map = new Map<string, string>();
 			for (const s of stations) {
 				map.set(s.id, s.name);
@@ -115,7 +117,7 @@
 
 	async function loadCustomers() {
 		try {
-			customers = await customerApi.listCustomers();
+			customers = await customerApi.listCustomers(spaceId);
 		} catch {
 			// Customers are optional for the roll dialog
 		}
@@ -124,7 +126,7 @@
 	async function loadTaskTree(rootTaskId: string) {
 		treeLoading = true;
 		try {
-			tree = await taskApi.getTaskTree(rootTaskId);
+			tree = await taskApi.getTaskTree(spaceId, rootTaskId);
 			await loadDepsForTree();
 		} catch (err) {
 			console.error('Failed to load task tree:', err);
@@ -144,7 +146,7 @@
 			const results = await Promise.all(
 				batch.map(async (t) => {
 					try {
-						const deps = await taskApi.getTaskDeps(t.id);
+						const deps = await taskApi.getTaskDeps(spaceId, t.id);
 						return { id: t.id, deps };
 					} catch {
 						return { id: t.id, deps: { blockers: [], dependents: [] } as TaskDepsResponse };
@@ -182,7 +184,7 @@
 		if (!recipe || isPublishing) return;
 		isPublishing = true;
 		try {
-			await recipeStore.publishVersion(recipe.id);
+			await recipeStore.publishVersion(spaceId, recipe.id);
 			toast.success('Recipe published successfully');
 			// Reload tree for the new published version
 			if ($recipeStore.currentRecipe?.currentVersion?.rootTaskId) {
@@ -199,7 +201,7 @@
 		if (!recipe || isRolling) return;
 		isRolling = true;
 		try {
-			const job = await recipeApi.rollRecipe(recipe.id, {
+			const job = await recipeApi.rollRecipe(spaceId, recipe.id, {
 				title: rollTitle.trim() || undefined,
 				order_qty: rollOrderQty > 1 ? rollOrderQty : undefined,
 				customer_id: rollCustomerId || undefined,
@@ -224,7 +226,7 @@
 		if (!recipe || isCreatingVersion) return;
 		isCreatingVersion = true;
 		try {
-			await recipeStore.createNewVersion(recipe.id, newVersionSummary.trim() || undefined);
+			await recipeStore.createNewVersion(spaceId, recipe.id, newVersionSummary.trim() || undefined);
 			showNewVersionDialog = false;
 			newVersionSummary = '';
 			toast.success('New draft version created');
@@ -244,7 +246,7 @@
 		showVersionHistory = !showVersionHistory;
 		if (showVersionHistory) {
 			try {
-				versions = await recipeApi.listVersions(recipe.id);
+				versions = await recipeApi.listVersions(spaceId, recipe.id);
 			} catch {
 				versions = [];
 			}
