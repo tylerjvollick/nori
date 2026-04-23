@@ -16,6 +16,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { Button } from '$lib/components/ui/button';
 	import { Moon, Sun, Plus, FileText } from '@lucide/svelte';
+	import { Toaster } from '$lib/components/ui/sonner';
 
 	let { children } = $props();
 
@@ -157,3 +158,4 @@
 
 <!-- Modals -->
 <CreateSOPModal isOpen={showCreateSOPModal} onClose={handleCloseCreateSOP} />
+<Toaster />

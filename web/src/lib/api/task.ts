@@ -9,6 +9,7 @@ import type {
 	CompleteTaskRequest,
 	CompleteTaskResponse,
 } from '$lib/types/task';
+import type { RecipeResponse } from '$lib/types/recipe';
 import { apiClient } from './client';
 
 const BASE = '/api/v1/tasks';
@@ -127,6 +128,14 @@ class TaskApi {
 	/** Remove a dependency edge by its UUID. */
 	async removeDep(taskId: string, depId: string): Promise<void> {
 		return apiClient.delete<void>(`${BASE}/${taskId}/deps/${depId}`);
+	}
+
+	/** Save a job as a new recipe. */
+	async saveAsRecipe(
+		jobId: string,
+		data: { name: string; description?: string; backfillEstimatedFromActual?: boolean },
+	): Promise<RecipeResponse> {
+		return apiClient.post<RecipeResponse>(`${BASE}/${jobId}/save-as-recipe`, data);
 	}
 }
 

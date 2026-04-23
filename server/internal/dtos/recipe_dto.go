@@ -44,6 +44,13 @@ type RollRecipeRequest struct {
 	Title      *string    `json:"title,omitempty"`
 }
 
+// SaveAsRecipeRequest represents the request body for saving a job as a recipe.
+type SaveAsRecipeRequest struct {
+	Name                        string  `json:"name" binding:"required"`
+	Description                 *string `json:"description,omitempty"`
+	BackfillEstimatedFromActual *bool   `json:"backfillEstimatedFromActual,omitempty"`
+}
+
 // RecipeResponse represents a single recipe in API responses.
 type RecipeResponse struct {
 	ID               uuid.UUID              `json:"id"`

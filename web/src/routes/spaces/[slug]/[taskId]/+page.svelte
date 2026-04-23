@@ -19,8 +19,13 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign } from '@lucide/svelte';
+	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign, BookOpen } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
+	import { toast } from 'svelte-sonner';
 
 	let slug = $derived($page.params.slug);
 	let taskId = $derived($page.params.taskId);
@@ -341,6 +346,35 @@
 		}
 	});
 
+	// ---- Save as Recipe dialog ----
+	let showSaveAsRecipeDialog = $state(false);
+	let recipeName = $state('');
+	let recipeDescription = $state('');
+	let backfillEstimates = $state(true);
+	let isSavingAsRecipe = $state(false);
+
+	/** Whether the root task is a job (save-as-recipe is only available for jobs). */
+	let isJob = $derived(tree?.type === 'job');
+
+	async function handleSaveAsRecipe(): Promise<void> {
+		if (!tree || !recipeName.trim()) return;
+		isSavingAsRecipe = true;
+		try {
+			const recipe = await taskApi.saveAsRecipe(tree.id, {
+				name: recipeName.trim(),
+				description: recipeDescription.trim() || undefined,
+				backfillEstimatedFromActual: backfillEstimates,
+			});
+			showSaveAsRecipeDialog = false;
+			toast.success('Recipe created from job. Review and publish when ready.');
+			goto(`/recipes/${recipe.id}`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to save as recipe');
+		} finally {
+			isSavingAsRecipe = false;
+		}
+	}
+
 	/** Compute root-level progress. */
 	function computeRootProgress(root: TaskTreeResponse): { done: number; total: number } {
 		if (!root.children || root.children.length === 0) return { done: 0, total: 0 };
@@ -378,9 +412,17 @@
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
 
-		<!-- 2. Title (shown once) -->
+		<!-- 2. Title + actions -->
 		{#if tree}
-			<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
+			<div class="flex items-center gap-3">
+				<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
+				{#if isJob}
+					<Button variant="outline" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
+						<BookOpen class="size-4 mr-1" />
+						Save as Recipe
+					</Button>
+				{/if}
+			</div>
 		{:else if isLoading}
 			<Skeleton class="h-6 w-48" />
 		{/if}
@@ -534,3 +576,68 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Save as Recipe Dialog -->
+<Dialog.Root
+	bind:open={showSaveAsRecipeDialog}
+	onOpenChange={(open) => {
+		if (!open) {
+			recipeName = '';
+			recipeDescription = '';
+			backfillEstimates = true;
+		}
+	}}
+>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Save as Recipe</Dialog.Title>
+			<Dialog.Description>
+				Create a reusable recipe template from this job's task tree.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleSaveAsRecipe();
+			}}
+		>
+			<div class="grid gap-4 py-2">
+				<div class="grid gap-2">
+					<Label for="recipe-name">Recipe Name</Label>
+					<Input
+						id="recipe-name"
+						bind:value={recipeName}
+						placeholder="e.g. Custom Bookshelf"
+						required
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label for="recipe-description">Description (optional)</Label>
+					<Input
+						id="recipe-description"
+						bind:value={recipeDescription}
+						placeholder="Brief description of this recipe"
+					/>
+				</div>
+				<div class="flex items-center justify-between">
+					<Label for="backfill-estimates" class="text-sm font-normal">
+						Use actual times as estimated times
+					</Label>
+					<Switch id="backfill-estimates" bind:checked={backfillEstimates} />
+				</div>
+			</div>
+			<Dialog.Footer class="pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => (showSaveAsRecipeDialog = false)}
+				>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={isSavingAsRecipe || !recipeName.trim()}>
+					{isSavingAsRecipe ? 'Saving...' : 'Save as Recipe'}
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
