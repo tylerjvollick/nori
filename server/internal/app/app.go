@@ -126,6 +126,13 @@ func New(cfg *config.Config) *App {
 	adminAPIKeyHandler.RegisterAdminAPIKeyRoutes(admin)
 	adminSpaceMemberHandler.RegisterAdminSpaceMemberRoutes(admin)
 
+	// ── Dev-only test routes (only registered when NORI_ENV=development) ──
+	if os.Getenv("NORI_ENV") == "development" {
+		testHandler := handlers.NewTestHandler(database.DB)
+		testHandler.RegisterTestRoutes(app, authMiddleware, requirePasswordChanged)
+		log.Println("Test routes registered (NORI_ENV=development)")
+	}
+
 	return &App{
 		Fiber:       app,
 		AuthHandler: authHandler,
