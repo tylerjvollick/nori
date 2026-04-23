@@ -982,6 +982,82 @@ func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersio
 	return published, nil
 }
 
+// CreateDraftFromPublished creates a new draft version by cloning the current
+// published version's task tree. This is the task-tree equivalent of "create new
+// version" — the user gets a mutable draft copy they can edit via the task API.
+func (s *RecipeService) CreateDraftFromPublished(
+	recipeID uuid.UUID,
+	authorID uuid.UUID,
+	changeSummary *string,
+) (*models.RecipeVersion, error) {
+	// 1. Load the recipe to find the current published version.
+	recipe, err := s.recipeRepo.GetByID(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe: %w", err)
+	}
+
+	if recipe.CurrentVersionID == nil {
+		return nil, fmt.Errorf("recipe %s has no published version to clone from", recipeID)
+	}
+
+	// 2. Ensure no draft already exists.
+	versions, err := s.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing versions: %w", err)
+	}
+	for _, v := range versions {
+		if v.Status == models.RecipeVersionStatusDraft {
+			return nil, fmt.Errorf("recipe %s already has a draft version (ID %d)", recipeID, v.ID)
+		}
+	}
+
+	// 3. Load the published version and verify it has a root task.
+	publishedVersion, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading published version: %w", err)
+	}
+	if publishedVersion.RootTaskID == nil {
+		return nil, fmt.Errorf("published version has no root task to clone")
+	}
+
+	// 4. Clone the published task tree.
+	clonedRootUUID := uuid.New()
+	clonedRootID := clonedRootUUID.String()
+
+	_, err = s.DeepCloneTaskTree(publishedVersion.RootTaskID.String(), TaskTreeCloneOptions{
+		NewRootID: clonedRootID,
+		RecipeID:  &recipeID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning published task tree: %w", err)
+	}
+
+	// 5. Determine the next version number.
+	nextVersion := 1
+	if len(versions) > 0 {
+		nextVersion = versions[0].VersionNumber + 1
+	}
+
+	// 6. Create the new draft version.
+	now := time.Now()
+	draft := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: nextVersion,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &clonedRootUUID,
+		ChangeSummary: changeSummary,
+		AuthorID:      authorID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := s.recipeRepo.CreateVersion(draft); err != nil {
+		return nil, fmt.Errorf("creating draft version: %w", err)
+	}
+
+	return draft, nil
+}
+
 // getDraftVersion finds the draft version for a recipe and validates it has a root task.
 func (s *RecipeService) getDraftVersion(recipeID uuid.UUID) (*models.RecipeVersion, error) {
 	versions, err := s.recipeRepo.ListVersions(recipeID)

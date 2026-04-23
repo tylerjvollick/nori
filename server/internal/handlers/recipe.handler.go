@@ -17,15 +17,13 @@ import (
 
 // RecipeRepoInterface defines the repository methods needed by RecipeHandler.
 type RecipeRepoInterface interface {
-	Create(recipe *models.Recipe) error
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	List(filter repositories.RecipeFilter) ([]models.Recipe, int64, error)
 	Update(recipe *models.Recipe) error
 	Delete(id uuid.UUID) error
-	CreateVersion(version *models.RecipeVersion) error
 	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
-	PublishVersion(versionID int) error
+	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
 }
 
 // RecipePourServiceInterface defines the pour method from RecipeService.
@@ -38,16 +36,34 @@ type RecipeRollServiceInterface interface {
 	RollRecipe(recipeID uuid.UUID, spaceID uuid.UUID, createdByID uuid.UUID, opts services.RollRecipeOptions) (*models.Task, error)
 }
 
+// RecipeAuthoringServiceInterface defines task-tree recipe authoring methods.
+type RecipeAuthoringServiceInterface interface {
+	CreateRecipeWithTaskTree(spaceID uuid.UUID, createdByID uuid.UUID, name string, description *string, categoryID *uuid.UUID) (*models.Recipe, *models.RecipeVersion, error)
+	PublishVersion(recipeID uuid.UUID) (*models.RecipeVersion, error)
+	CreateDraftFromPublished(recipeID uuid.UUID, authorID uuid.UUID, changeSummary *string) (*models.RecipeVersion, error)
+}
+
 // RecipeHandler handles HTTP requests for recipes.
 type RecipeHandler struct {
-	recipeRepo  RecipeRepoInterface
-	pourService RecipePourServiceInterface
-	rollService RecipeRollServiceInterface
+	recipeRepo      RecipeRepoInterface
+	pourService     RecipePourServiceInterface
+	rollService     RecipeRollServiceInterface
+	authoringService RecipeAuthoringServiceInterface
 }
 
 // NewRecipeHandler creates a new RecipeHandler.
-func NewRecipeHandler(recipeRepo RecipeRepoInterface, pourService RecipePourServiceInterface, rollService RecipeRollServiceInterface) *RecipeHandler {
-	return &RecipeHandler{recipeRepo: recipeRepo, pourService: pourService, rollService: rollService}
+func NewRecipeHandler(
+	recipeRepo RecipeRepoInterface,
+	pourService RecipePourServiceInterface,
+	rollService RecipeRollServiceInterface,
+	authoringService RecipeAuthoringServiceInterface,
+) *RecipeHandler {
+	return &RecipeHandler{
+		recipeRepo:       recipeRepo,
+		pourService:      pourService,
+		rollService:      rollService,
+		authoringService: authoringService,
+	}
 }
 
 // RegisterRecipeRoutes registers recipe API routes on the Fiber app.
@@ -63,7 +79,7 @@ func (h *RecipeHandler) RegisterRecipeRoutes(app *fiber.App, middlewares ...fibe
 	group.Post("/:id/versions", h.CreateVersion)
 	group.Post("/:id/pour", h.PourRecipe)
 	group.Post("/:id/roll", h.RollRecipe)
-	group.Post("/:id/versions/:vid/publish", h.PublishVersion)
+	group.Post("/:id/publish", h.PublishVersion)
 }
 
 // RegisterRecipeVersionRoutes registers the flat recipe-version API routes.
@@ -139,7 +155,8 @@ func (h *RecipeHandler) ListRecipes(c *fiber.Ctx) error {
 	})
 }
 
-// CreateRecipe creates a new recipe in the active space.
+// CreateRecipe creates a new recipe in the active space. This creates the recipe,
+// a root task (Type='recipe'), and an initial draft version with RootTaskID.
 func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -165,21 +182,22 @@ func (h *RecipeHandler) CreateRecipe(c *fiber.Ctx) error {
 		})
 	}
 
-	now := time.Now()
-	recipe := &models.Recipe{
-		ID:          uuid.New(),
-		SpaceID:     *authDTO.ActiveSpaceID,
-		Name:        dto.Name,
-		Slug:        slugify(dto.Name),
-		Description: dto.Description,
-		CategoryID:  dto.CategoryID,
-		CreatedByID: authDTO.User.ID,
-		IsActive:    true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+	recipe, _, err := h.authoringService.CreateRecipeWithTaskTree(
+		*authDTO.ActiveSpaceID,
+		authDTO.User.ID,
+		dto.Name,
+		dto.Description,
+		dto.CategoryID,
+	)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
 	}
 
-	if err := h.recipeRepo.Create(recipe); err != nil {
+	// Re-fetch to get CurrentVersion preloaded.
+	recipe, err = h.recipeRepo.GetByID(recipe.ID)
+	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -214,7 +232,7 @@ func (h *RecipeHandler) getRecipeInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, re
 	return recipe, nil
 }
 
-// GetRecipe returns a single recipe by ID.
+// GetRecipe returns a single recipe by ID, including the current version's task tree.
 func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -233,7 +251,18 @@ func (h *RecipeHandler) GetRecipe(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.Status(http.StatusOK).JSON(dtos.RecipeResponseFromModel(recipe))
+	resp := dtos.RecipeResponseFromModel(recipe)
+
+	// If the recipe has a current version with a task tree, load and include it.
+	if recipe.CurrentVersion != nil && recipe.CurrentVersion.RootTaskID != nil {
+		version, tasks, err := h.recipeRepo.GetVersionWithTaskTree(recipe.CurrentVersion.ID)
+		if err == nil && len(tasks) > 0 {
+			cv := dtos.RecipeVersionResponseWithTree(version, tasks)
+			resp.CurrentVersion = &cv
+		}
+	}
+
+	return c.Status(http.StatusOK).JSON(resp)
 }
 
 // UpdateRecipe updates an existing recipe.
@@ -352,7 +381,8 @@ func (h *RecipeHandler) ListVersions(c *fiber.Ctx) error {
 	})
 }
 
-// CreateVersion creates a new version for a recipe.
+// CreateVersion creates a new draft version for a recipe by cloning the current
+// published version's task tree. The resulting draft can be edited via the task API.
 func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -378,40 +408,13 @@ func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
 		})
 	}
 
-	if dto.Content == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "content is required",
-		})
-	}
-
-	// Determine the next version number.
-	versions, err := h.recipeRepo.ListVersions(recipeID)
+	version, err := h.authoringService.CreateDraftFromPublished(
+		recipeID,
+		authDTO.User.ID,
+		dto.ChangeSummary,
+	)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	nextVersion := 1
-	if len(versions) > 0 {
-		// Versions are ordered by version_number DESC, so the first is the latest.
-		nextVersion = versions[0].VersionNumber + 1
-	}
-
-	now := time.Now()
-	version := &models.RecipeVersion{
-		RecipeID:      recipeID,
-		VersionNumber: nextVersion,
-		Status:        models.RecipeVersionStatusDraft,
-		Content:       &dto.Content,
-		ChangeSummary: dto.ChangeSummary,
-		AuthorID:      authDTO.User.ID,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-
-	if err := h.recipeRepo.CreateVersion(version); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
@@ -509,8 +512,9 @@ func (h *RecipeHandler) RollRecipe(c *fiber.Ctx) error {
 	return c.Status(http.StatusCreated).JSON(dtos.TaskResponseFromModel(rootTask))
 }
 
-// PublishVersion publishes a specific version of a recipe, archiving any
-// previously published version and setting this as the current version.
+// PublishVersion publishes a recipe's draft version using clone-on-publish.
+// The draft task tree is cloned into a frozen snapshot, then the version is
+// marked as published.
 func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -529,42 +533,14 @@ func (h *RecipeHandler) PublishVersion(c *fiber.Ctx) error {
 		return err
 	}
 
-	versionID, err := strconv.Atoi(c.Params("vid"))
+	published, err := h.authoringService.PublishVersion(recipeID)
 	if err != nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "invalid version ID",
-		})
-	}
-
-	// Verify the version belongs to this recipe.
-	version, err := h.recipeRepo.GetVersionByID(versionID)
-	if err != nil {
-		return c.Status(http.StatusNotFound).JSON(fiber.Map{
-			"error": "version not found",
-		})
-	}
-
-	if version.RecipeID != recipeID {
-		return c.Status(http.StatusNotFound).JSON(fiber.Map{
-			"error": "version not found",
-		})
-	}
-
-	if err := h.recipeRepo.PublishVersion(versionID); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	// Re-fetch the version to get the updated status and publishedAt.
-	updated, err := h.recipeRepo.GetVersionByID(versionID)
-	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(updated))
+	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(published))
 }
 
 // PublishVersionFlat publishes a recipe version by its ID alone, without
@@ -596,21 +572,14 @@ func (h *RecipeHandler) PublishVersionFlat(c *fiber.Ctx) error {
 		return err
 	}
 
-	if err := h.recipeRepo.PublishVersion(versionID); err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
-		})
-	}
-
-	// Re-fetch the version to get the updated status and publishedAt.
-	updated, err := h.recipeRepo.GetVersionByID(versionID)
+	published, err := h.authoringService.PublishVersion(version.RecipeID)
 	if err != nil {
-		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+		return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(updated))
+	return c.Status(http.StatusOK).JSON(dtos.RecipeVersionResponseFromModel(published))
 }
 
 // slugify converts a string into a URL-friendly slug.

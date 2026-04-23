@@ -77,7 +77,7 @@ func New(cfg *config.Config) *App {
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
-	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService, recipeService)
+	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService, recipeService, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	costHandler := handlers.NewCostHandler(costService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)

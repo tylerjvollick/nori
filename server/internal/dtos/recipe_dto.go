@@ -23,8 +23,10 @@ type UpdateRecipeRequest struct {
 }
 
 // CreateRecipeVersionRequest represents the request body for creating a recipe version.
+// For TOML-based recipes, Content is required. For task-tree recipes, Content is
+// omitted and the draft is created by cloning from the published version.
 type CreateRecipeVersionRequest struct {
-	Content       string  `json:"content" binding:"required"`
+	Content       *string `json:"content,omitempty"`
 	ChangeSummary *string `json:"changeSummary,omitempty"`
 }
 
@@ -78,6 +80,7 @@ type RecipeVersionResponse struct {
 	ChangeSummary *string                    `json:"changeSummary,omitempty"`
 	AuthorID      uuid.UUID                  `json:"authorId"`
 	PublishedAt   *time.Time                 `json:"publishedAt,omitempty"`
+	TaskTree      *TaskTreeResponse          `json:"taskTree,omitempty"`
 	CreatedAt     string                     `json:"createdAt"`
 	UpdatedAt     string                     `json:"updatedAt"`
 }
@@ -104,6 +107,24 @@ func RecipeResponseFromModel(r *models.Recipe) RecipeResponse {
 		resp.CurrentVersion = &cv
 	}
 
+	return resp
+}
+
+// RecipeVersionResponseWithTree converts a RecipeVersion and its task tree into a
+// RecipeVersionResponse with the TaskTree field populated.
+func RecipeVersionResponseWithTree(v *models.RecipeVersion, tasks []models.Task) RecipeVersionResponse {
+	resp := RecipeVersionResponseFromModel(v)
+	if v.RootTaskID != nil && len(tasks) > 0 {
+		// Find the root task in the tasks slice.
+		rootID := v.RootTaskID.String()
+		for i := range tasks {
+			if tasks[i].ID == rootID {
+				tree := BuildTaskTree(&tasks[i], tasks)
+				resp.TaskTree = &tree
+				break
+			}
+		}
+	}
 	return resp
 }
 
