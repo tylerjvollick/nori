@@ -103,6 +103,14 @@ func (m *mockCostSpaceRepo) FindByID(id uuid.UUID) (*models.Space, error) {
 	return space, nil
 }
 
+type mockCostStationRepo struct {
+	stations map[uuid.UUID][]models.Station // spaceID → stations
+}
+
+func (m *mockCostStationRepo) GetBySpaceID(spaceID uuid.UUID) ([]models.Station, error) {
+	return m.stations[spaceID], nil
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 func newTestCostService() (*CostService, *mockCostEntryRepo, *mockCostTimeEventRepo, *mockCostTaskRepo, *mockCostSpaceRepo) {
@@ -110,8 +118,19 @@ func newTestCostService() (*CostService, *mockCostEntryRepo, *mockCostTimeEventR
 	timeRepo := &mockCostTimeEventRepo{events: make(map[string][]models.TimeEvent)}
 	taskRepo := &mockCostTaskRepo{tasks: make(map[string]*models.Task), descendants: make(map[string][]models.Task)}
 	spaceRepo := &mockCostSpaceRepo{spaces: make(map[uuid.UUID]*models.Space)}
-	svc := NewCostService(costRepo, timeRepo, taskRepo, spaceRepo)
+	stationRepo := &mockCostStationRepo{stations: make(map[uuid.UUID][]models.Station)}
+	svc := NewCostService(costRepo, timeRepo, taskRepo, spaceRepo, stationRepo)
 	return svc, costRepo, timeRepo, taskRepo, spaceRepo
+}
+
+func newTestCostServiceWithStations() (*CostService, *mockCostEntryRepo, *mockCostTimeEventRepo, *mockCostTaskRepo, *mockCostSpaceRepo, *mockCostStationRepo) {
+	costRepo := &mockCostEntryRepo{}
+	timeRepo := &mockCostTimeEventRepo{events: make(map[string][]models.TimeEvent)}
+	taskRepo := &mockCostTaskRepo{tasks: make(map[string]*models.Task), descendants: make(map[string][]models.Task)}
+	spaceRepo := &mockCostSpaceRepo{spaces: make(map[uuid.UUID]*models.Space)}
+	stationRepo := &mockCostStationRepo{stations: make(map[uuid.UUID][]models.Station)}
+	svc := NewCostService(costRepo, timeRepo, taskRepo, spaceRepo, stationRepo)
+	return svc, costRepo, timeRepo, taskRepo, spaceRepo, stationRepo
 }
 
 func makeRate(rate string) *decimal.Decimal {
@@ -484,5 +503,233 @@ func TestComputeTaskLaborCost_WithPauseResume(t *testing.T) {
 	expectedCost := decimal.NewFromFloat(120.00)
 	if !result.LaborCost.Equal(expectedCost) {
 		t.Errorf("expected labor cost %s, got %s", expectedCost, result.LaborCost)
+	}
+}
+
+// ── GetJobCostSummary Tests ──────────────────────────────────────────────
+
+func TestGetJobCostSummary_Basic(t *testing.T) {
+	svc, _, timeRepo, taskRepo, spaceRepo, stationRepo := newTestCostServiceWithStations()
+
+	spaceID := uuid.New()
+	stationID := uuid.New()
+	jobID := "job-1"
+	childID := "job-1.1"
+
+	est := 3600 // 1 hour estimated
+	taskRepo.tasks[jobID] = &models.Task{ID: jobID, SpaceID: spaceID, Type: models.TaskTypeJob}
+	taskRepo.tasks[childID] = &models.Task{ID: childID, SpaceID: spaceID, ParentID: &jobID, StationID: &stationID, EstimatedTimeSecs: &est}
+	taskRepo.descendants[jobID] = []models.Task{*taskRepo.tasks[childID]}
+	spaceRepo.spaces[spaceID] = &models.Space{ID: spaceID, DefaultLaborRate: makeRate("60.00")}
+	stationRepo.stations[spaceID] = []models.Station{{ID: stationID, Name: "Assembly"}}
+
+	base := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	timeRepo.events[childID] = []models.TimeEvent{
+		makeTimeEvent(childID, models.TimeEventTypeCheckIn, base),
+		makeTimeEvent(childID, models.TimeEventTypeCheckOut, base.Add(2*time.Hour)),
+	}
+
+	result, err := svc.GetJobCostSummary(jobID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.JobID != jobID {
+		t.Errorf("expected jobId %q, got %q", jobID, result.JobID)
+	}
+
+	// Estimated: 1h × $60 = $60
+	expectedEstHours := decimal.NewFromInt(1)
+	if !result.Estimated.LaborHours.Equal(expectedEstHours) {
+		t.Errorf("expected estimated hours %s, got %s", expectedEstHours, result.Estimated.LaborHours)
+	}
+	expectedEstCost := decimal.NewFromFloat(60.00)
+	if !result.Estimated.LaborCost.Equal(expectedEstCost) {
+		t.Errorf("expected estimated cost %s, got %s", expectedEstCost, result.Estimated.LaborCost)
+	}
+
+	// Actual: 2h × $60 = $120
+	expectedActHours := decimal.NewFromInt(2)
+	if !result.Actual.LaborHours.Equal(expectedActHours) {
+		t.Errorf("expected actual hours %s, got %s", expectedActHours, result.Actual.LaborHours)
+	}
+	expectedActCost := decimal.NewFromFloat(120.00)
+	if !result.Actual.LaborCost.Equal(expectedActCost) {
+		t.Errorf("expected actual cost %s, got %s", expectedActCost, result.Actual.LaborCost)
+	}
+
+	// Variance: actual - estimated = +1h, +$60, +100%
+	expectedVarHours := decimal.NewFromInt(1)
+	if !result.Variance.LaborHours.Equal(expectedVarHours) {
+		t.Errorf("expected variance hours %s, got %s", expectedVarHours, result.Variance.LaborHours)
+	}
+	expectedVarCost := decimal.NewFromFloat(60.00)
+	if !result.Variance.LaborCost.Equal(expectedVarCost) {
+		t.Errorf("expected variance cost %s, got %s", expectedVarCost, result.Variance.LaborCost)
+	}
+	expectedVarPct := decimal.NewFromInt(100)
+	if !result.Variance.Percent.Equal(expectedVarPct) {
+		t.Errorf("expected variance percent %s, got %s", expectedVarPct, result.Variance.Percent)
+	}
+}
+
+func TestGetJobCostSummary_ByStation(t *testing.T) {
+	svc, _, timeRepo, taskRepo, spaceRepo, stationRepo := newTestCostServiceWithStations()
+
+	spaceID := uuid.New()
+	st1 := uuid.New()
+	st2 := uuid.New()
+	jobID := "job-1"
+
+	est1 := 3600 // 1 hour
+	est2 := 1800 // 30 min
+	child1 := "job-1.1"
+	child2 := "job-1.2"
+
+	taskRepo.tasks[jobID] = &models.Task{ID: jobID, SpaceID: spaceID, Type: models.TaskTypeJob}
+	taskRepo.tasks[child1] = &models.Task{ID: child1, SpaceID: spaceID, ParentID: &jobID, StationID: &st1, EstimatedTimeSecs: &est1}
+	taskRepo.tasks[child2] = &models.Task{ID: child2, SpaceID: spaceID, ParentID: &jobID, StationID: &st2, EstimatedTimeSecs: &est2}
+	taskRepo.descendants[jobID] = []models.Task{*taskRepo.tasks[child1], *taskRepo.tasks[child2]}
+	spaceRepo.spaces[spaceID] = &models.Space{ID: spaceID, DefaultLaborRate: makeRate("50.00")}
+	stationRepo.stations[spaceID] = []models.Station{
+		{ID: st1, Name: "Mill"},
+		{ID: st2, Name: "Finish"},
+	}
+
+	base := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	timeRepo.events[child1] = []models.TimeEvent{
+		makeTimeEvent(child1, models.TimeEventTypeCheckIn, base),
+		makeTimeEvent(child1, models.TimeEventTypeCheckOut, base.Add(90*time.Minute)),
+	}
+	timeRepo.events[child2] = []models.TimeEvent{
+		makeTimeEvent(child2, models.TimeEventTypeCheckIn, base),
+		makeTimeEvent(child2, models.TimeEventTypeCheckOut, base.Add(20*time.Minute)),
+	}
+
+	result, err := svc.GetJobCostSummary(jobID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.ByStation) != 2 {
+		t.Fatalf("expected 2 station summaries, got %d", len(result.ByStation))
+	}
+
+	// Find each station in the results (map iteration order is non-deterministic).
+	stationMap := make(map[string]StationCostSummary)
+	for _, s := range result.ByStation {
+		stationMap[s.StationName] = s
+	}
+
+	mill := stationMap["Mill"]
+	if !mill.EstimatedHours.Equal(decimal.NewFromInt(1)) {
+		t.Errorf("Mill: expected 1h estimated, got %s", mill.EstimatedHours)
+	}
+	// 90 min = 1.5h
+	expectedMillActual := decimal.NewFromFloat(1.5)
+	if !mill.ActualHours.Equal(expectedMillActual) {
+		t.Errorf("Mill: expected 1.5h actual, got %s", mill.ActualHours)
+	}
+	// variance: 1.5 - 1 = 0.5
+	expectedMillVar := decimal.NewFromFloat(0.5)
+	if !mill.Variance.Equal(expectedMillVar) {
+		t.Errorf("Mill: expected 0.5h variance, got %s", mill.Variance)
+	}
+
+	finish := stationMap["Finish"]
+	// 30 min estimated = 0.5h
+	expectedFinishEst := decimal.NewFromFloat(0.5)
+	if !finish.EstimatedHours.Equal(expectedFinishEst) {
+		t.Errorf("Finish: expected 0.5h estimated, got %s", finish.EstimatedHours)
+	}
+}
+
+func TestGetJobCostSummary_NoEstimates(t *testing.T) {
+	svc, _, timeRepo, taskRepo, spaceRepo, stationRepo := newTestCostServiceWithStations()
+
+	spaceID := uuid.New()
+	jobID := "job-1"
+	childID := "job-1.1"
+
+	taskRepo.tasks[jobID] = &models.Task{ID: jobID, SpaceID: spaceID, Type: models.TaskTypeJob}
+	taskRepo.tasks[childID] = &models.Task{ID: childID, SpaceID: spaceID, ParentID: &jobID}
+	taskRepo.descendants[jobID] = []models.Task{*taskRepo.tasks[childID]}
+	spaceRepo.spaces[spaceID] = &models.Space{ID: spaceID, DefaultLaborRate: makeRate("50.00")}
+	stationRepo.stations[spaceID] = nil
+
+	base := time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)
+	timeRepo.events[childID] = []models.TimeEvent{
+		makeTimeEvent(childID, models.TimeEventTypeCheckIn, base),
+		makeTimeEvent(childID, models.TimeEventTypeCheckOut, base.Add(1*time.Hour)),
+	}
+
+	result, err := svc.GetJobCostSummary(jobID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Estimated should be zero.
+	if !result.Estimated.LaborHours.IsZero() {
+		t.Errorf("expected zero estimated hours, got %s", result.Estimated.LaborHours)
+	}
+
+	// Actual should be 1h.
+	expectedActHours := decimal.NewFromInt(1)
+	if !result.Actual.LaborHours.Equal(expectedActHours) {
+		t.Errorf("expected 1h actual, got %s", result.Actual.LaborHours)
+	}
+
+	// Variance percent should be zero (division by zero protection).
+	if !result.Variance.Percent.IsZero() {
+		t.Errorf("expected zero variance percent, got %s", result.Variance.Percent)
+	}
+}
+
+func TestGetJobCostSummary_NoActivity(t *testing.T) {
+	svc, _, _, taskRepo, spaceRepo, stationRepo := newTestCostServiceWithStations()
+
+	spaceID := uuid.New()
+	jobID := "job-1"
+
+	est := 7200 // 2 hours
+	taskRepo.tasks[jobID] = &models.Task{ID: jobID, SpaceID: spaceID, Type: models.TaskTypeJob, EstimatedTimeSecs: &est}
+	taskRepo.descendants[jobID] = nil
+	spaceRepo.spaces[spaceID] = &models.Space{ID: spaceID, DefaultLaborRate: makeRate("40.00")}
+	stationRepo.stations[spaceID] = nil
+
+	result, err := svc.GetJobCostSummary(jobID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Estimated: 2h × $40 = $80
+	expectedEstCost := decimal.NewFromFloat(80.00)
+	if !result.Estimated.LaborCost.Equal(expectedEstCost) {
+		t.Errorf("expected estimated cost %s, got %s", expectedEstCost, result.Estimated.LaborCost)
+	}
+
+	// Actual should be zero.
+	if !result.Actual.LaborCost.IsZero() {
+		t.Errorf("expected zero actual cost, got %s", result.Actual.LaborCost)
+	}
+
+	// Variance: 0 - 80 = -80 (under budget)
+	expectedVarCost := decimal.NewFromFloat(-80.00)
+	if !result.Variance.LaborCost.Equal(expectedVarCost) {
+		t.Errorf("expected variance cost %s, got %s", expectedVarCost, result.Variance.LaborCost)
+	}
+}
+
+func TestGetJobCostSummary_NoLaborRate(t *testing.T) {
+	svc, _, _, taskRepo, spaceRepo, _ := newTestCostServiceWithStations()
+
+	spaceID := uuid.New()
+	jobID := "job-1"
+	taskRepo.tasks[jobID] = &models.Task{ID: jobID, SpaceID: spaceID}
+	spaceRepo.spaces[spaceID] = &models.Space{ID: spaceID, DefaultLaborRate: nil}
+
+	_, err := svc.GetJobCostSummary(jobID)
+	if err == nil {
+		t.Fatal("expected error for missing labor rate")
 	}
 }

@@ -16,6 +16,7 @@ type CostServiceInterface interface {
 	ComputeJobLaborCost(jobID string, createdByID uuid.UUID) (*services.JobLaborCostResult, error)
 	EstimateRecipeLaborCost(rootTaskID string, spaceID uuid.UUID) (*services.EstimatedLaborCost, error)
 	GetTaskCosts(taskID string) ([]models.CostEntry, error)
+	GetJobCostSummary(jobID string) (*services.CostSummary, error)
 }
 
 // CostHandler handles HTTP requests for cost computation.
@@ -35,6 +36,7 @@ func (h *CostHandler) RegisterCostRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Get("/tasks/:id", h.GetTaskCosts)
 	group.Post("/tasks/:id/compute-labor", h.ComputeTaskLaborCost)
 	group.Post("/jobs/:id/compute-labor", h.ComputeJobLaborCost)
+	group.Get("/jobs/:id/cost-summary", h.GetJobCostSummary)
 	group.Get("/recipes/:rootTaskId/estimate-labor", h.EstimateRecipeLaborCost)
 }
 
@@ -82,6 +84,23 @@ func (h *CostHandler) ComputeJobLaborCost(c *fiber.Ctx) error {
 
 	jobID := c.Params("id")
 	result, err := h.costService.ComputeJobLaborCost(jobID, authDTO.User.ID)
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(result)
+}
+
+// GetJobCostSummary returns the aggregated cost summary for a job.
+func (h *CostHandler) GetJobCostSummary(c *fiber.Ctx) error {
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	jobID := c.Params("id")
+	result, err := h.costService.GetJobCostSummary(jobID)
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": err.Error(),

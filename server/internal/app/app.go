@@ -68,7 +68,7 @@ func New(cfg *config.Config) *App {
 	taskService := services.NewTaskService(taskRepo, taskDepRepo, timeEventRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)
 	recipeService := services.NewRecipeService(database.DB, recipeRepo, taskRepo, taskDepRepo)
-	costService := services.NewCostService(costEntryRepo, timeEventRepo, taskRepo, spaceRepo)
+	costService := services.NewCostService(costEntryRepo, timeEventRepo, taskRepo, spaceRepo, stationRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
