@@ -15,7 +15,7 @@
 	<Search class="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
 	<Sidebar.Input
 		type="search"
-		placeholder="Search SOPs, tasks..."
+		placeholder="Search recipes, tasks..."
 		class="pl-8"
 		bind:value={searchQuery}
 		disabled

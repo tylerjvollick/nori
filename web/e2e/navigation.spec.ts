@@ -27,11 +27,4 @@ test.describe('Navigation — authenticated pages', () => {
     await expect(page.locator('text=Internal Error')).not.toBeVisible();
   });
 
-  test('/sops loads without error', async ({ page }) => {
-    const response = await page.goto('/sops');
-    expect(response?.status()).toBeLessThan(400);
-    // May redirect if /sops isn't built yet — that's fine, just no crash
-    await expect(page.locator('body')).not.toBeEmpty();
-    await expect(page.locator('text=Internal Error')).not.toBeVisible();
-  });
 });

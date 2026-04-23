@@ -10,7 +10,6 @@
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
 	import {
 		LayoutGrid,
-		FileText,
 		BookOpen,
 		Package,
 		Wrench,
@@ -118,12 +117,6 @@
 
 	// Navigation structure
 	const navMain = [
-		{
-			title: 'SOPs',
-			url: '/sops',
-			icon: FileText,
-			isActive: isActive('/sops')
-		},
 		{
 			title: 'Recipes',
 			url: '/recipes',
@@ -242,7 +235,6 @@
 					{/snippet}
 				</Collapsible.Root>
 
-				<!-- SOPs -->
 				{#each navMain as item (item.title)}
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton

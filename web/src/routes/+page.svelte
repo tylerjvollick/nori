@@ -4,7 +4,7 @@
   import * as Alert from '$lib/components/ui/alert';
   import { Badge } from '$lib/components/ui/badge';
   import { Skeleton } from '$lib/components/ui/skeleton';
-  import { FileText, Target, BarChart3, Info, Plus } from '@lucide/svelte';
+  import { BookOpen, Target, BarChart3, Info, Plus } from '@lucide/svelte';
 
   let user = $derived($page.data.user);
 </script>
@@ -27,16 +27,16 @@
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <!-- SOPs Card (active) -->
-          <a href="/sops" class="group">
+          <!-- Recipes Card (active) -->
+          <a href="/recipes" class="group">
             <Card.Root class="h-full p-8 border-2 border-transparent transition-all group-hover:border-primary group-hover:shadow-lg">
               <Card.Header class="px-0 py-0">
-                <FileText class="size-10 text-primary mb-2" />
-                <Card.Title class="text-xl group-hover:text-primary transition-colors">SOPs</Card.Title>
+                <BookOpen class="size-10 text-primary mb-2" />
+                <Card.Title class="text-xl group-hover:text-primary transition-colors">Recipes</Card.Title>
               </Card.Header>
               <Card.Content class="px-0 py-0">
                 <Card.Description>
-                  Document and manage your standard operating procedures with ease.
+                  Document and manage your process recipes — built incrementally during real work.
                 </Card.Description>
               </Card.Content>
             </Card.Root>
@@ -78,16 +78,12 @@
             <Alert.Title>Quick Start</Alert.Title>
             <Alert.Description>
               <p class="mb-3">
-                Get started by creating your first SOP template or task from the "+Create" button in the top navigation.
+                Get started by creating your first Recipe or exploring your Spaces.
               </p>
               <div class="flex gap-3">
                 <Badge variant="outline">
                   <Plus class="size-3" />
-                  Create Task &rarr; From SOP template
-                </Badge>
-                <Badge variant="outline">
-                  <Plus class="size-3" />
-                  Create SOP &rarr; New template
+                  Create Recipe &rarr; New process template
                 </Badge>
               </div>
             </Alert.Description>

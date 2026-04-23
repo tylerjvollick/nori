@@ -7,20 +7,17 @@
 	import { authStore } from '$lib/stores/auth';
 	import { themeStore } from '$lib/stores/theme';
 	import AppSidebar from '$lib/components/AppSidebar.svelte';
-	import CreateSOPModal from '$lib/components/CreateSOPModal.svelte';
 	import SearchForm from '$lib/components/SearchForm.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Button } from '$lib/components/ui/button';
-	import { Moon, Sun, Plus, FileText } from '@lucide/svelte';
+	import { Moon, Sun } from '@lucide/svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
 
 	let { children } = $props();
 
-	let showCreateSOPModal = $state(false);
 	let theme: 'light' | 'dark' = $state('light');
 
 	// Use server-provided user from hooks.server.ts via +layout.server.ts
@@ -53,14 +50,6 @@
 		themeStore.initialize();
 	});
 
-	function handleOpenCreateSOP() {
-		showCreateSOPModal = true;
-	}
-
-	function handleCloseCreateSOP() {
-		showCreateSOPModal = false;
-	}
-
 	async function handleLogout() {
 		await authStore.logout();
 		goto('/login');
@@ -92,27 +81,6 @@
 
 				<!-- Right side actions -->
 				<div class="ml-auto flex items-center gap-3">
-					<!-- Create Dropdown -->
-					<DropdownMenu.Root>
-						<DropdownMenu.Trigger>
-							{#snippet child({ props })}
-								<Button {...props} size="sm" class="flex items-center gap-2">
-									<Plus class="w-4 h-4" />
-									Create
-								</Button>
-							{/snippet}
-						</DropdownMenu.Trigger>
-						<DropdownMenu.Content align="end" class="w-56">
-							<DropdownMenu.Item onclick={handleOpenCreateSOP} class="flex items-start gap-3 py-3">
-								<FileText class="w-5 h-5 text-primary mt-0.5" />
-								<div>
-									<div class="text-sm font-medium">SOP</div>
-									<div class="text-xs text-muted-foreground">Create new template</div>
-								</div>
-							</DropdownMenu.Item>
-						</DropdownMenu.Content>
-					</DropdownMenu.Root>
-
 					<!-- Theme Toggle -->
 					<Tooltip.Root>
 						<Tooltip.Trigger>
@@ -156,6 +124,4 @@
 	{@render children()}
 {/if}
 
-<!-- Modals -->
-<CreateSOPModal isOpen={showCreateSOPModal} onClose={handleCloseCreateSOP} />
 <Toaster />
