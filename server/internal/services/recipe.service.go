@@ -1312,6 +1312,84 @@ func generateTaskID() string {
 }
 
 // ---------------------------------------------------------------------------
+// Roll Recipe (clone published tree → new job)
+// ---------------------------------------------------------------------------
+
+// RollRecipeOptions configures optional fields when rolling a recipe into a job.
+type RollRecipeOptions struct {
+	Title      *string    // Override the job root title (defaults to recipe name).
+	CustomerID *uuid.UUID // Associate the job with a customer.
+	DueDate    *time.Time // Set a due date on the job root.
+}
+
+// RollRecipe clones a published recipe version's task tree into a new job.
+// This is a 1:1 structural clone — no batch expansion. The cloned tree gets:
+//   - A new root with Type='job' and a generated nori-{hex} ID
+//   - All children cloned with new hierarchical IDs
+//   - All internal TaskDep edges remapped to new IDs
+//   - RecipeID and RecipeVersionID set on all tasks for traceability
+//   - Status reset to 'open' on all tasks
+//
+// Returns the new job root task.
+func (s *RecipeService) RollRecipe(
+	recipeID uuid.UUID,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	opts RollRecipeOptions,
+) (*models.Task, error) {
+	// 1. Load recipe and validate it has a published version.
+	recipe, err := s.recipeRepo.GetByID(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe: %w", err)
+	}
+	if recipe.CurrentVersionID == nil {
+		return nil, fmt.Errorf("recipe %q has no published version", recipe.Name)
+	}
+
+	version, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe version: %w", err)
+	}
+	if version.RootTaskID == nil {
+		return nil, fmt.Errorf("published version %d has no root task tree", version.ID)
+	}
+
+	// 2. Deep-clone the published task tree into a new job.
+	sourceRootID := version.RootTaskID.String()
+	newRootID := generateTaskID()
+
+	clonedRoot, err := s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
+		NewRootID:       newRootID,
+		SpaceID:         &spaceID,
+		CreatedByID:     &createdByID,
+		RecipeID:        &recipeID,
+		RecipeVersionID: recipe.CurrentVersionID,
+		ResetStatus:     true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning recipe task tree: %w", err)
+	}
+
+	// 3. Update root task: remap type to 'job' and apply optional overrides.
+	clonedRoot.Type = models.TaskTypeJob
+	if opts.Title != nil {
+		clonedRoot.Title = *opts.Title
+	}
+	if opts.CustomerID != nil {
+		clonedRoot.CustomerID = opts.CustomerID
+	}
+	if opts.DueDate != nil {
+		clonedRoot.DueDate = opts.DueDate
+	}
+
+	if err := s.taskRepo.Update(clonedRoot); err != nil {
+		return nil, fmt.Errorf("updating job root task: %w", err)
+	}
+
+	return clonedRoot, nil
+}
+
+// ---------------------------------------------------------------------------
 // Recipe Promote
 // ---------------------------------------------------------------------------
 

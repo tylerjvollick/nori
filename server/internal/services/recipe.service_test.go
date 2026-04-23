@@ -3147,3 +3147,300 @@ func TestPublishVersion_PreservesClonedTaskFields(t *testing.T) {
 		t.Errorf("cloned BatchSize = %v, want %d", child.BatchSize, batchSize)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Roll Recipe Tests
+// ---------------------------------------------------------------------------
+
+// setupPublishedRecipe creates a recipe with a published version containing a
+// task tree (root + 2 steps + 1 dep). Returns the service, repos, and recipe ID.
+func setupPublishedRecipe(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	svc, recipeRepo, taskRepo, depRepo, recipeID := setupRecipeWithDraftTree(t)
+
+	// Publish the draft version.
+	_, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipeID
+}
+
+func TestRollRecipe_ClonesTaskTree(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	tasksBefore := len(taskRepo.tasks)
+
+	job, err := svc.RollRecipe(recipeID, spaceID, userID, RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Should have created 3 new tasks (root + 2 steps).
+	tasksAfter := len(taskRepo.tasks)
+	if tasksAfter != tasksBefore+3 {
+		t.Errorf("expected %d tasks after roll, got %d", tasksBefore+3, tasksAfter)
+	}
+
+	// Root should exist in repo.
+	if _, err := taskRepo.GetByID(job.ID); err != nil {
+		t.Errorf("job root %q not found: %v", job.ID, err)
+	}
+}
+
+func TestRollRecipe_RootIsJobType(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.Type != models.TaskTypeJob {
+		t.Errorf("expected root Type=%s, got %s", models.TaskTypeJob, job.Type)
+	}
+}
+
+func TestRollRecipe_ChildrenAreTaskType(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children, got %d", len(children))
+	}
+	for _, child := range children {
+		if child.Type != models.TaskTypeTask {
+			t.Errorf("child %q: expected Type=%s, got %s", child.ID, models.TaskTypeTask, child.Type)
+		}
+	}
+}
+
+func TestRollRecipe_SetsRecipeTraceability(t *testing.T) {
+	svc, recipeRepo, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	recipe := recipeRepo.recipes[recipeID]
+
+	// Root task should have RecipeID and RecipeVersionID set.
+	if job.RecipeID == nil || *job.RecipeID != recipeID {
+		t.Errorf("job RecipeID = %v, want %s", job.RecipeID, recipeID)
+	}
+	if job.RecipeVersionID == nil || *job.RecipeVersionID != *recipe.CurrentVersionID {
+		t.Errorf("job RecipeVersionID = %v, want %d", job.RecipeVersionID, *recipe.CurrentVersionID)
+	}
+
+	// Children should also have RecipeID and RecipeVersionID.
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.RecipeID == nil || *child.RecipeID != recipeID {
+			t.Errorf("child %q RecipeID = %v, want %s", child.ID, child.RecipeID, recipeID)
+		}
+		if child.RecipeVersionID == nil || *child.RecipeVersionID != *recipe.CurrentVersionID {
+			t.Errorf("child %q RecipeVersionID = %v, want %d", child.ID, child.RecipeVersionID, *recipe.CurrentVersionID)
+		}
+	}
+}
+
+func TestRollRecipe_ClonesDependencies(t *testing.T) {
+	svc, _, _, depRepo, recipeID := setupPublishedRecipe(t)
+
+	depsBefore := len(depRepo.deps)
+
+	_, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Should have 1 new dep (cloned from the published tree's dep).
+	depsAfter := len(depRepo.deps)
+	if depsAfter != depsBefore+1 {
+		t.Errorf("expected %d deps after roll, got %d", depsBefore+1, depsAfter)
+	}
+}
+
+func TestRollRecipe_ResetsStatusToOpen(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.Status != models.TaskStatusOpen {
+		t.Errorf("job Status = %s, want %s", job.Status, models.TaskStatusOpen)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.Status != models.TaskStatusOpen {
+			t.Errorf("child %q Status = %s, want %s", child.ID, child.Status, models.TaskStatusOpen)
+		}
+	}
+}
+
+func TestRollRecipe_SetsSpaceAndCreatedBy(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	job, err := svc.RollRecipe(recipeID, spaceID, userID, RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.SpaceID != spaceID {
+		t.Errorf("job SpaceID = %s, want %s", job.SpaceID, spaceID)
+	}
+	if job.CreatedByID != userID {
+		t.Errorf("job CreatedByID = %s, want %s", job.CreatedByID, userID)
+	}
+
+	// Children should also have the overridden space and createdBy.
+	children, _ := taskRepo.GetChildren(job.ID)
+	for _, child := range children {
+		if child.SpaceID != spaceID {
+			t.Errorf("child %q SpaceID = %s, want %s", child.ID, child.SpaceID, spaceID)
+		}
+		if child.CreatedByID != userID {
+			t.Errorf("child %q CreatedByID = %s, want %s", child.ID, child.CreatedByID, userID)
+		}
+	}
+}
+
+func TestRollRecipe_TitleOverride(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipe(t)
+
+	title := "Custom Job Title"
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		Title: &title,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.Title != title {
+		t.Errorf("job Title = %q, want %q", job.Title, title)
+	}
+}
+
+func TestRollRecipe_DefaultTitleFromRecipe(t *testing.T) {
+	svc, recipeRepo, _, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Default title should come from the recipe's task tree root (which has the recipe name).
+	recipe := recipeRepo.recipes[recipeID]
+	if job.Title != recipe.Name {
+		t.Errorf("job Title = %q, want recipe name %q", job.Title, recipe.Name)
+	}
+}
+
+func TestRollRecipe_CustomerIDAndDueDate(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipe(t)
+
+	customerID := uuid.New()
+	dueDate := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		CustomerID: &customerID,
+		DueDate:    &dueDate,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if job.CustomerID == nil || *job.CustomerID != customerID {
+		t.Errorf("job CustomerID = %v, want %s", job.CustomerID, customerID)
+	}
+	if job.DueDate == nil || !job.DueDate.Equal(dueDate) {
+		t.Errorf("job DueDate = %v, want %v", job.DueDate, dueDate)
+	}
+}
+
+func TestRollRecipe_ErrorNoPublishedVersion(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	recipeID := uuid.New()
+	recipeRepo.recipes[recipeID] = &models.Recipe{
+		ID:   recipeID,
+		Name: "Unpublished Recipe",
+	}
+
+	_, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err == nil {
+		t.Fatal("expected error for recipe with no published version")
+	}
+}
+
+func TestRollRecipe_GeneratesNoriPrefixID(t *testing.T) {
+	svc, _, _, _, recipeID := setupPublishedRecipe(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	if len(job.ID) < 5 || job.ID[:5] != "nori-" {
+		t.Errorf("job ID %q does not start with 'nori-'", job.ID)
+	}
+}
+
+func TestRollRecipe_PreservesStationAssignments(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipe(t)
+
+	// Find a published step and set a station on it (simulating recipe authoring).
+	// We need to find a child task in the published tree.
+	recipe := svc.recipeRepo.(*mockRecipeRepo).recipes[recipeID]
+	version := svc.recipeRepo.(*mockRecipeRepo).versions[*recipe.CurrentVersionID]
+	publishedRootID := version.RootTaskID.String()
+	pubChildren, _ := taskRepo.GetChildren(publishedRootID)
+	if len(pubChildren) == 0 {
+		t.Fatal("published tree has no children")
+	}
+
+	stationID := uuid.New()
+	pubChildren[0].StationID = &stationID
+	taskRepo.tasks[pubChildren[0].ID] = &pubChildren[0]
+
+	// Roll the recipe.
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	// Find the corresponding child in the rolled job.
+	jobChildren, _ := taskRepo.GetChildren(job.ID)
+	found := false
+	for _, child := range jobChildren {
+		if child.StationID != nil && *child.StationID == stationID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected rolled job to preserve station assignment from published tree")
+	}
+}
