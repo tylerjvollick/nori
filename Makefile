@@ -79,6 +79,12 @@ dev-local:
 	$(MAKE) migrate-native
 	$(MAKE) serve
 
+build:
+	cd server && go build -o ../nori .
+
+init-dev:
+	$(LOAD_ENV) && cd server && go run . init-dev
+
 open-api:
 	cd ./open-api && bash ./bin/generate-open-api.sh
 

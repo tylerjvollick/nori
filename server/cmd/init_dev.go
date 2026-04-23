@@ -189,6 +189,10 @@ func seedDemoAccount(db *gorm.DB) error {
 	if err := db.Create(user).Error; err != nil {
 		return fmt.Errorf("creating user: %w", err)
 	}
+	// GORM skips false (zero value) on insert, so the DB default (true) wins.
+	if err := db.Model(user).Update("must_change_password", false).Error; err != nil {
+		return fmt.Errorf("clearing must_change_password: %w", err)
+	}
 	log.Printf("  Created user: %s", user.Email)
 
 	// Create account.
@@ -511,6 +515,9 @@ func seedTestAccount(db *gorm.DB) error {
 	}
 	if err := db.Create(user).Error; err != nil {
 		return fmt.Errorf("creating user: %w", err)
+	}
+	if err := db.Model(user).Update("must_change_password", false).Error; err != nil {
+		return fmt.Errorf("clearing must_change_password: %w", err)
 	}
 	log.Printf("  Created user: %s", user.Email)
 

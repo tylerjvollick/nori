@@ -39,7 +39,7 @@
 		...restProps
 	}: ComponentProps<typeof Sidebar.Root> = $props();
 
-	let spaces = $derived($spaceStore.recentSpaces);
+	let spaces = $derived($spaceStore.spaces);
 	let user = $state<User | null>(null);
 	let showCreateDialog = $state(false);
 	let newSpaceName = $state('');
@@ -80,9 +80,9 @@
 		user = state.user;
 	});
 
-	// Load recent spaces on mount
+	// Load all spaces for the current account on mount
 	onMount(() => {
-		spaceStore.loadRecentSpaces();
+		spaceStore.loadSpaces();
 	});
 
 	function isActive(href: string): boolean {

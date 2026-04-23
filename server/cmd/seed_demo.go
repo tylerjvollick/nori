@@ -88,7 +88,7 @@ func connectDB() (*gorm.DB, error) {
 		envOrDefault("DB_USER", "postgres"),
 		os.Getenv("DB_PASSWORD"),
 		envOrDefault("DB_NAME", "nori"),
-		envOrDefault("DB_PORT", "5432"),
+		envOrDefault("DB_PORT", "5433"),
 	)
 	return gorm.Open(postgres.Open(dsn), &gorm.Config{})
 }

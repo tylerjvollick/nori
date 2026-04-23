@@ -69,15 +69,6 @@ func NewAuthMiddleware(
 			})
 		}
 
-		// Extract active SpaceID from X-Space-ID header if present
-		// This overrides the space from the JWT token
-		spaceIDHeader := c.Get("X-Space-ID")
-		if spaceIDHeader != "" {
-			if spaceID, err := uuid.Parse(spaceIDHeader); err == nil {
-				authDTO.ActiveSpaceID = &spaceID
-			}
-		}
-
 		// Store authDTO in context using consistent key "authDTO"
 		c.Locals("authDTO", authDTO)
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
 )
 
@@ -25,4 +26,17 @@ func requireAuth(c *fiber.Ctx) (*dtos.AuthDTO, error) {
 		})
 	}
 	return authDTO, nil
+}
+
+// spaceIDFromPath returns the space UUID stored by the RequireSpace middleware.
+// Call this instead of reading authDTO.ActiveSpaceID in handlers that are
+// mounted under a /:spaceId path segment.
+func spaceIDFromPath(c *fiber.Ctx) (uuid.UUID, error) {
+	id, ok := c.Locals("spaceID").(uuid.UUID)
+	if !ok {
+		return uuid.Nil, c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": "space ID not resolved — RequireSpace middleware missing",
+		})
+	}
+	return id, nil
 }
