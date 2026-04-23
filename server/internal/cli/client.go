@@ -22,7 +22,7 @@ type Client struct {
 
 // NewClient creates a new CLI HTTP client from stored credentials.
 // Uses ActiveToken() to prefer API key over JWT.
-// Populates SpaceID from credentials so X-Space-ID is sent on every request.
+// Populates SpaceID from credentials for use in space-scoped URL paths.
 func NewClient(creds *Credentials) *Client {
 	return &Client{
 		ServerURL: creds.ServerURL,
@@ -68,9 +68,6 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	if c.SpaceID != "" {
-		req.Header.Set("X-Space-ID", c.SpaceID)
-	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -98,6 +95,12 @@ func (c *Client) Put(path string, body interface{}) (*http.Response, error) {
 // Delete sends a DELETE request and returns the response.
 func (c *Client) Delete(path string) (*http.Response, error) {
 	return c.doRequest(http.MethodDelete, path, nil)
+}
+
+// SpacePath prepends the space-scoped URL prefix to path.
+// Use this for all endpoints under /api/v1/spaces/:spaceId/...
+func (c *Client) SpacePath(path string) string {
+	return fmt.Sprintf("/api/v1/spaces/%s%s", c.SpaceID, path)
 }
 
 // ReadJSON reads and unmarshals a JSON response body. Caller is responsible for

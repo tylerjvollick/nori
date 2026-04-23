@@ -139,7 +139,7 @@ func runTaskShow(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s", taskID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s", taskID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -219,7 +219,7 @@ func runTaskUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no fields to update — use --title, --description, --station, or --priority")
 	}
 
-	path := fmt.Sprintf("/api/v1/tasks/%s", taskID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s", taskID))
 	resp, err := client.Put(path, body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -262,7 +262,7 @@ func runTaskDelete(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s", taskID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s", taskID))
 	resp, err := client.Delete(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -295,7 +295,7 @@ func runTaskTree(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/tree", taskID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/tree", taskID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -350,7 +350,7 @@ func runTaskDepList(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/deps", taskID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/deps", taskID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -416,13 +416,13 @@ func runTaskDepAdd(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	// POST /api/v1/tasks/:blockerID/deps — blocker blocks target.
+	// POST /api/v1/spaces/:spaceId/tasks/:blockerID/deps — blocker blocks target.
 	body := map[string]interface{}{
 		"targetTaskId": targetID,
 		"type":         "blocks",
 	}
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/deps", blockerID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/deps", blockerID))
 	resp, err := client.Post(path, body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -466,7 +466,7 @@ func runTaskDepRemove(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/deps/%s", taskID, depID)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/deps/%s", taskID, depID))
 	resp, err := client.Delete(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)

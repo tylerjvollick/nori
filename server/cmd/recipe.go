@@ -230,7 +230,7 @@ func runRecipeList(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := "/api/v1/recipes"
+	path := client.SpacePath("/recipes")
 	if listActiveFlag != "" {
 		path += "?isActive=" + listActiveFlag
 	}
@@ -286,8 +286,8 @@ func runRecipeShow(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	// 1. Resolve slug to get recipe details via GET /api/v1/recipes?slug=<slug>&limit=1
-	path := fmt.Sprintf("/api/v1/recipes?slug=%s&limit=1", slug)
+	// 1. Resolve slug to get recipe details via GET /api/v1/spaces/:spaceId/recipes?slug=<slug>&limit=1
+	path := client.SpacePath(fmt.Sprintf("/recipes?slug=%s&limit=1", slug))
 	resp, err := client.Get(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -319,8 +319,8 @@ func runRecipeShow(cmd *cobra.Command, args []string) error {
 
 	recipe := list.Items[0]
 
-	// 2. Fetch the published version content via GET /api/v1/recipes/:id/versions.
-	versionsPath := fmt.Sprintf("/api/v1/recipes/%s/versions", recipe.ID)
+	// 2. Fetch the published version content via GET /api/v1/spaces/:spaceId/recipes/:id/versions.
+	versionsPath := client.SpacePath(fmt.Sprintf("/recipes/%s/versions", recipe.ID))
 	versionResp, err := client.Get(versionsPath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -425,8 +425,8 @@ func runRecipePour(cmd *cobra.Command, args []string) error {
 		pourBody["orderId"] = orderID.String()
 	}
 
-	// 3. POST /api/v1/recipes/:id/pour
-	path := fmt.Sprintf("/api/v1/recipes/%s/pour", recipeID)
+	// 3. POST /api/v1/spaces/:spaceId/recipes/:id/pour
+	path := client.SpacePath(fmt.Sprintf("/recipes/%s/pour", recipeID))
 	resp, err := client.Post(path, pourBody)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -512,7 +512,7 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 		createBody["description"] = createDescFlag
 	}
 
-	resp, err := client.Post("/api/v1/recipes", createBody)
+	resp, err := client.Post(client.SpacePath("/recipes"), createBody)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -606,7 +606,7 @@ func runRecipeCreateFromTOML(cmd *cobra.Command, args []string) error {
 		"name": name,
 	}
 
-	resp, err := client.Post("/api/v1/recipes", createBody)
+	resp, err := client.Post(client.SpacePath("/recipes"), createBody)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -634,7 +634,7 @@ func runRecipeCreateFromTOML(cmd *cobra.Command, args []string) error {
 		"changeSummary": "Initial import from TOML file",
 	}
 
-	versionPath := fmt.Sprintf("/api/v1/recipes/%s/versions", recipe.ID)
+	versionPath := client.SpacePath(fmt.Sprintf("/recipes/%s/versions", recipe.ID))
 	resp, err = client.Post(versionPath, versionBody)
 	if err != nil {
 		return fmt.Errorf("recipe created but failed to create version: %w", err)
@@ -654,7 +654,7 @@ func runRecipeCreateFromTOML(cmd *cobra.Command, args []string) error {
 	}
 
 	// POST /api/v1/recipes/:id/versions/:vid/publish — auto-publish.
-	publishPath := fmt.Sprintf("/api/v1/recipes/%s/versions/%d/publish", recipe.ID, version.ID)
+	publishPath := client.SpacePath(fmt.Sprintf("/recipes/%s/versions/%d/publish", recipe.ID, version.ID))
 	resp, err = client.Post(publishPath, nil)
 	if err != nil {
 		return fmt.Errorf("recipe and version created but publish failed: %w", err)
@@ -710,7 +710,7 @@ func runRecipePublish(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. List versions to find the latest draft.
-	versionsPath := fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID)
+	versionsPath := client.SpacePath(fmt.Sprintf("/recipes/%s/versions", recipeID))
 	resp, err := client.Get(versionsPath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -747,7 +747,7 @@ func runRecipePublish(cmd *cobra.Command, args []string) error {
 	}
 
 	// 3. Publish via the flat recipe-versions endpoint.
-	publishPath := fmt.Sprintf("/api/v1/recipe-versions/%d/publish", draft.ID)
+	publishPath := client.SpacePath(fmt.Sprintf("/recipe-versions/%d/publish", draft.ID))
 	resp, err = client.Post(publishPath, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -802,8 +802,8 @@ func runRecipeTasks(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// GET /api/v1/recipes/:id — includes task tree in currentVersion.
-	path := fmt.Sprintf("/api/v1/recipes/%s", recipeID)
+	// GET /api/v1/spaces/:spaceId/recipes/:id — includes task tree in currentVersion.
+	path := client.SpacePath(fmt.Sprintf("/recipes/%s", recipeID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -844,7 +844,7 @@ func runRecipeTasks(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch the task tree via GET /api/v1/tasks/:id/tree.
-	treePath := fmt.Sprintf("/api/v1/tasks/%s/tree", rootTaskID)
+	treePath := client.SpacePath(fmt.Sprintf("/tasks/%s/tree", rootTaskID))
 	resp, err = client.Get(treePath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -933,7 +933,7 @@ func flattenTree(node *cliTaskTree) []string {
 func fetchAllDeps(client *cli.Client, taskIDs []string) map[string][]string {
 	depMap := make(map[string][]string)
 	for _, id := range taskIDs {
-		path := fmt.Sprintf("/api/v1/tasks/%s/deps", id)
+		path := client.SpacePath(fmt.Sprintf("/tasks/%s/deps", id))
 		resp, err := client.Get(path)
 		if err != nil {
 			continue
@@ -982,7 +982,7 @@ func runRecipeRoll(cmd *cobra.Command, args []string) error {
 		rollBody["orderQty"] = rollOrderQtyFlag
 	}
 
-	path := fmt.Sprintf("/api/v1/recipes/%s/roll", recipeID)
+	path := client.SpacePath(fmt.Sprintf("/recipes/%s/roll", recipeID))
 	resp, err := client.Post(path, rollBody)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -1017,7 +1017,7 @@ func runRecipeRoll(cmd *cobra.Command, args []string) error {
 
 // resolveRecipeSlug looks up a recipe by slug via the list endpoint and returns its ID.
 func resolveRecipeSlug(client *cli.Client, slug string) (string, error) {
-	path := fmt.Sprintf("/api/v1/recipes?slug=%s&limit=1", slug)
+	path := client.SpacePath(fmt.Sprintf("/recipes?slug=%s&limit=1", slug))
 	resp, err := client.Get(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to server: %w", err)
@@ -1049,7 +1049,7 @@ func resolveRecipeSlug(client *cli.Client, slug string) (string, error) {
 
 // countChildTasks queries the tasks list endpoint to count children of a job.
 func countChildTasks(client *cli.Client, parentID string) (int64, error) {
-	path := fmt.Sprintf("/api/v1/tasks?parentId=%s&limit=1", parentID)
+	path := client.SpacePath(fmt.Sprintf("/tasks?parentId=%s&limit=1", parentID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return 0, err

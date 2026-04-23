@@ -656,7 +656,7 @@ func createSpace(client *cli.Client, name string) (*initSpaceResponse, error) {
 
 // createStation creates a station via the API.
 func createStation(client *cli.Client, name string, wipLimit int) (*initStationResponse, error) {
-	resp, err := client.Post("/api/v1/stations", map[string]interface{}{
+	resp, err := client.Post(client.SpacePath("/stations"), map[string]interface{}{
 		"name":     name,
 		"wipLimit": wipLimit,
 	})
@@ -736,7 +736,7 @@ func fetchSpaceByName(client *cli.Client, name string) (*initSpaceResponse, erro
 
 // createStationIdempotent creates a station, returning nil (not error) if it already exists.
 func createStationIdempotent(client *cli.Client, name string, wipLimit int) (*initStationResponse, error) {
-	resp, err := client.Post("/api/v1/stations", map[string]interface{}{
+	resp, err := client.Post(client.SpacePath("/stations"), map[string]interface{}{
 		"name":     name,
 		"wipLimit": wipLimit,
 	})

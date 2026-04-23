@@ -70,7 +70,7 @@ func runStationList(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	resp, err := client.Get("/api/v1/stations")
+	resp, err := client.Get(client.SpacePath("/stations"))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -134,7 +134,7 @@ func runStationCreate(cmd *cobra.Command, args []string) error {
 		body["description"] = stationCreateDescription
 	}
 
-	resp, err := client.Post("/api/v1/stations", body)
+	resp, err := client.Post(client.SpacePath("/stations"), body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}

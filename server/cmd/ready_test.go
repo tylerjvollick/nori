@@ -31,7 +31,7 @@ func TestReadyCommandHasJSONFlag(t *testing.T) {
 
 func TestRunReady_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/tasks/ready", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/test-space/tasks/ready", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
@@ -54,6 +54,7 @@ func TestRunReady_Success(t *testing.T) {
 		AccessToken: "test-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
@@ -80,6 +81,7 @@ func TestRunReady_EmptyList(t *testing.T) {
 		AccessToken: "test-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
@@ -106,6 +108,7 @@ func TestRunReady_Unauthorized(t *testing.T) {
 		AccessToken: "bad-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
@@ -130,6 +133,7 @@ func TestRunReady_ServerError(t *testing.T) {
 		AccessToken: "test-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
@@ -147,10 +151,10 @@ func TestRunReady_NoCredentials(t *testing.T) {
 	assert.Contains(t, err.Error(), "not logged in")
 }
 
-func TestRunReady_SpaceIDHeader(t *testing.T) {
-	var receivedSpaceID string
+func TestRunReady_SpaceIDInPath(t *testing.T) {
+	var receivedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedSpaceID = r.Header.Get("X-Space-ID")
+		receivedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(readyResponse{Items: []readyTask{}, Total: 0})
 	}))
@@ -168,19 +172,19 @@ func TestRunReady_SpaceIDHeader(t *testing.T) {
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 
-	// NewClient now populates SpaceID from credentials automatically
+	// SpacePath embeds the space ID in the URL path
 	client := cli.NewClient(creds)
-	resp, err := client.Get("/api/v1/tasks/ready")
+	resp, err := client.Get(client.SpacePath("/tasks/ready"))
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	assert.Equal(t, "test-space-id", receivedSpaceID)
+	assert.Equal(t, "/api/v1/spaces/test-space-id/tasks/ready", receivedPath)
 }
 
 func TestRunReady_SpaceIDFromCredentials(t *testing.T) {
-	var receivedSpaceID string
+	var receivedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedSpaceID = r.Header.Get("X-Space-ID")
+		receivedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(readyResponse{Items: []readyTask{}, Total: 0})
 	}))
@@ -204,7 +208,7 @@ func TestRunReady_SpaceIDFromCredentials(t *testing.T) {
 	err := runReady(readyCmd, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, "creds-space-id", receivedSpaceID)
+	assert.Equal(t, "/api/v1/spaces/creds-space-id/tasks/ready", receivedPath)
 }
 
 func TestResolveSpaceID_FlagOverridesAll(t *testing.T) {

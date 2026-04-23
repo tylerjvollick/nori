@@ -462,7 +462,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		// --- Recipe routes ---
 
 		// POST /api/v1/recipes — create recipe
-		if r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/recipes" && r.Method == http.MethodPost {
 			state.recordCall("POST /api/v1/recipes")
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
@@ -480,7 +480,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// GET /api/v1/recipes — list recipes (supports slug filter)
-		if r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/recipes" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/recipes")
 			slugFilter := r.URL.Query().Get("slug")
 
@@ -501,8 +501,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// Handle recipe-specific routes: /api/v1/recipes/:id/...
-		if len(r.URL.Path) > len("/api/v1/recipes/") {
-			pathRest := r.URL.Path[len("/api/v1/recipes/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/recipes/") {
+			pathRest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/recipes/"):]
 
 			// Extract recipeID and subpath by finding the first /
 			slashIdx := indexOf(pathRest, "/")
@@ -610,8 +610,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 
 		// --- Recipe versions flat endpoint ---
 		// POST /api/v1/recipe-versions/:vid/publish
-		if len(r.URL.Path) > len("/api/v1/recipe-versions/") && r.Method == http.MethodPost {
-			rest := r.URL.Path[len("/api/v1/recipe-versions/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/recipe-versions/") && r.Method == http.MethodPost {
+			rest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/recipe-versions/"):]
 			var vid int
 			var suffix string
 			fmt.Sscanf(rest, "%d/%s", &vid, &suffix)
@@ -635,7 +635,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		// --- Task routes ---
 
 		// GET /api/v1/tasks/ready
-		if r.URL.Path == "/api/v1/tasks/ready" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/tasks/ready" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/tasks/ready")
 			ready := state.readyTasks()
 			if ready == nil {
@@ -649,7 +649,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// GET /api/v1/tasks — list tasks (supports parentId, status, assigneeId filters)
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/tasks" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/tasks")
 			parentFilter := r.URL.Query().Get("parentId")
 
@@ -674,8 +674,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// POST /api/v1/tasks/:id/<action> (complete, pause, resume, skip)
-		if len(r.URL.Path) > len("/api/v1/tasks/") && r.Method == http.MethodPost {
-			rest := r.URL.Path[len("/api/v1/tasks/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/tasks/") && r.Method == http.MethodPost {
+			rest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/tasks/"):]
 
 			// Extract task ID and action.
 			// Paths: /api/v1/tasks/<id>/complete, /api/v1/tasks/<id>/pause, etc.

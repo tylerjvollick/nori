@@ -51,7 +51,7 @@ func TestJobListCommandHasStatusFlag(t *testing.T) {
 
 func TestRunJobList_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/tasks", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/test-space/tasks", r.URL.Path)
 		assert.Equal(t, "job", r.URL.Query().Get("type"))
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
@@ -171,7 +171,7 @@ func TestRunJobShow_Success(t *testing.T) {
 		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks/shop-a1" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/shop-a1" {
 			// First request: get the job itself
 			assert.Equal(t, http.MethodGet, r.Method)
 			json.NewEncoder(w).Encode(jobDetail{
@@ -184,7 +184,7 @@ func TestRunJobShow_Success(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/api/v1/tasks" && r.URL.Query().Get("parentId") == "shop-a1" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.URL.Query().Get("parentId") == "shop-a1" {
 			// Second request: get children
 			json.NewEncoder(w).Encode(struct {
 				Items []taskChild `json:"items"`
@@ -256,7 +256,7 @@ func TestRunJobShow_NoChildren(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks/shop-a1" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/shop-a1" {
 			json.NewEncoder(w).Encode(jobDetail{
 				ID:       "shop-a1",
 				Title:    "Walnut Dining Table",
@@ -267,7 +267,7 @@ func TestRunJobShow_NoChildren(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/api/v1/tasks" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" {
 			json.NewEncoder(w).Encode(struct {
 				Items []taskChild `json:"items"`
 				Total int64       `json:"total"`

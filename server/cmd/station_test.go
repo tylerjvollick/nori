@@ -45,7 +45,7 @@ func TestStationCommandHasJSONFlag(t *testing.T) {
 
 func TestRunStationList_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/stations", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/test-space/stations", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
@@ -161,7 +161,7 @@ func TestRunStationList_ConnectionFailed(t *testing.T) {
 
 func TestRunStationCreate_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/stations", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/test-space/stations", r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 

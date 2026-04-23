@@ -167,7 +167,7 @@ func runTaskAction(taskID, action string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/%s", taskID, action)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/%s", taskID, action))
 	resp, err := client.Post(path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -203,7 +203,7 @@ func runTaskAction(taskID, action string) error {
 
 // findActiveTask finds the user's current active task.
 func findActiveTask(client *cli.Client, creds *cli.Credentials) (*activeTaskResponse, error) {
-	path := fmt.Sprintf("/api/v1/tasks?status=active&assigneeId=%s&limit=1", creds.UserID)
+	path := client.SpacePath(fmt.Sprintf("/tasks?status=active&assigneeId=%s&limit=1", creds.UserID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
@@ -256,7 +256,7 @@ func resolveParentID(client *cli.Client, creds *cli.Credentials) (string, error)
 
 // resolveStationID looks up a station by name and returns its UUID.
 func resolveStationID(client *cli.Client, name string) (string, error) {
-	resp, err := client.Get("/api/v1/stations")
+	resp, err := client.Get(client.SpacePath("/stations"))
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -321,8 +321,8 @@ func runTaskAdd(cmd *cobra.Command, args []string) error {
 		body["afterId"] = taskAddAfter
 	}
 
-	// POST /api/v1/tasks/:parentId/children
-	path := fmt.Sprintf("/api/v1/tasks/%s/children", parentID)
+	// POST /api/v1/spaces/:spaceId/tasks/:parentId/children
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/children", parentID))
 	resp, err := client.Post(path, body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -372,8 +372,8 @@ func runTaskNote(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// POST /api/v1/tasks/:id/notes
-	path := fmt.Sprintf("/api/v1/tasks/%s/notes", active.ID)
+	// POST /api/v1/spaces/:spaceId/tasks/:id/notes
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/notes", active.ID))
 	resp, err := client.Post(path, map[string]string{
 		"text": text,
 	})

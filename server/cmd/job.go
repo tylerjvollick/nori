@@ -93,7 +93,7 @@ func runJobList(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := "/api/v1/tasks?type=job"
+	path := client.SpacePath("/tasks?type=job")
 	if jobStatusFlag != "" {
 		path += "&status=" + jobStatusFlag
 	}
@@ -150,7 +150,7 @@ func runJobShow(cmd *cobra.Command, args []string) error {
 	client := newClientWithSpace(creds)
 
 	// 1. Fetch the job itself.
-	jobPath := fmt.Sprintf("/api/v1/tasks/%s", jobID)
+	jobPath := client.SpacePath(fmt.Sprintf("/tasks/%s", jobID))
 	resp, err := client.Get(jobPath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -174,7 +174,7 @@ func runJobShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. Fetch children (task tree).
-	childrenPath := fmt.Sprintf("/api/v1/tasks?parentId=%s&limit=200", jobID)
+	childrenPath := client.SpacePath(fmt.Sprintf("/tasks?parentId=%s&limit=200", jobID))
 	childResp, err := client.Get(childrenPath)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)

@@ -62,7 +62,7 @@ func TestRunRecipePour_Success(t *testing.T) {
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			assert.Equal(t, "walnut-dining-table", r.URL.Query().Get("slug"))
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
@@ -72,7 +72,7 @@ func TestRunRecipePour_Success(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(pourResponse{
@@ -81,7 +81,7 @@ func TestRunRecipePour_Success(t *testing.T) {
 				Type:  "job",
 			})
 
-		case r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet:
 			assert.Equal(t, "nori-abcd1234", r.URL.Query().Get("parentId"))
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(taskListResponse{Total: 5})
@@ -112,7 +112,7 @@ func TestRunRecipePour_WithVarsAndOrder(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
 				Items: []recipeListItem{
@@ -121,7 +121,7 @@ func TestRunRecipePour_WithVarsAndOrder(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
 			json.NewDecoder(r.Body).Decode(&capturedBody)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -131,7 +131,7 @@ func TestRunRecipePour_WithVarsAndOrder(t *testing.T) {
 				Type:  "job",
 			})
 
-		case r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(taskListResponse{Total: 8})
 
@@ -192,7 +192,7 @@ func TestRunRecipePour_PourError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
 				Items: []recipeListItem{
@@ -201,7 +201,7 @@ func TestRunRecipePour_PourError(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/pour", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			json.NewEncoder(w).Encode(errorResponse{Error: "recipe has no published version"})
@@ -371,7 +371,7 @@ func TestRunRecipeCreate_Success(t *testing.T) {
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodPost:
 			json.NewDecoder(r.Body).Decode(&capturedCreateBody)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -381,7 +381,7 @@ func TestRunRecipeCreate_Success(t *testing.T) {
 				Slug: "walnut-dining-table",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
 			json.NewDecoder(r.Body).Decode(&capturedVersionBody)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -391,7 +391,7 @@ func TestRunRecipeCreate_Success(t *testing.T) {
 				Status:        "draft",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/%d/publish", recipeID, versionID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/%d/publish", recipeID, versionID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{
@@ -437,7 +437,7 @@ func TestRunRecipeCreate_WithNameOverride(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodPost:
 			json.NewDecoder(r.Body).Decode(&capturedCreateBody)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -447,12 +447,12 @@ func TestRunRecipeCreate_WithNameOverride(t *testing.T) {
 				Slug: "custom-name",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
@@ -486,7 +486,7 @@ func TestRunRecipeCreate_JSONOutput(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createRecipeResponse{
@@ -495,12 +495,12 @@ func TestRunRecipeCreate_JSONOutput(t *testing.T) {
 				Slug: "walnut-dining-table",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
@@ -659,7 +659,7 @@ func TestRunRecipeCreate_VersionCreationFails(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createRecipeResponse{
@@ -668,7 +668,7 @@ func TestRunRecipeCreate_VersionCreationFails(t *testing.T) {
 				Slug: "walnut-dining-table",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
@@ -698,7 +698,7 @@ func TestRunRecipeCreate_PublishFails(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createRecipeResponse{
@@ -707,12 +707,12 @@ func TestRunRecipeCreate_PublishFails(t *testing.T) {
 				Slug: "walnut-dining-table",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "publish failed"})
@@ -768,7 +768,7 @@ func TestRunRecipePublish_Success(t *testing.T) {
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			assert.Equal(t, "walnut-dining-table", r.URL.Query().Get("slug"))
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
@@ -778,7 +778,7 @@ func TestRunRecipePublish_Success(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(versionListResponse{
 				Items: []versionListItem{
@@ -789,7 +789,7 @@ func TestRunRecipePublish_Success(t *testing.T) {
 				Total: 3,
 			})
 
-		case r.URL.Path == "/api/v1/recipe-versions/3/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/3/publish" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(publishVersionResponse{
@@ -817,7 +817,7 @@ func TestRunRecipePublish_JSONOutput(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
 				Items: []recipeListItem{
@@ -826,7 +826,7 @@ func TestRunRecipePublish_JSONOutput(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(versionListResponse{
 				Items: []versionListItem{
@@ -836,7 +836,7 @@ func TestRunRecipePublish_JSONOutput(t *testing.T) {
 				Total: 2,
 			})
 
-		case r.URL.Path == "/api/v1/recipe-versions/2/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/2/publish" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(publishVersionResponse{
@@ -882,7 +882,7 @@ func TestRunRecipePublish_NoDraftVersion(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
 				Items: []recipeListItem{
@@ -891,7 +891,7 @@ func TestRunRecipePublish_NoDraftVersion(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(versionListResponse{
 				Items: []versionListItem{
@@ -967,7 +967,7 @@ func TestRunRecipePublish_PublishServerError(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(recipeListResponse{
 				Items: []recipeListItem{
@@ -976,7 +976,7 @@ func TestRunRecipePublish_PublishServerError(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(versionListResponse{
 				Items: []versionListItem{
@@ -985,7 +985,7 @@ func TestRunRecipePublish_PublishServerError(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == "/api/v1/recipe-versions/2/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/2/publish" && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
@@ -1031,7 +1031,7 @@ func TestRecipeListHasActiveFlag(t *testing.T) {
 
 func TestRunRecipeList_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/recipes", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/test-space/recipes", r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
@@ -1217,7 +1217,7 @@ func TestRunRecipeShow_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			assert.Equal(t, "walnut-dining-table", r.URL.Query().Get("slug"))
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowDetail `json:"items"`
@@ -1234,7 +1234,7 @@ func TestRunRecipeShow_Success(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			changeSummary := "Initial import"
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowVersion `json:"items"`
@@ -1283,7 +1283,7 @@ func TestRunRecipeShow_JSONOutput(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowDetail `json:"items"`
 				Total int64              `json:"total"`
@@ -1299,7 +1299,7 @@ func TestRunRecipeShow_JSONOutput(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowVersion `json:"items"`
 				Total int                 `json:"total"`
@@ -1386,7 +1386,7 @@ func TestRunRecipeShow_NoPublishedVersion(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
-		case r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet:
+		case r.URL.Path == "/api/v1/spaces/test-space/recipes" && r.Method == http.MethodGet:
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowDetail `json:"items"`
 				Total int64              `json:"total"`
@@ -1402,7 +1402,7 @@ func TestRunRecipeShow_NoPublishedVersion(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions", recipeID) && r.Method == http.MethodGet:
 			json.NewEncoder(w).Encode(struct {
 				Items []recipeShowVersion `json:"items"`
 				Total int                 `json:"total"`
