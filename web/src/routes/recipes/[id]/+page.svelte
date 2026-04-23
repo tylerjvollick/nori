@@ -10,6 +10,8 @@
 	import type { RecipeVersionResponse } from '$lib/types/recipe';
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
+	import { customerApi } from '$lib/api/customer';
+	import type { CustomerResponse } from '$lib/api/customer';
 	import TaskTreeEditor from '$lib/components/flow/TaskTreeEditor.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -49,7 +51,12 @@
 	let showRollDialog = $state(false);
 	let rollTitle = $state('');
 	let rollOrderQty = $state(1);
+	let rollCustomerId = $state('');
+	let rollDueDate = $state('');
 	let isRolling = $state(false);
+
+	// Customer data
+	let customers = $state<CustomerResponse[]>([]);
 
 	// Publish state
 	let isPublishing = $state(false);
@@ -89,6 +96,7 @@
 
 	onMount(() => {
 		loadStations();
+		loadCustomers();
 		return () => recipeStore.clearCurrent();
 	});
 
@@ -102,6 +110,14 @@
 			stationMap = map;
 		} catch {
 			// Stations are optional for display
+		}
+	}
+
+	async function loadCustomers() {
+		try {
+			customers = await customerApi.listCustomers();
+		} catch {
+			// Customers are optional for the roll dialog
 		}
 	}
 
@@ -186,10 +202,14 @@
 			const job = await recipeApi.rollRecipe(recipe.id, {
 				title: rollTitle.trim() || undefined,
 				order_qty: rollOrderQty > 1 ? rollOrderQty : undefined,
+				customer_id: rollCustomerId || undefined,
+				due_date: rollDueDate ? new Date(rollDueDate).toISOString() : undefined,
 			});
 			showRollDialog = false;
 			rollTitle = '';
 			rollOrderQty = 1;
+			rollCustomerId = '';
+			rollDueDate = '';
 			toast.success('Job created from recipe');
 			// Navigate to the new job
 			goto(`/spaces/${$page.params.slug || 'default'}/${job.id}`);
@@ -446,6 +466,8 @@
 		if (!open) {
 			rollTitle = '';
 			rollOrderQty = 1;
+			rollCustomerId = '';
+			rollDueDate = '';
 		}
 	}}
 >
@@ -453,7 +475,11 @@
 		<Dialog.Header>
 			<Dialog.Title>Roll Recipe into Job</Dialog.Title>
 			<Dialog.Description>
-				Create a new job from this recipe. The published task tree will be cloned.
+				Create a new job from <strong>{recipe?.name ?? 'this recipe'}</strong>
+				{#if currentVersion}
+					<span class="text-muted-foreground"> (v{currentVersion.versionNumber})</span>
+				{/if}.
+				The published task tree will be cloned.
 			</Dialog.Description>
 		</Dialog.Header>
 		<form
@@ -486,6 +512,35 @@
 						When greater than 1, tasks with batch sizes will be expanded accordingly.
 					</p>
 				</div>
+				{#if customers.length > 0}
+					<div class="grid gap-2">
+						<Label for="roll-customer">Customer (optional)</Label>
+						<Select.Root
+							type="single"
+							value={rollCustomerId || undefined}
+							onValueChange={(v) => { rollCustomerId = v ?? ''; }}
+						>
+							<Select.Trigger id="roll-customer" class="w-full" disabled={isRolling}>
+								{customers.find((c) => c.id === rollCustomerId)?.name ?? 'Select a customer'}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="" label="None">None</Select.Item>
+								{#each customers as customer}
+									<Select.Item value={customer.id} label={customer.name}>{customer.name}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+				{/if}
+				<div class="grid gap-2">
+					<Label for="roll-due-date">Due Date (optional)</Label>
+					<Input
+						id="roll-due-date"
+						type="date"
+						bind:value={rollDueDate}
+						disabled={isRolling}
+					/>
+				</div>
 			</div>
 			<Dialog.Footer class="pt-2">
 				<Button
@@ -497,7 +552,7 @@
 					Cancel
 				</Button>
 				<Button type="submit" disabled={isRolling}>
-					{isRolling ? 'Creating Job...' : 'Create Job'}
+					{isRolling ? 'Creating Job...' : 'Roll'}
 				</Button>
 			</Dialog.Footer>
 		</form>

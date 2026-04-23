@@ -38,6 +38,7 @@ func New(cfg *config.Config) *App {
 	taskDepRepo := repositories.NewTaskDepRepository(database.DB)
 	recipeRepo := repositories.NewRecipeRepository(database.DB)
 	stationRepo := repositories.NewStationRepository(database.DB)
+	customerRepo := repositories.NewCustomerRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -81,6 +82,7 @@ func New(cfg *config.Config) *App {
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	costHandler := handlers.NewCostHandler(costService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
+	customerHandler := handlers.NewCustomerHandler(customerRepo)
 
 	// Fiber instance with CORS and increased body limit for media uploads
 	app := fiber.New(fiber.Config{
@@ -116,6 +118,7 @@ func New(cfg *config.Config) *App {
 	stationHandler.RegisterStationRoutes(app, authMiddleware, requirePasswordChanged)
 	costHandler.RegisterCostRoutes(app, authMiddleware, requirePasswordChanged)
 	taskDepHandler.RegisterTaskDepRoutes(app, authMiddleware, requirePasswordChanged)
+	customerHandler.RegisterCustomerRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())
