@@ -12,12 +12,16 @@ import (
 type AdminUserService struct {
 	userRepo        *repositories.UserRepository
 	userAccountRepo *repositories.UserAccountRepository
+	spaceRepo       *repositories.SpaceRepository
+	spaceMemberRepo *repositories.SpaceMemberRepository
 }
 
-func NewAdminUserService(userRepo *repositories.UserRepository, userAccountRepo *repositories.UserAccountRepository) *AdminUserService {
+func NewAdminUserService(userRepo *repositories.UserRepository, userAccountRepo *repositories.UserAccountRepository, spaceRepo *repositories.SpaceRepository, spaceMemberRepo *repositories.SpaceMemberRepository) *AdminUserService {
 	return &AdminUserService{
 		userRepo:        userRepo,
 		userAccountRepo: userAccountRepo,
+		spaceRepo:       spaceRepo,
+		spaceMemberRepo: spaceMemberRepo,
 	}
 }
 
@@ -59,6 +63,23 @@ func (s *AdminUserService) CreateUser(accountID uuid.UUID, email, firstName, las
 	if err != nil {
 		// TODO: Consider rolling back user creation if UserAccount creation fails
 		return nil, fmt.Errorf("failed to create user account relationship: %w", err)
+	}
+
+	// Auto-add user to all spaces in the account
+	if s.spaceRepo != nil && s.spaceMemberRepo != nil {
+		spaces, err := s.spaceRepo.FindByAccountID(accountID)
+		if err == nil {
+			for _, space := range spaces {
+				member := &models.SpaceMember{
+					UserID:  user.ID,
+					SpaceID: space.ID,
+				}
+				if err := s.spaceMemberRepo.Create(member); err != nil {
+					// Log but don't fail user creation
+					fmt.Printf("Warning: failed to add user %s to space %s: %v\n", user.ID, space.ID, err)
+				}
+			}
+		}
 	}
 
 	return user, nil

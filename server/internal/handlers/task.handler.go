@@ -20,8 +20,8 @@ type TaskServiceInterface interface {
 	ListTasks(filter repositories.TaskFilter) ([]models.Task, int64, error)
 	UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*models.Task, error)
 	DeleteTask(id string) error
-	ClaimTask(taskID string, userID uuid.UUID) (*models.Task, error)
-	CompleteTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	StartTask(taskID string, userID uuid.UUID) (*models.Task, error)
+	CompleteTask(taskID string, userID uuid.UUID, actualTimeSecs *int) (*services.CompleteTaskResult, error)
 	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	SkipTask(taskID string, userID uuid.UUID) (*models.Task, error)
@@ -56,7 +56,7 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Get("/:id/tree", h.GetTaskTree)
 	group.Put("/:id", h.UpdateTask)
 	group.Delete("/:id", h.DeleteTask)
-	group.Post("/:id/claim", h.ClaimTask)
+	group.Post("/:id/start", h.StartTask)
 	group.Post("/:id/complete", h.CompleteTask)
 	group.Post("/:id/pause", h.PauseTask)
 	group.Post("/:id/resume", h.ResumeTask)
@@ -322,8 +322,8 @@ func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
 	return c.Status(http.StatusNoContent).Send(nil)
 }
 
-// ClaimTask assigns the authenticated user to the task and sets it to active.
-func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
+// StartTask transitions a task from open to active.
+func (h *TaskHandler) StartTask(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
 		return err
@@ -336,12 +336,12 @@ func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify task belongs to the requester's space before claiming.
+	// Verify task belongs to the requester's space before starting.
 	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
 		return err
 	}
 
-	task, err := h.taskService.ClaimTask(id, authDTO.User.ID)
+	task, err := h.taskService.StartTask(id, authDTO.User.ID)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),
@@ -351,7 +351,9 @@ func (h *TaskHandler) ClaimTask(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }
 
-// CompleteTask marks the task as done. Only the assigned user can complete it.
+// CompleteTask marks the task as done.
+// Accepts an optional JSON body with actualTimeSeconds for time correction.
+// Returns the completed task plus a nextTaskId hint for navigation.
 func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -370,17 +372,28 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 		return err
 	}
 
-	task, err := h.taskService.CompleteTask(id, authDTO.User.ID)
+	// Parse optional request body for time correction.
+	var dto dtos.CompleteTaskRequest
+	// BodyParser may fail if no body is sent — that's fine, all fields are optional.
+	_ = c.BodyParser(&dto)
+
+	result, err := h.taskService.CompleteTask(id, authDTO.User.ID, dto.ActualTimeSecs)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
+	resp := dtos.CompleteTaskResponse{
+		TaskResponse:  dtos.TaskResponseFromModel(result.Task),
+		NextTaskId:    result.NextTaskID,
+		NextTaskTitle: result.NextTaskTitle,
+	}
+
+	return c.Status(http.StatusOK).JSON(resp)
 }
 
-// PauseTask pauses an active task. Only the assigned user can pause it.
+// PauseTask pauses an active task.
 func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -409,7 +422,7 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }
 
-// ResumeTask resumes a paused task. Only the assigned user can resume it.
+// ResumeTask resumes a paused task.
 func (h *TaskHandler) ResumeTask(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -438,7 +451,7 @@ func (h *TaskHandler) ResumeTask(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }
 
-// SkipTask marks a task as skipped. Only the assigned user can skip it (if assigned).
+// SkipTask marks a task as skipped.
 func (h *TaskHandler) SkipTask(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {

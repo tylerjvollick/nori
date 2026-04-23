@@ -122,6 +122,17 @@ func (s *TaskService) UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*model
 	if dto.Status != nil {
 		task.Status = *dto.Status
 	}
+	if dto.AssignedToID != nil {
+		if *dto.AssignedToID == "" {
+			task.AssignedToID = nil // unassign
+		} else {
+			parsed, err := uuid.Parse(*dto.AssignedToID)
+			if err != nil {
+				return nil, fmt.Errorf("invalid assignedToId: %w", err)
+			}
+			task.AssignedToID = &parsed
+		}
+	}
 
 	task.UpdatedAt = time.Now()
 
@@ -137,26 +148,23 @@ func (s *TaskService) DeleteTask(id string) error {
 	return s.taskRepo.Delete(id)
 }
 
-// ClaimTask assigns a task to a user and sets it to active status.
-// Returns an error if the task is not in "open" status or is already claimed.
-func (s *TaskService) ClaimTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+// StartTask transitions a task from open to active status.
+// Sets StartedAt timestamp if not already set.
+func (s *TaskService) StartTask(taskID string, userID uuid.UUID) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
 		return nil, err
 	}
 
 	if task.Status != models.TaskStatusOpen {
-		return nil, fmt.Errorf("task %q cannot be claimed: status is %q, must be %q", taskID, task.Status, models.TaskStatusOpen)
-	}
-
-	if task.AssignedToID != nil {
-		return nil, fmt.Errorf("task %q is already assigned to user %s", taskID, task.AssignedToID.String())
+		return nil, fmt.Errorf("task %q cannot be started: status is %q, must be %q", taskID, task.Status, models.TaskStatusOpen)
 	}
 
 	now := time.Now()
-	task.AssignedToID = &userID
 	task.Status = models.TaskStatusActive
-	task.StartedAt = &now
+	if task.StartedAt == nil {
+		task.StartedAt = &now
+	}
 	task.UpdatedAt = now
 
 	if err := s.taskRepo.Update(task); err != nil {
@@ -166,12 +174,21 @@ func (s *TaskService) ClaimTask(taskID string, userID uuid.UUID) (*models.Task, 
 	return task, nil
 }
 
-// CompleteTask marks a task as done. Only the assigned user can complete it,
-// and the task must be in "active" status. All blocking dependencies must be
+// CompleteTaskResult holds the completed task and optional navigation hint.
+type CompleteTaskResult struct {
+	Task          *models.Task
+	NextTaskID    *string
+	NextTaskTitle *string
+}
+
+// CompleteTask marks a task as done.
+// The task must be in "active" status. All blocking dependencies must be
 // resolved (in a terminal status: done, skipped, or cancelled).
+// If actualTimeSecs is non-nil, the task's ActualTimeSecs is overridden.
 // If all sibling tasks under the same parent are now done, the parent is
 // auto-completed as well.
-func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+// Returns the completed task plus the next downstream task ID (if any).
+func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSecs *int) (*CompleteTaskResult, error) {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
 		return nil, err
@@ -182,15 +199,10 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID) (*models.Tas
 		return nil, fmt.Errorf("task %q cannot be completed: status is %q, must be %q", taskID, task.Status, models.TaskStatusActive)
 	}
 
-	// Validate assignee: must be assigned to the requesting user.
-	if task.AssignedToID == nil || *task.AssignedToID != userID {
-		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
-	}
-
 	// Check blocking dependencies are resolved.
-	// GetDependents returns deps where from_task_id = taskID (i.e., deps that this task has).
-	// We filter for type "blocks" and check each blocker's status.
-	deps, err := s.taskDepRepo.GetDependents(taskID)
+	// GetBlockers returns deps where from_task_id = taskID (i.e., deps where this task is blocked).
+	// We filter for type "blocks" and check each blocker's status (ToTaskID = the blocker).
+	deps, err := s.taskDepRepo.GetBlockers(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check dependencies for task %q: %w", taskID, err)
 	}
@@ -206,6 +218,11 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID) (*models.Tas
 		if !isTerminalStatus(blocker.Status) {
 			return nil, fmt.Errorf("task %q cannot be completed: blocked by task %q (status %q)", taskID, blocker.ID, blocker.Status)
 		}
+	}
+
+	// Apply time correction if provided.
+	if actualTimeSecs != nil {
+		task.ActualTimeSecs = *actualTimeSecs
 	}
 
 	// Mark task as done.
@@ -227,7 +244,67 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID) (*models.Tas
 		}
 	}
 
-	return task, nil
+	// Find the next downstream task (first task blocked by this one).
+	result := &CompleteTaskResult{Task: task}
+	nextID, nextTitle := s.findNextTask(taskID)
+	result.NextTaskID = nextID
+	result.NextTaskTitle = nextTitle
+
+	return result, nil
+}
+
+// findNextTask finds the first downstream task that is blocked by the given task.
+// It returns the task ID and title, or nil if no downstream task exists.
+// The "next" task is the first non-terminal task that has a "blocks" dependency
+// on the completed task, sorted by priority then creation date.
+func (s *TaskService) findNextTask(completedTaskID string) (*string, *string) {
+	// GetDependents returns deps where to_task_id = completedTaskID.
+	// In the dep model: FromTaskID is the task that depends, ToTaskID is the blocker.
+	// So these are deps where completedTaskID is the blocker — the FromTaskID tasks
+	// are the ones that were waiting on it.
+	blockerDeps, err := s.taskDepRepo.GetDependents(completedTaskID)
+	if err != nil {
+		return nil, nil
+	}
+
+	// Collect candidate downstream tasks (non-terminal, with "blocks" type).
+	type candidate struct {
+		id       string
+		title    string
+		priority int
+	}
+	var candidates []candidate
+
+	for _, dep := range blockerDeps {
+		if dep.Type != models.DepTypeBlocks {
+			continue
+		}
+		downstream, err := s.taskRepo.GetByID(dep.FromTaskID)
+		if err != nil {
+			continue
+		}
+		if !isTerminalStatus(downstream.Status) {
+			candidates = append(candidates, candidate{
+				id:       downstream.ID,
+				title:    downstream.Title,
+				priority: downstream.Priority,
+			})
+		}
+	}
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	// Pick the highest-priority (lowest number) candidate.
+	best := candidates[0]
+	for _, c := range candidates[1:] {
+		if c.priority < best.priority {
+			best = c
+		}
+	}
+
+	return &best.id, &best.title
 }
 
 // maybeCompleteParent checks if all children of the given parent task are in
@@ -314,7 +391,7 @@ func (s *TaskService) AddChildTask(parentID string, dto *dtos.AddChildTaskReques
 		Title:       dto.Title,
 		Description: dto.Description,
 		StationID:   dto.StationID,
-		Priority:    parent.Priority,
+		Priority:    2, // Default to P2 (Medium); callers can update after creation
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -371,7 +448,7 @@ func (s *TaskService) AddNote(taskID string, text string) (*models.Task, error) 
 	return task, nil
 }
 
-// ResumeTask resumes a paused task back to active status. Only the assigned user can resume it.
+// ResumeTask resumes a paused task back to active status.
 // Clears the PausedAt timestamp on resume.
 func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
@@ -381,10 +458,6 @@ func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task,
 
 	if task.Status != models.TaskStatusPaused {
 		return nil, fmt.Errorf("task %q cannot be resumed: status is %q, must be %q", taskID, task.Status, models.TaskStatusPaused)
-	}
-
-	if task.AssignedToID == nil || *task.AssignedToID != userID {
-		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
 	}
 
 	now := time.Now()
@@ -399,9 +472,9 @@ func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task,
 	return task, nil
 }
 
-// SkipTask marks a task as skipped. Only the assigned user can skip it (if assigned).
+// SkipTask marks a task as skipped.
 // Skipping a task triggers downstream readiness checks via maybeCompleteParent.
-// The task must not already be in a terminal status (done, skipped, cancelled).
+// The task must not already be in a terminal status (done, skipped, or cancelled).
 func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
@@ -410,11 +483,6 @@ func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, e
 
 	if isTerminalStatus(task.Status) {
 		return nil, fmt.Errorf("task %q cannot be skipped: status is %q (already terminal)", taskID, task.Status)
-	}
-
-	// If the task is assigned, only the assignee can skip it.
-	if task.AssignedToID != nil && *task.AssignedToID != userID {
-		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
 	}
 
 	now := time.Now()
@@ -436,8 +504,8 @@ func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, e
 	return task, nil
 }
 
-// PauseTask pauses an active task. Only the assigned user can pause it.
-// Returns an error if the task is not in "active" status or is not assigned to the user.
+// PauseTask pauses an active task.
+// Returns an error if the task is not in "active" status.
 func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
@@ -446,10 +514,6 @@ func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, 
 
 	if task.Status != models.TaskStatusActive {
 		return nil, fmt.Errorf("task %q cannot be paused: status is %q, must be %q", taskID, task.Status, models.TaskStatusActive)
-	}
-
-	if task.AssignedToID == nil || *task.AssignedToID != userID {
-		return nil, fmt.Errorf("task %q is not assigned to user %s", taskID, userID.String())
 	}
 
 	now := time.Now()

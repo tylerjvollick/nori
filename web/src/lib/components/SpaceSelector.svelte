@@ -5,7 +5,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
-	import { ChevronsUpDown, Check, Plus } from 'lucide-svelte';
+	import { ChevronsUpDown, Check, Plus } from '@lucide/svelte';
 	import type { User } from '$lib/api/auth';
 
 	let { user, onCreateSpace }: { user: User; onCreateSpace?: () => void } = $props();
@@ -30,7 +30,7 @@
 		}
 
 		// Navigate to the selected space
-		goto(`/spaces/${space.id}`);
+		goto(`/spaces/${space.slug}`);
 	}
 </script>
 

@@ -4,7 +4,7 @@
 // simulates the Nori API:
 //
 //	login -> recipe create --from-toml chair.toml -> recipe pour chair
-//	  -> ready -> task claim <id> -> task complete <id> -> (repeat)
+//	  -> ready -> task complete <id> -> (repeat)
 //
 // Run:
 //
@@ -673,13 +673,13 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 			return
 		}
 
-		// POST /api/v1/tasks/:id/claim
+		// POST /api/v1/tasks/:id/<action> (complete, pause, resume, skip)
 		if len(r.URL.Path) > len("/api/v1/tasks/") && r.Method == http.MethodPost {
 			rest := r.URL.Path[len("/api/v1/tasks/"):]
 
 			// Extract task ID and action.
-			// Paths: /api/v1/tasks/<id>/claim, /api/v1/tasks/<id>/complete
-			for _, action := range []string{"/claim", "/complete", "/pause", "/resume", "/skip"} {
+			// Paths: /api/v1/tasks/<id>/complete, /api/v1/tasks/<id>/pause, etc.
+			for _, action := range []string{"/complete", "/pause", "/resume", "/skip"} {
 				if idx := indexOf(rest, action); idx > 0 {
 					taskID := rest[:idx]
 					actionName := action[1:] // strip leading /
@@ -694,23 +694,11 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 					}
 
 					switch actionName {
-					case "claim":
-						if task.Status != "open" {
-							w.WriteHeader(http.StatusConflict)
-							json.NewEncoder(w).Encode(map[string]string{
-								"error": fmt.Sprintf("task %q cannot be claimed: status is %q, must be \"open\"", taskID, task.Status),
-							})
-							return
-						}
-						task.Status = "active"
-						assignee := state.userID
-						task.AssigneeID = &assignee
-
 					case "complete":
-						if task.Status != "active" {
+						if task.Status != "active" && task.Status != "open" {
 							w.WriteHeader(http.StatusConflict)
 							json.NewEncoder(w).Encode(map[string]string{
-								"error": fmt.Sprintf("task %q cannot be completed: status is %q, must be \"active\"", taskID, task.Status),
+								"error": fmt.Sprintf("task %q cannot be completed: status is %q, must be \"active\" or \"open\"", taskID, task.Status),
 							})
 							return
 						}
@@ -764,7 +752,7 @@ func toSlug(name string) string {
 // TestChairWorkflowE2E exercises the full CLI workflow end-to-end:
 //
 //	login -> recipe create --from-toml chair.toml -> recipe pour dining-chair
-//	  -> ready -> task claim <id> -> task complete <id> -> (repeat for N tasks)
+//	  -> ready -> task complete <id> -> (repeat for N tasks)
 //
 // This test uses a stateful mock HTTP server that tracks recipes, versions,
 // and tasks, validating the complete API call sequence.
@@ -908,9 +896,9 @@ func TestChairWorkflowE2E(t *testing.T) {
 	assert.True(t, readySteps["cut-seat-blank"], "cut-seat-blank should be ready")
 	state.mu.Unlock()
 
-	// ── Step 5: Claim and complete resaw-veneers (batch task) ────────────
+	// ── Step 5: Complete resaw-veneers (batch task) ─────────────────────
 
-	t.Log("Step 5: Claim and complete resaw-veneers (fan-out test)")
+	t.Log("Step 5: Complete resaw-veneers (fan-out test)")
 
 	state.mu.Lock()
 	resawTasks := state.findTasksByStep("resaw-veneers")
@@ -919,22 +907,13 @@ func TestChairWorkflowE2E(t *testing.T) {
 	assert.Equal(t, 6, resawTasks[0].Quantity, "resaw-veneers should have qty=6")
 	state.mu.Unlock()
 
-	// Claim it.
-	taskJSONFlag = false
-	err = runTaskClaim(taskClaimCmd, []string{resawID})
-	require.NoError(t, err, "claim resaw-veneers should succeed")
-
-	state.mu.Lock()
-	resawTask := state.findTask(resawID)
-	assert.Equal(t, "active", resawTask.Status, "resaw-veneers should be active after claim")
-	state.mu.Unlock()
-
 	// Complete it.
+	taskJSONFlag = false
 	err = runTaskComplete(taskCompleteCmd, []string{resawID})
 	require.NoError(t, err, "complete resaw-veneers should succeed")
 
 	state.mu.Lock()
-	resawTask = state.findTask(resawID)
+	resawTask := state.findTask(resawID)
 	assert.Equal(t, "done", resawTask.Status, "resaw-veneers should be done after complete")
 
 	// Verify fan-out: completing resaw-veneers (1 ticket) should unlock
@@ -964,9 +943,7 @@ func TestChairWorkflowE2E(t *testing.T) {
 	glueLam1ID := glueLamTasks[0].ID
 	state.mu.Unlock()
 
-	// Claim and complete glue-lamination ticket 1.
-	err = runTaskClaim(taskClaimCmd, []string{glueLam1ID})
-	require.NoError(t, err)
+	// Complete glue-lamination ticket 1.
 	err = runTaskComplete(taskCompleteCmd, []string{glueLam1ID})
 	require.NoError(t, err)
 
@@ -1004,8 +981,6 @@ func TestChairWorkflowE2E(t *testing.T) {
 			if task.Status == "done" {
 				continue // already completed (glue-lamination[1] done in step 6)
 			}
-			err = runTaskClaim(taskClaimCmd, []string{task.ID})
-			require.NoError(t, err, "claim %s should succeed", task.ID)
 			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
 			require.NoError(t, err, "complete %s should succeed", task.ID)
 		}
@@ -1028,8 +1003,6 @@ func TestChairWorkflowE2E(t *testing.T) {
 		state.mu.Unlock()
 
 		for _, task := range tasks {
-			err = runTaskClaim(taskClaimCmd, []string{task.ID})
-			require.NoError(t, err, "claim %s should succeed", task.ID)
 			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
 			require.NoError(t, err, "complete %s should succeed", task.ID)
 		}
@@ -1056,8 +1029,6 @@ func TestChairWorkflowE2E(t *testing.T) {
 		state.mu.Unlock()
 
 		for _, task := range tasks {
-			err = runTaskClaim(taskClaimCmd, []string{task.ID})
-			require.NoError(t, err, "claim %s should succeed", task.ID)
 			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
 			require.NoError(t, err, "complete %s should succeed", task.ID)
 		}
@@ -1073,8 +1044,6 @@ func TestChairWorkflowE2E(t *testing.T) {
 		state.mu.Unlock()
 
 		for _, task := range tasks {
-			err = runTaskClaim(taskClaimCmd, []string{task.ID})
-			require.NoError(t, err, "claim %s should succeed", task.ID)
 			err = runTaskComplete(taskCompleteCmd, []string{task.ID})
 			require.NoError(t, err, "complete %s should succeed", task.ID)
 		}
@@ -1103,8 +1072,6 @@ func TestChairWorkflowE2E(t *testing.T) {
 
 	// Complete all 6 install-seat tickets.
 	for _, task := range installTasks {
-		err = runTaskClaim(taskClaimCmd, []string{task.ID})
-		require.NoError(t, err, "claim %s should succeed", task.ID)
 		err = runTaskComplete(taskCompleteCmd, []string{task.ID})
 		require.NoError(t, err, "complete %s should succeed", task.ID)
 	}
@@ -1176,7 +1143,7 @@ func TestChairWorkflowE2E(t *testing.T) {
 	t.Logf("  - Verified 4 ready tasks (stream starts)")
 	t.Logf("  - Verified fan-out: resaw-veneers → 6 glue-lamination tickets")
 	t.Logf("  - Verified 1:1: glue-lamination[1] → true-up-edge[1]")
-	t.Logf("  - Completed all 75 tasks through claim/complete workflow")
+	t.Logf("  - Completed all 75 tasks through complete workflow")
 	t.Logf("  - Verified fan-in: 6 install-seat → done milestone")
 	t.Logf("  - Total API calls: %d", len(calls))
 }
@@ -1299,46 +1266,6 @@ func TestChairWorkflowE2E_PourWithoutPublish(t *testing.T) {
 	err := runRecipePour(recipePourCmd, []string{"test-recipe"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no published version")
-}
-
-// TestChairWorkflowE2E_ClaimAlreadyActiveFails verifies that claiming an
-// already-active task returns an error.
-func TestChairWorkflowE2E_ClaimAlreadyActiveFails(t *testing.T) {
-	state := newMockState()
-	server := newMockServer(t, state)
-	defer server.Close()
-
-	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
-	defer cli.SetIsInteractiveFunc(origFunc)
-
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	creds := &cli.Credentials{
-		ServerURL:   server.URL,
-		AccessToken: state.validToken,
-		UserID:      state.userID,
-		UserEmail:   state.userEmail,
-		SpaceID:     state.spaceID,
-	}
-	require.NoError(t, cli.SaveCredentials(creds))
-
-	// Add a task that's already active.
-	state.mu.Lock()
-	assignee := state.userID
-	state.tasks = append(state.tasks, mockTask{
-		ID:         "task-001",
-		Title:      "Already active",
-		Status:     "active",
-		Type:       "task",
-		AssigneeID: &assignee,
-	})
-	state.mu.Unlock()
-
-	taskJSONFlag = false
-	err := runTaskClaim(taskClaimCmd, []string{"task-001"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be claimed")
 }
 
 // findChairTOML locates the chair.toml seed file relative to the test.

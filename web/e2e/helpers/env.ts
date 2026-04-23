@@ -9,7 +9,7 @@
  *   NORI_TEST_EMAIL      — dedicated e2e test user (default: e2e-test@nori.dev)
  *   NORI_TEST_PASSWORD   — password for the test user  (default: TestPass123!)
  *   NORI_TEST_BASE_URL   — SvelteKit dev server  (default: http://localhost:5173)
- *   NORI_TEST_API_URL    — Go backend API         (default: http://localhost:8080)
+ *   NORI_TEST_API_URL    — Go backend API         (default: http://localhost:8081)
  */
 export const env = {
   /** Admin email — needed to bootstrap the test user. */
@@ -25,5 +25,5 @@ export const env = {
   /** Base URL of the SvelteKit dev server. */
   baseURL: process.env.NORI_TEST_BASE_URL ?? 'http://localhost:5173',
   /** Base URL of the Go backend API. */
-  apiURL: process.env.NORI_TEST_API_URL ?? 'http://localhost:8080',
+  apiURL: process.env.NORI_TEST_API_URL ?? 'http://localhost:8081',
 };

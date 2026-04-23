@@ -6,6 +6,8 @@ import type {
 	UpdateTaskRequest,
 	AddChildTaskRequest,
 	AddNoteRequest,
+	CompleteTaskRequest,
+	CompleteTaskResponse,
 } from '$lib/types/task';
 import { apiClient } from './client';
 
@@ -73,12 +75,12 @@ class TaskApi {
 		return apiClient.delete<void>(`${BASE}/${id}`);
 	}
 
-	async claimTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/claim`);
+	async startTask(id: string): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`${BASE}/${id}/start`);
 	}
 
-	async completeTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/complete`);
+	async completeTask(id: string, data?: CompleteTaskRequest): Promise<CompleteTaskResponse> {
+		return apiClient.post<CompleteTaskResponse>(`${BASE}/${id}/complete`, data);
 	}
 
 	async pauseTask(id: string): Promise<TaskResponse> {

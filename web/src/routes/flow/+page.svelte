@@ -1,24 +1,27 @@
 <script lang="ts">
-	import { page } from '$app/stores';
-	import BoardView from '$lib/components/flow/BoardView.svelte';
-	import GraphView from '$lib/components/flow/GraphView.svelte';
-	import ListView from '$lib/components/flow/ListView.svelte';
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { spaceStore } from '$lib/stores/space';
+	import LoadingPage from '$lib/components/LoadingPage.svelte';
 
-	// ---- View mode ----
-	type ViewMode = 'board' | 'graph' | 'list';
-	let currentView = $derived<ViewMode>(
-		(($page.url.searchParams.get('view') as ViewMode) || 'board') as ViewMode,
-	);
+	/**
+	 * Legacy /flow route — redirects to the user's first space.
+	 * Kept for backwards compatibility with bookmarks and external links.
+	 */
+	onMount(async () => {
+		// Load spaces if not already loaded
+		if ($spaceStore.recentSpaces.length === 0) {
+			await spaceStore.loadRecentSpaces();
+		}
+
+		const spaces = $spaceStore.recentSpaces;
+		if (spaces.length > 0 && spaces[0].slug) {
+			goto(`/spaces/${spaces[0].slug}`, { replaceState: true });
+		} else {
+			// No spaces available — go to dashboard
+			goto('/', { replaceState: true });
+		}
+	});
 </script>
 
-<svelte:head>
-	<title>Flow - Nori</title>
-</svelte:head>
-
-{#if currentView === 'board'}
-	<BoardView />
-{:else if currentView === 'graph'}
-	<GraphView />
-{:else if currentView === 'list'}
-	<ListView />
-{/if}
+<LoadingPage message="Redirecting..." />

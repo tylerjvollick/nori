@@ -18,6 +18,7 @@ export interface LoginResponse {
 export interface Space {
   id: string;
   name: string;
+  slug: string;
   accountId: string;
   isDefault: boolean;
   createdAt: string;

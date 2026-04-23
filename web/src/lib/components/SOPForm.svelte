@@ -3,7 +3,7 @@
   import CollapsibleStep from '$lib/components/CollapsibleStep.svelte';
   import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
   import { Button } from '$lib/components/ui/button';
-  import { ChevronDown } from 'lucide-svelte';
+  import { ChevronDown } from '@lucide/svelte';
   
   interface SOPFormProps {
     onSubmit: (data: {

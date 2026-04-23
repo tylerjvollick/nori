@@ -38,13 +38,18 @@ func newMockSpaceService() *mockSpaceService {
 	}
 }
 
-func (m *mockSpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO) (*models.Space, error) {
+func (m *mockSpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO, creatorUserID uuid.UUID) (*models.Space, error) {
 	if m.createErr != nil {
 		return nil, m.createErr
+	}
+	slug := "TST"
+	if dto.Slug != nil && *dto.Slug != "" {
+		slug = *dto.Slug
 	}
 	space := &models.Space{
 		ID:        uuid.New(),
 		Name:      dto.Name,
+		Slug:      slug,
 		AccountID: accountID,
 		IsDefault: false,
 		CreatedAt: time.Now(),
@@ -66,6 +71,18 @@ func (m *mockSpaceService) GetSpaceByID(spaceID uuid.UUID, accountID uuid.UUID) 
 		return nil, errors.New("unauthorized access to space")
 	}
 	return space, nil
+}
+
+func (m *mockSpaceService) GetSpaceBySlug(slug string, accountID uuid.UUID) (*models.Space, error) {
+	if m.getByIDErr != nil {
+		return nil, m.getByIDErr
+	}
+	for _, space := range m.spaces {
+		if space.Slug == slug && space.AccountID == accountID {
+			return space, nil
+		}
+	}
+	return nil, errors.New("space not found")
 }
 
 func (m *mockSpaceService) GetSpacesByAccountID(accountID uuid.UUID) ([]models.Space, error) {
@@ -603,6 +620,7 @@ func TestSpaceRoutes_AllRegistered(t *testing.T) {
 		{"POST", "/api/spaces"},
 		{"GET", "/api/spaces"},
 		{"GET", "/api/spaces/recent"},
+		{"GET", "/api/spaces/by-slug/:slug"},
 		{"GET", "/api/spaces/:id"},
 		{"PUT", "/api/spaces/:id"},
 		{"DELETE", "/api/spaces/:id"},

@@ -24,7 +24,7 @@ func TestTaskCommandRegistered(t *testing.T) {
 }
 
 func TestTaskSubcommandsRegistered(t *testing.T) {
-	subcommands := map[string]bool{"claim": false, "complete": false, "pause": false, "resume": false, "skip": false, "add": false, "note": false}
+	subcommands := map[string]bool{"start": false, "complete": false, "pause": false, "resume": false, "skip": false, "add": false, "note": false}
 	for _, cmd := range taskCmd.Commands() {
 		if _, ok := subcommands[cmd.Name()]; ok {
 			subcommands[cmd.Name()] = true
@@ -72,50 +72,33 @@ func setupCredentials(t *testing.T, serverURL string) {
 	require.NoError(t, cli.SaveCredentials(creds))
 }
 
-// --- Claim Tests ---
+// --- Start Tests ---
 
-func TestRunTaskClaim_Success(t *testing.T) {
+func TestRunTaskStart_Success(t *testing.T) {
 	resp := taskActionResponse{
 		ID:     "shop-a1.1",
 		Title:  "Cut mortises",
 		Status: "active",
 	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/claim", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/start", http.MethodPost, resp, http.StatusOK)
 	setupCredentials(t, server.URL)
 
-	err := runTaskClaim(taskClaimCmd, []string{"shop-a1.1"})
+	err := runTaskStart(taskStartCmd, []string{"shop-a1.1"})
 	require.NoError(t, err)
 }
 
-func TestRunTaskClaim_Conflict(t *testing.T) {
+func TestRunTaskStart_Conflict(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/claim",
+		"/api/v1/tasks/shop-a1.1/start",
 		http.MethodPost,
-		errorResponse{Error: `task "shop-a1.1" cannot be claimed: status is "active", must be "open"`},
+		errorResponse{Error: `task "shop-a1.1" cannot be started: status is "active", must be "open"`},
 		http.StatusConflict,
 	)
 	setupCredentials(t, server.URL)
 
-	err := runTaskClaim(taskClaimCmd, []string{"shop-a1.1"})
+	err := runTaskStart(taskStartCmd, []string{"shop-a1.1"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be claimed")
-}
-
-func TestRunTaskClaim_Unauthorized(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(errorResponse{Error: "invalid credentials"})
-	}))
-	defer server.Close()
-
-	setupCredentials(t, server.URL)
-
-	origFunc := cli.SetIsInteractiveFunc(func() bool { return false })
-	defer cli.SetIsInteractiveFunc(origFunc)
-
-	err := runTaskClaim(taskClaimCmd, []string{"shop-a1.1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "authentication expired or invalid")
+	assert.Contains(t, err.Error(), "cannot be started")
 }
 
 // --- Complete Tests ---
@@ -240,7 +223,7 @@ func TestRunTaskAction_NoCredentials(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	err := runTaskClaim(taskClaimCmd, []string{"shop-a1.1"})
+	err := runTaskComplete(taskCompleteCmd, []string{"shop-a1.1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not logged in")
 }
@@ -249,14 +232,14 @@ func TestRunTaskAction_NoCredentials(t *testing.T) {
 
 func TestRunTaskAction_ServerError(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/claim",
+		"/api/v1/tasks/shop-a1.1/complete",
 		http.MethodPost,
 		errorResponse{Error: "database error"},
 		http.StatusInternalServerError,
 	)
 	setupCredentials(t, server.URL)
 
-	err := runTaskClaim(taskClaimCmd, []string{"shop-a1.1"})
+	err := runTaskComplete(taskCompleteCmd, []string{"shop-a1.1"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "database error")
 }

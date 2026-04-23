@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { Users, Key, LayoutGrid } from 'lucide-svelte';
+	import { Users, Key, LayoutGrid } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 
 	let { children } = $props();

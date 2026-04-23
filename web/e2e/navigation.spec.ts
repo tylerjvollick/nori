@@ -3,10 +3,11 @@ import { test, expect } from '@playwright/test';
 test.describe('Navigation — authenticated pages', () => {
   // Uses storageState from globalSetup automatically
 
-  test('/flow loads without error', async ({ page }) => {
+  test('/flow redirects to a space', async ({ page }) => {
     const response = await page.goto('/flow');
     expect(response?.status()).toBeLessThan(400);
-    await expect(page).toHaveURL(/\/flow/);
+    // /flow now redirects to /spaces/:slug
+    await page.waitForURL(/\/spaces\/[A-Z]{2,5}/, { timeout: 5_000 });
     // Page should render some meaningful content (not a blank white screen)
     await expect(page.locator('body')).not.toBeEmpty();
     // Should not show SvelteKit error page

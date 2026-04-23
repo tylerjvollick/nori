@@ -6,7 +6,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
-	import { Plus, Pencil, Trash2, Shield, User as UserIcon } from 'lucide-svelte';
+	import { Plus, Pencil, Trash2, Shield, User as UserIcon } from '@lucide/svelte';
 
 	let users = $state<AdminUser[]>([]);
 	let isLoading = $state(true);

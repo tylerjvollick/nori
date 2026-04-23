@@ -66,6 +66,7 @@ export interface UpdateTaskRequest {
 	stationId?: string;
 	priority?: number;
 	status?: TaskStatus;
+	assignedToId?: string; // UUID string to assign, empty string to unassign
 }
 
 export interface AddChildTaskRequest {
@@ -82,3 +83,16 @@ export interface AddNoteRequest {
 
 /** Tasks returned by GET /tasks/ready have the same shape as TaskResponse. */
 export type ReadyTask = TaskResponse;
+
+// --- Completion flow types ---
+
+/** Request body for POST /tasks/:id/complete. All fields optional. */
+export interface CompleteTaskRequest {
+	actualTimeSeconds?: number;
+}
+
+/** Response from POST /tasks/:id/complete. Extends TaskResponse with navigation hints. */
+export interface CompleteTaskResponse extends TaskResponse {
+	nextTaskId?: string | null;
+	nextTaskTitle?: string | null;
+}

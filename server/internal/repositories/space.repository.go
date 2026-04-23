@@ -65,3 +65,23 @@ func (r *SpaceRepository) CountByAccountID(accountID uuid.UUID) (int64, error) {
 	err := r.db.Model(&models.Space{}).Where("account_id = ?", accountID).Count(&count).Error
 	return count, err
 }
+
+// FindBySlugAndAccountID retrieves a space by slug within an account
+func (r *SpaceRepository) FindBySlugAndAccountID(slug string, accountID uuid.UUID) (*models.Space, error) {
+	var space models.Space
+	err := r.db.Where("slug = ? AND account_id = ?", slug, accountID).First(&space).Error
+	if err != nil {
+		return nil, err
+	}
+	return &space, nil
+}
+
+// SlugExistsInAccount checks if a slug already exists for the given account
+func (r *SpaceRepository) SlugExistsInAccount(slug string, accountID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.Model(&models.Space{}).Where("slug = ? AND account_id = ?", slug, accountID).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}

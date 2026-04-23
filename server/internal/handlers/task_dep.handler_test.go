@@ -51,10 +51,9 @@ func (m *mockTaskDepRepo) GetBlockers(taskID string) ([]models.TaskDep, error) {
 	}
 	var result []models.TaskDep
 	for _, d := range m.deps {
-		if d.ToTaskID == taskID && d.Type == models.DepTypeBlocks {
-			// Actually, GetBlockers returns where to_task_id = taskID
-			// Wait: the repo returns deps where to_task_id = taskID AND type = blocks
-			// But in our mock we simulate blockers = tasks blocking taskID
+		// GetBlockers queries WHERE from_task_id = taskID AND type = 'blocks'.
+		// FromTaskID = the blocked/downstream task, so this returns deps where taskID is blocked.
+		if d.FromTaskID == taskID && d.Type == models.DepTypeBlocks {
 			result = append(result, d)
 		}
 	}
@@ -67,7 +66,9 @@ func (m *mockTaskDepRepo) GetDependents(taskID string) ([]models.TaskDep, error)
 	}
 	var result []models.TaskDep
 	for _, d := range m.deps {
-		if d.FromTaskID == taskID {
+		// GetDependents queries WHERE to_task_id = taskID.
+		// ToTaskID = the blocker/upstream task, so this returns deps where taskID is depended upon.
+		if d.ToTaskID == taskID {
 			result = append(result, d)
 		}
 	}
@@ -157,11 +158,11 @@ func TestGetDeps_Success(t *testing.T) {
 
 	var result dtos.TaskDepsResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	// blockers = where to_task_id = taskID, but our mock dep has ToTaskID=blockerTaskID, so 0 blockers
-	// dependents = where from_task_id = taskID, which matches our dep
-	assert.Len(t, result.Blockers, 0)
-	assert.Len(t, result.Dependents, 1)
-	assert.Equal(t, blockerTaskID, result.Dependents[0].ToTaskID)
+	// GetBlockers matches from_task_id = taskID: our dep has FromTaskID=taskID, so 1 blocker
+	// GetDependents matches to_task_id = taskID: our dep has ToTaskID=blockerTaskID, so 0 dependents
+	assert.Len(t, result.Blockers, 1)
+	assert.Equal(t, blockerTaskID, result.Blockers[0].ToTaskID)
+	assert.Len(t, result.Dependents, 0)
 }
 
 func TestGetDeps_WithBlockers(t *testing.T) {
@@ -170,12 +171,13 @@ func TestGetDeps_WithBlockers(t *testing.T) {
 
 	depRepo := newMockTaskDepRepo()
 	// This dep means: taskID is blocked by "other-task"
-	// GetBlockers(taskID) returns where to_task_id = taskID AND type = blocks
+	// In the data model: FromTaskID = blocked/downstream task, ToTaskID = blocker/upstream task
+	// GetBlockers(taskID) queries WHERE from_task_id = taskID AND type = blocks
 	depRepo.deps = []models.TaskDep{
 		{
 			ID:         uuid.New(),
-			FromTaskID: "other-task",
-			ToTaskID:   taskID,
+			FromTaskID: taskID,
+			ToTaskID:   "other-task",
 			Type:       models.DepTypeBlocks,
 			CreatedAt:  time.Now(),
 		},
@@ -197,7 +199,7 @@ func TestGetDeps_WithBlockers(t *testing.T) {
 	var result dtos.TaskDepsResponse
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.Len(t, result.Blockers, 1)
-	assert.Equal(t, taskID, result.Blockers[0].ToTaskID)
+	assert.Equal(t, taskID, result.Blockers[0].FromTaskID)
 	assert.Len(t, result.Dependents, 0)
 }
 

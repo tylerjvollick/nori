@@ -8,7 +8,6 @@
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
-	import SpaceSelector from '$lib/components/SpaceSelector.svelte';
 	import {
 		LayoutGrid,
 		FileText,
@@ -22,10 +21,14 @@
 		User as UserIcon,
 		Settings,
 		Users,
-		Key,
-		ListChecks
-	} from 'lucide-svelte';
+		Key
+	} from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Alert from '$lib/components/ui/alert';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { CircleAlert } from '@lucide/svelte';
 	import type { ComponentProps } from 'svelte';
 	import type { User } from '$lib/api/auth';
 
@@ -39,7 +42,32 @@
 	let user = $state<User | null>(null);
 	let showCreateDialog = $state(false);
 	let newSpaceName = $state('');
+	let newSpaceSlug = $state('');
+	let slugTouched = $state(false);
 	let isCreating = $state(false);
+
+	/** Auto-generate a slug from the space name (matches backend logic). */
+	function generateSlug(name: string): string {
+		const trimmed = name.trim();
+		if (!trimmed) return '';
+		const words = trimmed.split(/\s+/);
+		let slug: string;
+		if (words.length >= 2) {
+			// Take first letter of each word (up to 5)
+			slug = words.slice(0, 5).map((w) => w[0]).join('');
+		} else {
+			// Single word — take first 3 chars
+			slug = trimmed.slice(0, 3);
+		}
+		return slug.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 5);
+	}
+
+	// Auto-update slug when name changes (unless user manually edited the slug)
+	$effect(() => {
+		if (!slugTouched) {
+			newSpaceSlug = generateSlug(newSpaceName);
+		}
+	});
 
 	// Server-provided user with accessibleSpaces (always fresh from hooks.server.ts)
 	let pageUser = $derived($page.data.user);
@@ -57,24 +85,25 @@
 	});
 
 	function isActive(href: string): boolean {
-		if (typeof window === 'undefined') return false;
-		return (
-			window.location.pathname === href || window.location.pathname.startsWith(href + '/')
-		);
+		const pathname = $page.url.pathname;
+		return pathname === href || pathname.startsWith(href + '/');
 	}
 
 	async function handleCreateSpace() {
 		if (!newSpaceName.trim() || isCreating) return;
 
 		isCreating = true;
-		const space = await spaceStore.createSpace(newSpaceName.trim());
+		const slugToSend = newSpaceSlug.trim() || undefined;
+		const space = await spaceStore.createSpace(newSpaceName.trim(), slugToSend);
 		isCreating = false;
 
 		if (space) {
 			newSpaceName = '';
+			newSpaceSlug = '';
+			slugTouched = false;
 			showCreateDialog = false;
 			spaceStore.loadRecentSpaces();
-			goto(`/spaces/${space.id}`);
+			goto(`/spaces/${space.slug}`);
 		}
 	}
 
@@ -88,12 +117,6 @@
 
 	// Navigation structure
 	const navMain = [
-		{
-			title: 'Flow',
-			url: '/flow',
-			icon: ListChecks,
-			isActive: isActive('/flow')
-		},
 		{
 			title: 'SOPs',
 			url: '/sops',
@@ -136,28 +159,14 @@
 
 <Sidebar.Root {collapsible} {...restProps} bind:ref>
 	<Sidebar.Header>
-		{#if pageUser}
-			<SpaceSelector user={pageUser} onCreateSpace={() => (showCreateDialog = true)} />
-		{:else}
-			<div class="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center h-(--header-height)">
-				<div class="size-10 bg-sidebar-primary rounded-lg flex items-center justify-center shrink-0">
-					<svg
-						class="size-6 text-sidebar-primary-foreground"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M13 10V3L4 14h7v7l9-11h-7z"
-						/>
-					</svg>
-				</div>
-				<span class="font-bold text-sidebar-foreground group-data-[collapsible=icon]:hidden">Nori</span>
-			</div>
-		{/if}
+		<div class="flex items-center gap-2 px-2 group-data-[collapsible=icon]:justify-center h-(--header-height)">
+			<img
+				src="/nori_logo.png"
+				alt="Nori"
+				class="size-8 shrink-0 rounded-lg"
+			/>
+			<span class="font-bold text-lg text-sidebar-foreground group-data-[collapsible=icon]:hidden">Nori</span>
+		</div>
 	</Sidebar.Header>
 
 	<Sidebar.Content>
@@ -193,11 +202,11 @@
 										{#each spaces as space (space.id)}
 											<Sidebar.MenuSubItem>
 												<Sidebar.MenuSubButton
-													isActive={isActive(`/spaces/${space.id}`)}
-													onclick={() => goto(`/spaces/${space.id}`)}
+													isActive={isActive(`/spaces/${space.slug}`)}
+													onclick={() => goto(`/spaces/${space.slug}`)}
 												>
 													{#snippet child({ props })}
-														<a href={`/spaces/${space.id}`} {...props}>
+														<a href={`/spaces/${space.slug}`} {...props}>
 															<Folder />
 															<span>{space.name}</span>
 														</a>
@@ -366,54 +375,74 @@
 </Sidebar.Root>
 
 <!-- Create Space Dialog -->
-{#if showCreateDialog}
-	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-		<div class="bg-card rounded-lg shadow-xl max-w-md w-full p-6">
-			<h2 class="text-xl font-semibold text-card-foreground mb-4">Create New Space</h2>
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					handleCreateSpace();
-				}}
-			>
-				<div class="mb-4">
-					<label for="space-name" class="block text-sm font-medium text-foreground mb-2">
-						Space Name
-					</label>
-					<input
+<Dialog.Root bind:open={showCreateDialog} onOpenChange={(open) => {
+	if (!open) {
+		newSpaceName = '';
+		newSpaceSlug = '';
+		slugTouched = false;
+		spaceStore.clearError();
+	}
+}}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Create New Space</Dialog.Title>
+			<Dialog.Description>Add a new workspace for your team.</Dialog.Description>
+		</Dialog.Header>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleCreateSpace();
+			}}
+		>
+			<div class="grid gap-4 py-2">
+				<div class="grid gap-2">
+					<Label for="space-name">Space Name</Label>
+					<Input
 						id="space-name"
 						type="text"
 						bind:value={newSpaceName}
 						placeholder="e.g., Marketing, Engineering, HR"
-						class="w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+						disabled={isCreating}
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label for="space-slug">Slug</Label>
+					<p class="text-xs text-muted-foreground">
+						2-5 uppercase letters used in URLs. Auto-generated from the name.
+					</p>
+					<Input
+						id="space-slug"
+						type="text"
+						bind:value={newSpaceSlug}
+						oninput={() => (slugTouched = true)}
+						placeholder="e.g., MKT, ENG, HR"
+						maxlength={5}
+						class="font-mono uppercase placeholder:normal-case"
 						disabled={isCreating}
 					/>
 				</div>
 				{#if $spaceStore.error}
-					<div
-						class="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive"
-					>
-						{$spaceStore.error}
-					</div>
+					<Alert.Root variant="destructive">
+						<CircleAlert class="size-4" />
+						<Alert.Description>{$spaceStore.error}</Alert.Description>
+					</Alert.Root>
 				{/if}
-				<div class="flex gap-3 justify-end">
-					<Button
-						type="button"
-						variant="outline"
-						onclick={() => {
-							showCreateDialog = false;
-							newSpaceName = '';
-							spaceStore.clearError();
-						}}
-						disabled={isCreating}
-					>
-						Cancel
-					</Button>
-					<Button type="submit" disabled={!newSpaceName.trim() || isCreating}>
-						{isCreating ? 'Creating...' : 'Create Space'}
-					</Button>
-				</div>
-			</form>
-		</div>
-	</div>
-{/if}
+			</div>
+			<Dialog.Footer class="pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => {
+						showCreateDialog = false;
+					}}
+					disabled={isCreating}
+				>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={!newSpaceName.trim() || isCreating}>
+					{isCreating ? 'Creating...' : 'Create Space'}
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

@@ -276,7 +276,7 @@ func (s *AuthService) CreateUser(firstName, lastName, email, password string, cr
 		}
 
 		// Create default space for the account
-		_, err = s.spaceService.CreateDefaultSpace(defaultAccount.ID)
+		_, err = s.spaceService.CreateDefaultSpace(defaultAccount.ID, user.ID)
 		if err != nil {
 			log.Printf("Failed to create default space for account %s: %v", defaultAccount.ID, err)
 			return nil, err

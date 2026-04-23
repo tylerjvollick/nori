@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"log"
+	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
@@ -23,8 +24,13 @@ var serveCmd = &cobra.Command{
 			log.Fatalf("Failed to load configuration: %v", err)
 		}
 
+		port := os.Getenv("NORI_PORT")
+		if port == "" {
+			port = "8080"
+		}
+
 		a := app.New(cfg)
-		log.Fatal(a.Fiber.Listen(":8080"))
+		log.Fatal(a.Fiber.Listen(":" + port))
 	},
 }
 

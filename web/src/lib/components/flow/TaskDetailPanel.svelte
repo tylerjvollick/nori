@@ -1,8 +1,16 @@
 <script lang="ts">
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
-	import type { TaskResponse, TaskDep } from '$lib/types/task';
+	import type { TaskResponse } from '$lib/types/task';
+	import type { CompleteTaskResponse } from '$lib/types/task';
+	import { spaceMembersStore } from '$lib/stores/spaceMembers';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
+	import { Progress } from '$lib/components/ui/progress';
+	import { Skeleton } from '$lib/components/ui/skeleton';
+	import * as Avatar from '$lib/components/ui/avatar';
 	import {
 		Circle,
 		CircleDot,
@@ -16,18 +24,26 @@
 		Link as LinkIcon,
 		ArrowRight,
 		ArrowLeft,
-	} from 'lucide-svelte';
+		ChevronRight,
+	} from '@lucide/svelte';
+	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
-		task: TaskTreeResponse;
-		stationMap: Map<string, string>;
+		task?: TaskTreeResponse;
+		stationMap?: Map<string, string>;
 		deps?: TaskDepsResponse | null;
 		/** Called after a successful task action with the updated task */
 		onaction?: (updated: TaskResponse) => void;
+		/** Called after completion with navigation info (next task ID). */
+		oncomplete?: (response: CompleteTaskResponse) => void;
+		/** When true, show skeleton placeholders instead of task data */
+		isLoading?: boolean;
 	}
 
-	let { task, stationMap, deps = null, onaction }: Props = $props();
+	let { task, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false }: Props = $props();
+
+	let slug = $derived($page.params.slug);
 
 	// --- Helpers ---
 
@@ -88,14 +104,6 @@
 		return stationMap.get(stationId) ?? stationId.slice(0, 8);
 	}
 
-	function formatDuration(seconds: number): string {
-		if (seconds === 0) return '--';
-		const h = Math.floor(seconds / 3600);
-		const m = Math.floor((seconds % 3600) / 60);
-		if (h > 0) return `${h}h ${m}m`;
-		return `${m}m`;
-	}
-
 	function formatDate(dateStr: string | null | undefined): string {
 		if (!dateStr) return '--';
 		return new Date(dateStr).toLocaleDateString(undefined, {
@@ -127,9 +135,70 @@
 		return { done, total: node.children.length };
 	}
 
-	let progress = $derived(computeProgress(task));
-	let statusCfg = $derived(getStatusConfig(task.status));
-	let station = $derived(getStationName(task.stationId));
+	// --- Space members for assignee display ---
+
+	let members = $derived($spaceMembersStore.members);
+
+	/** Get initials for a user. Falls back to first char of email. */
+	function getInitials(user: { firstName?: string; lastName?: string; email: string }): string {
+		if (user.firstName && user.lastName) {
+			return `${user.firstName[0]}${user.lastName[0]}`.toUpperCase();
+		}
+		if (user.firstName) {
+			return user.firstName[0].toUpperCase();
+		}
+		return user.email[0].toUpperCase();
+	}
+
+	/** Get display name for a user. */
+	function getDisplayName(user: { firstName?: string; lastName?: string; email: string }): string {
+		if (user.firstName && user.lastName) {
+			return `${user.firstName} ${user.lastName}`;
+		}
+		if (user.firstName) {
+			return user.firstName;
+		}
+		return user.email;
+	}
+
+	/** Find the assigned member from the members list. */
+	let assignedMember = $derived(
+		task?.assignedToId
+			? members.find((m) => m.userId === task.assignedToId)
+			: null,
+	);
+
+	let assignedInitials = $derived(
+		assignedMember ? getInitials(assignedMember.user) : null,
+	);
+
+	let assignedDisplayName = $derived(
+		assignedMember ? getDisplayName(assignedMember.user) : null,
+	);
+
+	// --- Forward navigation ---
+
+	/**
+	 * The first dependent (successor) task ID, used for the "Next" button.
+	 * In deps.dependents: fromTaskId = the downstream task, toTaskId = this task (upstream/blocker).
+	 * GetDependents queries WHERE to_task_id = currentTask, so fromTaskId is the successor.
+	 */
+	let nextTaskId = $derived.by((): string | null => {
+		if (!deps || deps.dependents.length === 0) return null;
+		return deps.dependents[0].fromTaskId;
+	});
+
+	function navigateToNextTask(): void {
+		if (nextTaskId) {
+			goto(`/spaces/${slug}/${nextTaskId}`);
+		}
+	}
+
+	// --- Derived state (safe when task is undefined during loading) ---
+
+	let progress = $derived(task ? computeProgress(task) : { done: 0, total: 0 });
+	let statusCfg = $derived(task ? getStatusConfig(task.status) : getStatusConfig('open'));
+	let station = $derived(task ? getStationName(task.stationId) : null);
 </script>
 
 {#snippet statusIcon(status: string, sizeClass: string)}
@@ -150,193 +219,272 @@
 {/snippet}
 
 <div class="p-6 space-y-5">
-	<!-- Header: title, ID, type -->
-	<div>
-		<div class="flex items-center gap-2 mb-2">
-			<Badge variant="outline" class="text-xs font-mono">
-				{task.id}
-			</Badge>
-			<Badge variant="outline" class="text-xs">
-				{typeLabel(task.type)}
-			</Badge>
-		</div>
-		<h2 class="text-lg font-semibold text-foreground">{task.title}</h2>
-		{#if task.description}
-			<p class="text-sm text-muted-foreground mt-1">{task.description}</p>
-		{/if}
-	</div>
-
-	<!-- Action buttons -->
-	<TaskActions {task} layout="bar" {onaction} />
-
-	<Separator />
-
-	<!-- Core metadata -->
-	<div class="space-y-3">
-		<!-- Status -->
-		<div class="flex items-center justify-between">
-			<span class="text-sm text-muted-foreground">Status</span>
-			<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
-				{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
-				{statusCfg.label}
-			</Badge>
+	{#if isLoading || !task}
+		<!-- Skeleton loading state -->
+		<div>
+			<div class="flex items-center gap-2 mb-2">
+				<Skeleton class="h-5 w-20 rounded" />
+				<Skeleton class="h-5 w-14 rounded" />
+			</div>
+			<Skeleton class="h-6 w-3/4 rounded" />
+			<Skeleton class="h-4 w-1/2 mt-1 rounded" />
 		</div>
 
-		<!-- Priority -->
-		<div class="flex items-center justify-between">
-			<span class="text-sm text-muted-foreground">Priority</span>
-			<Badge variant={priorityBadgeVariant(task.priority)}>
-				{priorityLabel(task.priority)}
-			</Badge>
-		</div>
+		<Skeleton class="h-8 w-full rounded" />
 
-		<!-- Station -->
-		{#if station}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Station</span>
-				<span class="text-sm text-foreground">{station}</span>
-			</div>
-		{/if}
-
-		<!-- Assignee -->
-		{#if task.assignedToId}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Assigned To</span>
-				<span class="text-sm text-foreground font-mono flex items-center gap-1">
-					<User class="w-3 h-3" />
-					{task.assignedToId.slice(0, 8)}
-				</span>
-			</div>
-		{/if}
-
-		<!-- Quantity -->
-		{#if task.quantity > 1}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Quantity</span>
-				<span class="text-sm text-foreground">{task.quantity}</span>
-			</div>
-		{/if}
-
-		<!-- Recipe link -->
-		{#if task.recipeId}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Recipe</span>
-				<span class="text-sm text-foreground font-mono flex items-center gap-1">
-					<LinkIcon class="w-3 h-3" />
-					{task.recipeId.slice(0, 8)}
-				</span>
-			</div>
-		{/if}
-	</div>
-
-	<Separator />
-
-	<!-- Time data -->
-	<div class="space-y-3">
-		<h4 class="text-sm font-medium text-foreground">Time</h4>
-
-		<div class="flex items-center justify-between">
-			<span class="text-sm text-muted-foreground">Actual Time</span>
-			<span class="text-sm text-foreground flex items-center gap-1">
-				<Clock class="w-3 h-3 text-muted-foreground" />
-				{formatDuration(task.actualTimeSeconds)}
-			</span>
-		</div>
-
-		{#if task.startedAt}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Started</span>
-				<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
-			</div>
-		{/if}
-
-		{#if task.completedAt}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Completed</span>
-				<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
-			</div>
-		{/if}
-
-		{#if task.dueDate}
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Due Date</span>
-				<span class="text-sm text-foreground flex items-center gap-1">
-					<Calendar class="w-3 h-3 text-muted-foreground" />
-					{formatDate(task.dueDate)}
-				</span>
-			</div>
-		{/if}
-	</div>
-
-	<!-- Children progress -->
-	{#if progress.total > 0}
 		<Separator />
-		<div class="space-y-2">
-			<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
-			<div class="flex items-center justify-between text-sm text-muted-foreground">
-				<span>{progress.done} of {progress.total} complete</span>
-				<span>{Math.round((progress.done / progress.total) * 100)}%</span>
-			</div>
-			<div class="h-2 bg-muted rounded-full overflow-hidden">
-				<div
-					class="h-full bg-green-500 transition-all duration-300"
-					style="width: {(progress.done / progress.total) * 100}%"
-				></div>
-			</div>
-		</div>
-	{/if}
 
-	<!-- Dependencies -->
-	{#if deps && (deps.blockers.length > 0 || deps.dependents.length > 0)}
-		<Separator />
 		<div class="space-y-3">
-			<h4 class="text-sm font-medium text-foreground">Dependencies</h4>
-
-			{#if deps.blockers.length > 0}
-				<div class="space-y-1">
-					<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocked by</span>
-					{#each deps.blockers as dep (dep.id)}
-						<div class="flex items-center gap-2 text-sm text-foreground py-1 px-2 bg-muted/50 rounded">
-							<ArrowLeft class="w-3 h-3 text-red-400 shrink-0" />
-							<span class="font-mono text-xs">{dep.toTaskId}</span>
-						</div>
-					{/each}
+			{#each Array(4) as _}
+				<div class="flex items-center justify-between">
+					<Skeleton class="h-4 w-20 rounded" />
+					<Skeleton class="h-5 w-16 rounded" />
 				</div>
-			{/if}
-
-			{#if deps.dependents.length > 0}
-				<div class="space-y-1">
-					<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocks</span>
-					{#each deps.dependents as dep (dep.id)}
-						<div class="flex items-center gap-2 text-sm text-foreground py-1 px-2 bg-muted/50 rounded">
-							<ArrowRight class="w-3 h-3 text-orange-400 shrink-0" />
-							<span class="font-mono text-xs">{dep.fromTaskId}</span>
-						</div>
-					{/each}
-				</div>
-			{/if}
+			{/each}
 		</div>
-	{/if}
 
-	<!-- Deviation notes -->
-	{#if task.deviationNotes}
 		<Separator />
+
+		<div class="space-y-3">
+			<Skeleton class="h-4 w-12 rounded" />
+			{#each Array(2) as _}
+				<div class="flex items-center justify-between">
+					<Skeleton class="h-4 w-24 rounded" />
+					<Skeleton class="h-4 w-16 rounded" />
+				</div>
+			{/each}
+		</div>
+
+		<Separator />
+
 		<div class="space-y-2">
-			<h4 class="text-sm font-medium text-foreground">Deviation Notes</h4>
-			<p class="text-sm text-muted-foreground whitespace-pre-wrap">{task.deviationNotes}</p>
+			<div class="flex items-center justify-between">
+				<Skeleton class="h-3 w-16 rounded" />
+				<Skeleton class="h-3 w-24 rounded" />
+			</div>
+			<div class="flex items-center justify-between">
+				<Skeleton class="h-3 w-16 rounded" />
+				<Skeleton class="h-3 w-24 rounded" />
+			</div>
+		</div>
+	{:else}
+		<!-- Header: title, ID, type -->
+		<div>
+			<div class="flex items-center gap-2 mb-2">
+				<Badge variant="outline" class="text-xs font-mono">
+					{task.id}
+				</Badge>
+				<Badge variant="outline" class="text-xs">
+					{typeLabel(task.type)}
+				</Badge>
+			</div>
+			<h2 class="text-lg font-semibold text-foreground">{task.title}</h2>
+			{#if task.description}
+				<p class="text-sm text-muted-foreground mt-1">{task.description}</p>
+			{/if}
+		</div>
+
+		<!-- Action buttons -->
+		<TaskActions {task} layout="bar" {onaction} {oncomplete} />
+
+		<!-- Forward navigation: go to next task in dependency chain -->
+		{#if nextTaskId}
+			<Button
+				variant="outline"
+				size="sm"
+				class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
+				onclick={navigateToNextTask}
+			>
+				<span class="text-sm">Next: <span class="font-mono">{nextTaskId}</span></span>
+				<ChevronRight class="size-4" />
+			</Button>
+		{/if}
+
+		<Separator />
+
+		<!-- Core metadata -->
+		<div class="space-y-3">
+			<!-- Status -->
+			<div class="flex items-center justify-between">
+				<span class="text-sm text-muted-foreground">Status</span>
+				<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
+					{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
+					{statusCfg.label}
+				</Badge>
+			</div>
+
+			<!-- Priority -->
+			<div class="flex items-center justify-between">
+				<span class="text-sm text-muted-foreground">Priority</span>
+				<Badge variant={priorityBadgeVariant(task.priority)}>
+					{priorityLabel(task.priority)}
+				</Badge>
+			</div>
+
+			<!-- Station -->
+			{#if station}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Station</span>
+					<span class="text-sm text-foreground">{station}</span>
+				</div>
+			{/if}
+
+			<!-- Assignee -->
+			{#if task.assignedToId}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Assigned To</span>
+					<span class="text-sm text-foreground flex items-center gap-2">
+						{#if assignedMember}
+							<Avatar.Root size="sm" class="size-5 bg-primary/10 text-primary">
+								<Avatar.Fallback class="text-[10px] font-medium bg-primary/10 text-primary">
+									{assignedInitials}
+								</Avatar.Fallback>
+							</Avatar.Root>
+							<span>{assignedDisplayName}</span>
+						{:else}
+							<Avatar.Root size="sm" class="size-5 bg-muted text-muted-foreground">
+								<Avatar.Fallback class="text-[10px] font-medium">
+									<User class="size-3" />
+								</Avatar.Fallback>
+							</Avatar.Root>
+							<span class="font-mono">{task.assignedToId.slice(0, 8)}</span>
+						{/if}
+					</span>
+				</div>
+			{/if}
+
+			<!-- Quantity -->
+			{#if task.quantity > 1}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Quantity</span>
+					<span class="text-sm text-foreground">{task.quantity}</span>
+				</div>
+			{/if}
+
+			<!-- Recipe link -->
+			{#if task.recipeId}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Recipe</span>
+					<span class="text-sm text-foreground font-mono flex items-center gap-1">
+						<LinkIcon class="w-3 h-3" />
+						{task.recipeId.slice(0, 8)}
+					</span>
+				</div>
+			{/if}
+		</div>
+
+		<Separator />
+
+		<!-- Time data -->
+		<div class="space-y-3">
+			<h4 class="text-sm font-medium text-foreground">Time</h4>
+
+			<div class="flex items-center justify-between">
+				<span class="text-sm text-muted-foreground">Actual Time</span>
+				<span class="text-sm text-foreground flex items-center gap-1">
+					<Clock class="w-3 h-3 text-muted-foreground" />
+					{formatDuration(task.actualTimeSeconds)}
+				</span>
+			</div>
+
+			{#if task.startedAt}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Started</span>
+					<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
+				</div>
+			{/if}
+
+			{#if task.completedAt}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Completed</span>
+					<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
+				</div>
+			{/if}
+
+			{#if task.dueDate}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Due Date</span>
+					<span class="text-sm text-foreground flex items-center gap-1">
+						<Calendar class="w-3 h-3 text-muted-foreground" />
+						{formatDate(task.dueDate)}
+					</span>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Children progress -->
+		{#if progress.total > 0}
+			<Separator />
+			<div class="space-y-2">
+				<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
+				<div class="flex items-center justify-between text-sm text-muted-foreground">
+					<span>{progress.done} of {progress.total} complete</span>
+					<span>{Math.round((progress.done / progress.total) * 100)}%</span>
+				</div>
+				<Progress value={progress.done} max={progress.total} class="h-2 rounded-full [&>[data-slot=progress-indicator]]:bg-green-500" />
+			</div>
+		{/if}
+
+		<!-- Dependencies -->
+		{#if deps && (deps.blockers.length > 0 || deps.dependents.length > 0)}
+			<Separator />
+			<div class="space-y-3">
+				<h4 class="text-sm font-medium text-foreground">Dependencies</h4>
+
+				{#if deps.blockers.length > 0}
+					<div class="space-y-1.5">
+						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocked by</span>
+						<div class="flex flex-wrap gap-1.5">
+							{#each deps.blockers as dep (dep.id)}
+								<a href="/spaces/{slug}/{dep.toTaskId}" class="no-underline">
+									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
+										<ArrowLeft class="w-3 h-3 text-red-400 shrink-0" />
+										<span class="font-mono text-xs">{dep.toTaskId}</span>
+									</Badge>
+								</a>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if deps.dependents.length > 0}
+					<div class="space-y-1.5">
+						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocks</span>
+						<div class="flex flex-wrap gap-1.5">
+							{#each deps.dependents as dep (dep.id)}
+								<a href="/spaces/{slug}/{dep.fromTaskId}" class="no-underline">
+									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
+										<ArrowRight class="w-3 h-3 text-orange-400 shrink-0" />
+										<span class="font-mono text-xs">{dep.fromTaskId}</span>
+									</Badge>
+								</a>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- Deviation notes -->
+		{#if task.deviationNotes}
+			<Separator />
+			<div class="space-y-2">
+				<h4 class="text-sm font-medium text-foreground">Deviation Notes</h4>
+				<p class="text-sm text-muted-foreground whitespace-pre-wrap">{task.deviationNotes}</p>
+			</div>
+		{/if}
+
+		<!-- Timestamps -->
+		<Separator />
+		<div class="space-y-2 text-xs text-muted-foreground">
+			<div class="flex items-center justify-between">
+				<span>Created</span>
+				<span>{formatDateTime(task.createdAt)}</span>
+			</div>
+			<div class="flex items-center justify-between">
+				<span>Updated</span>
+				<span>{formatDateTime(task.updatedAt)}</span>
+			</div>
 		</div>
 	{/if}
-
-	<!-- Timestamps -->
-	<Separator />
-	<div class="space-y-2 text-xs text-muted-foreground">
-		<div class="flex items-center justify-between">
-			<span>Created</span>
-			<span>{formatDateTime(task.createdAt)}</span>
-		</div>
-		<div class="flex items-center justify-between">
-			<span>Updated</span>
-			<span>{formatDateTime(task.updatedAt)}</span>
-		</div>
-	</div>
 </div>

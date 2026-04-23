@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Keyboard } from 'lucide-svelte';
+	import { Keyboard } from '@lucide/svelte';
 
 	interface Props {
 		open: boolean;
@@ -35,8 +35,7 @@
 				{ key: 'k', description: 'Select previous card up' },
 				{ key: 'l', description: 'Select next column' },
 				{ key: 'Enter', description: 'Open selected task' },
-				{ key: 'c', description: 'Claim selected task' },
-				{ key: 'd', description: 'Complete selected task' },
+				{ key: 'c', description: 'Start selected task' },				{ key: 'd', description: 'Complete selected task' },
 			],
 		},
 		{
@@ -45,8 +44,7 @@
 				{ key: 'j', description: 'Select next row' },
 				{ key: 'k', description: 'Select previous row' },
 				{ key: 'Enter', description: 'Open selected task' },
-				{ key: 'c', description: 'Claim selected task' },
-				{ key: 'd', description: 'Complete selected task' },
+				{ key: 'c', description: 'Start selected task' },				{ key: 'd', description: 'Complete selected task' },
 			],
 		},
 		{

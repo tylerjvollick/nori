@@ -4,6 +4,12 @@
   import { authApi } from '$lib/api/auth';
   import type { LoginRequest } from '$lib/api/auth';
   import { Button } from '$lib/components/ui/button';
+  import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
+  import * as Card from '$lib/components/ui/card';
+  import * as Alert from '$lib/components/ui/alert';
+  import { CircleAlert, LoaderCircle } from '@lucide/svelte';
+  import Logo from '$lib/components/Logo.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -46,77 +52,62 @@
 </svelte:head>
 
 <div class="min-h-screen flex items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8">
-  <div class="max-w-md w-full space-y-8">
-    <div>
-      <div class="flex justify-center">
-        <div class="w-16 h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
-          <svg class="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
-        </div>
-      </div>
-      <h1 class="mt-4 text-center text-4xl font-bold text-foreground">
-        Nori
-      </h1>
-      <h2 class="mt-6 text-center text-3xl font-extrabold text-foreground">
-        Sign in to your account
-      </h2>
-    </div>
+  <Card.Root class="w-full max-w-md">
+    <Card.Header class="text-center">
+      <Logo />
+      <Card.Description class="text-lg">Sign in to your account</Card.Description>
+    </Card.Header>
 
-    <form class="mt-8 space-y-6" onsubmit={handleLogin}>
-      <div class="rounded-md shadow-sm -space-y-px">
-        <div>
-          <label for="email" class="sr-only">Email address</label>
-          <input
+    <Card.Content>
+      <form class="space-y-4" onsubmit={handleLogin}>
+        <div class="space-y-2">
+          <Label for="email">Email address</Label>
+          <Input
             id="email"
             name="email"
             type="email"
             autocomplete="email"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-t-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Email address"
             bind:value={email}
           />
         </div>
-        <div>
-          <label for="password" class="sr-only">Password</label>
-          <input
+
+        <div class="space-y-2">
+          <Label for="password">Password</Label>
+          <Input
             id="password"
             name="password"
             type="password"
             autocomplete="current-password"
             required
-            class="appearance-none rounded-none relative block w-full px-3 py-2 border border-border placeholder-muted-foreground text-foreground bg-card rounded-b-md focus:outline-none focus:ring-ring focus:border-ring focus:z-10 sm:text-sm"
             placeholder="Password"
             bind:value={password}
           />
         </div>
-      </div>
 
-      {#if error}
-        <div class="rounded-md bg-destructive/10 p-4">
-          <div class="text-sm text-destructive">{error}</div>
-        </div>
-      {/if}
+        {#if error}
+          <Alert.Root variant="destructive">
+            <CircleAlert />
+            <Alert.Description>{error}</Alert.Description>
+          </Alert.Root>
+        {/if}
 
-      <div>
-        <Button
-          type="submit"
-          disabled={isLoading}
-          class="w-full"
-        >
-          {#if isLoading}
-            Signing in...
-          {:else}
-            Sign in
-          {/if}
-        </Button>
-      </div>
-    </form>
-  </div>
+        <Card.Footer class="px-0 pb-0">
+          <Button
+            type="submit"
+            disabled={isLoading}
+            class="w-full"
+          >
+            {#if isLoading}
+              <LoaderCircle class="animate-spin" />
+              Signing in...
+            {:else}
+              Sign in
+            {/if}
+          </Button>
+        </Card.Footer>
+      </form>
+    </Card.Content>
+  </Card.Root>
 </div>

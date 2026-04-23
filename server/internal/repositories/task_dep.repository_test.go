@@ -269,24 +269,10 @@ func TestTaskDepRepository_GetBlockers(t *testing.T) {
 	taskB := createTestTask(t, db, "blk-b", space.ID, user.ID)
 	taskC := createTestTask(t, db, "blk-c", space.ID, user.ID)
 
-	// A blocks B (FromTaskID=B, ToTaskID=A, Type=blocks)
-	// Wait — re-reading the spec: GetBlockers(taskID) returns deps where ToTaskID=taskID and Type=blocks.
-	// So if A blocks B, the dep edge is: FromTaskID=A, ToTaskID=B? No.
-	// The spec says: FromTaskID = "the task that has the dependency", ToTaskID = "the task being depended on".
-	// So if B depends on A (A blocks B), then FromTaskID=B, ToTaskID=A.
-	// GetBlockers(taskID=B) returns deps where ToTaskID=B and Type=blocks.
-	// Wait, that's wrong. Let me re-read: GetBlockers(taskID) — deps where ToTaskID=taskID.
-	// If B depends on A: FromTaskID=B, ToTaskID=A. GetBlockers("A") returns deps where ToTaskID="A" — that's the dep B→A.
-	// But "blockers of A" doesn't make sense in that framing. Let me look at the bead description again.
-	// "GetBlockers(taskID string) — deps where ToTaskID=taskID and Type=blocks"
-	// So GetBlockers("A") returns tasks that have A as their dependency target.
-	// These are tasks that depend ON task A. In other words, task A is blocking them.
-	// Actually, GetBlockers returns the blocking relationships targeting this task.
-
-	// Let's just follow the spec literally:
-	// B depends on A: FromTaskID=B, ToTaskID=A, Type=blocks
-	// C depends on A: FromTaskID=C, ToTaskID=A, Type=blocks
-	// GetBlockers("A") returns deps where ToTaskID="A" — returns [B→A, C→A]
+	// B depends on A: FromTaskID=B (blocked), ToTaskID=A (blocker)
+	// C depends on A: FromTaskID=C (blocked), ToTaskID=A (blocker)
+	// GetBlockers(B) returns deps where from_task_id=B AND type=blocks
+	// → returns the B→A dep (A blocks B)
 
 	err := repo.AddDep(&models.TaskDep{
 		ID: uuid.New(), FromTaskID: taskB.ID, ToTaskID: taskA.ID, Type: models.DepTypeBlocks,
@@ -310,21 +296,37 @@ func TestTaskDepRepository_GetBlockers(t *testing.T) {
 		t.Fatalf("Failed to add B→C (related): %v", err)
 	}
 
-	blockers, err := repo.GetBlockers(taskA.ID)
+	// GetBlockers(B) should return 1 dep: B→A (A blocks B)
+	blockers, err := repo.GetBlockers(taskB.ID)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
-	if len(blockers) != 2 {
-		t.Fatalf("Expected 2 blockers, got %d", len(blockers))
+	if len(blockers) != 1 {
+		t.Fatalf("Expected 1 blocker for B, got %d", len(blockers))
+	}
+	if blockers[0].FromTaskID != taskB.ID {
+		t.Errorf("Expected FromTaskID %q, got %q", taskB.ID, blockers[0].FromTaskID)
+	}
+	if blockers[0].ToTaskID != taskA.ID {
+		t.Errorf("Expected ToTaskID (blocker) %q, got %q", taskA.ID, blockers[0].ToTaskID)
 	}
 
-	for _, b := range blockers {
-		if b.ToTaskID != taskA.ID {
-			t.Errorf("Expected ToTaskID %q, got %q", taskA.ID, b.ToTaskID)
-		}
-		if b.Type != models.DepTypeBlocks {
-			t.Errorf("Expected type blocks, got %q", b.Type)
-		}
+	// GetBlockers(C) should return 1 dep: C→A (A blocks C)
+	blockersC, err := repo.GetBlockers(taskC.ID)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if len(blockersC) != 1 {
+		t.Fatalf("Expected 1 blocker for C, got %d", len(blockersC))
+	}
+
+	// GetBlockers(A) should return 0 — nothing blocks A
+	blockersA, err := repo.GetBlockers(taskA.ID)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if len(blockersA) != 0 {
+		t.Fatalf("Expected 0 blockers for A, got %d", len(blockersA))
 	}
 }
 
@@ -340,21 +342,23 @@ func TestTaskDepRepository_GetDependents(t *testing.T) {
 	taskB := createTestTask(t, db, "dep-b", space.ID, user.ID)
 	taskC := createTestTask(t, db, "dep-c", space.ID, user.ID)
 
-	// A depends on B and C
+	// B depends on A (A blocks B): FromTaskID=B (blocked), ToTaskID=A (blocker)
 	err := repo.AddDep(&models.TaskDep{
-		ID: uuid.New(), FromTaskID: taskA.ID, ToTaskID: taskB.ID, Type: models.DepTypeBlocks,
+		ID: uuid.New(), FromTaskID: taskB.ID, ToTaskID: taskA.ID, Type: models.DepTypeBlocks,
 	})
 	if err != nil {
-		t.Fatalf("Failed to add A→B: %v", err)
+		t.Fatalf("Failed to add B→A: %v", err)
 	}
 
+	// C depends on A (A blocks C): FromTaskID=C (blocked), ToTaskID=A (blocker)
 	err = repo.AddDep(&models.TaskDep{
-		ID: uuid.New(), FromTaskID: taskA.ID, ToTaskID: taskC.ID, Type: models.DepTypeWaitsFor,
+		ID: uuid.New(), FromTaskID: taskC.ID, ToTaskID: taskA.ID, Type: models.DepTypeWaitsFor,
 	})
 	if err != nil {
-		t.Fatalf("Failed to add A→C: %v", err)
+		t.Fatalf("Failed to add C→A: %v", err)
 	}
 
+	// GetDependents(A) should return 2 deps — B and C both depend on A
 	dependents, err := repo.GetDependents(taskA.ID)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
@@ -364,9 +368,18 @@ func TestTaskDepRepository_GetDependents(t *testing.T) {
 	}
 
 	for _, d := range dependents {
-		if d.FromTaskID != taskA.ID {
-			t.Errorf("Expected FromTaskID %q, got %q", taskA.ID, d.FromTaskID)
+		if d.ToTaskID != taskA.ID {
+			t.Errorf("Expected ToTaskID %q, got %q", taskA.ID, d.ToTaskID)
 		}
+	}
+
+	// GetDependents(B) should return 0 — nothing depends on B
+	dependentsB, err := repo.GetDependents(taskB.ID)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if len(dependentsB) != 0 {
+		t.Fatalf("Expected 0 dependents for B, got %d", len(dependentsB))
 	}
 }
 

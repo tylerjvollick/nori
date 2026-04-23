@@ -11,6 +11,7 @@ import (
 type Space struct {
 	ID               uuid.UUID        `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	Name             string           `gorm:"not null" json:"name"`
+	Slug             string           `gorm:"size:10;not null" json:"slug"`
 	AccountID        uuid.UUID        `gorm:"type:uuid;not null" json:"accountId"`
 	IsDefault        bool             `gorm:"not null;default:false" json:"isDefault"`
 	DefaultLaborRate *decimal.Decimal `gorm:"type:numeric(12,4)" json:"defaultLaborRate,omitempty"`

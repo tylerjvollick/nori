@@ -4,7 +4,7 @@
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
   import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '$lib/components/ui/collapsible';
-  import { Clock } from 'lucide-svelte';
+  import { Clock } from '@lucide/svelte';
   import SOPStepMediaGrid from './SOPStepMediaGrid.svelte'; 
 
   interface Props {

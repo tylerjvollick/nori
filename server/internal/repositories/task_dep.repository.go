@@ -87,20 +87,22 @@ func (r *TaskDepRepository) RemoveDep(fromID, toID string) error {
 	return nil
 }
 
-// GetBlockers returns deps where the given task is the target (ToTaskID)
+// GetBlockers returns deps where the given task is the source (FromTaskID)
 // and the dependency type is "blocks". These are the tasks blocking this one.
+// In the data model, FromTaskID = the blocked/downstream task, ToTaskID = the blocker/upstream task.
 func (r *TaskDepRepository) GetBlockers(taskID string) ([]models.TaskDep, error) {
 	var deps []models.TaskDep
-	err := r.db.Where("to_task_id = ? AND type = ?", taskID, models.DepTypeBlocks).
+	err := r.db.Where("from_task_id = ? AND type = ?", taskID, models.DepTypeBlocks).
 		Find(&deps).Error
 	return deps, err
 }
 
-// GetDependents returns deps where the given task is the source (FromTaskID).
-// These are the tasks that depend on this task.
+// GetDependents returns deps where the given task is the target (ToTaskID).
+// These are the tasks that depend on this task (downstream tasks).
+// In the data model, FromTaskID = the blocked/downstream task, ToTaskID = the blocker/upstream task.
 func (r *TaskDepRepository) GetDependents(taskID string) ([]models.TaskDep, error) {
 	var deps []models.TaskDep
-	err := r.db.Where("from_task_id = ?", taskID).
+	err := r.db.Where("to_task_id = ?", taskID).
 		Find(&deps).Error
 	return deps, err
 }

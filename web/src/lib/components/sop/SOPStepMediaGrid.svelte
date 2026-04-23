@@ -5,7 +5,7 @@
   import { Button } from '$lib/components/ui/button';
   import * as Carousel from '$lib/components/ui/carousel';
   import * as Dialog from '$lib/components/ui/dialog';
-  import { Image, Trash2, Upload, X, Video } from 'lucide-svelte';
+  import { Image, Trash2, Upload, X, Video } from '@lucide/svelte';
   import Uppy from '@uppy/core';
   import Tus from '@uppy/tus';
 
@@ -46,7 +46,7 @@
 
     // Configure tus plugin
     uppy.use(Tus, {
-      endpoint: 'http://localhost:8080/api/tus/',
+      endpoint: `${import.meta.env.VITE_API_URL || 'http://localhost:8081'}/api/tus/`,
       chunkSize: 5 * 1024 * 1024, // 5MB chunks
       retryDelays: [0, 1000, 3000, 5000],
       removeFingerprintOnSuccess: true,

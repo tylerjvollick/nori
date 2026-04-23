@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { TaskResponse } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Clock, User, Inbox } from 'lucide-svelte';
+	import { Clock, User, Inbox } from '@lucide/svelte';
+	import { formatTimeSpent } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
@@ -13,7 +14,7 @@
 		isLoading?: boolean;
 		/** Called when a task row is clicked. */
 		onclick?: (task: TaskResponse) => void;
-		/** Called after a successful task action (claim, skip, etc.). */
+		/** Called after a successful task action (start, skip, etc.). */
 		onaction?: (updated: TaskResponse) => void;
 	}
 
@@ -57,19 +58,6 @@
 	function getStationName(stationId: string | null | undefined): string | null {
 		if (!stationId) return null;
 		return stationMap.get(stationId) ?? stationId.slice(0, 8);
-	}
-
-	function formatTimeAgo(dateStr: string): string {
-		const date = new Date(dateStr);
-		const now = new Date();
-		const diffMs = now.getTime() - date.getTime();
-		const diffMins = Math.floor(diffMs / 60_000);
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		const diffHours = Math.floor(diffMins / 60);
-		if (diffHours < 24) return `${diffHours}h ago`;
-		const diffDays = Math.floor(diffHours / 24);
-		return `${diffDays}d ago`;
 	}
 
 	function handleRowClick(task: TaskResponse): void {
@@ -159,7 +147,7 @@
 
 					<span class="flex items-center gap-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
 						<Clock class="size-3" />
-						{formatTimeAgo(task.updatedAt)}
+						{formatTimeSpent(task.actualTimeSeconds, task.status, task.startedAt)}
 					</span>
 				</div>
 			</div>

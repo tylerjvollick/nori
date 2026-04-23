@@ -1,7 +1,7 @@
 import { redirect, type Handle } from '@sveltejs/kit';
 import type { User } from '$lib/api/auth';
 
-const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:8080';
+const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:8081';
 
 /** Routes that do not require authentication. */
 const PUBLIC_ROUTES = ['/login'];

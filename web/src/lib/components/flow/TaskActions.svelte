@@ -1,18 +1,18 @@
 <script lang="ts">
-	import type { TaskResponse, TaskStatus } from '$lib/types/task';
+	import type { TaskResponse, TaskStatus, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
-		UserPlus,
 		CircleCheck,
 		Pause,
 		Play,
 		SkipForward,
 		Loader2,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
+	import CompletionModal from './CompletionModal.svelte';
 
-	type ActionType = 'claim' | 'complete' | 'pause' | 'resume' | 'skip';
+	type ActionType = 'start' | 'complete' | 'pause' | 'resume' | 'skip';
 
 	interface Props {
 		task: TaskResponse;
@@ -20,35 +20,47 @@
 		layout?: 'bar' | 'compact';
 		/** Called after a successful action with the updated task */
 		onaction?: (updated: TaskResponse) => void;
+		/** Called after completion with navigation info (next task ID). */
+		oncomplete?: (response: CompleteTaskResponse) => void;
 	}
 
-	let { task, layout = 'bar', onaction }: Props = $props();
+	let { task, layout = 'bar', onaction, oncomplete }: Props = $props();
 
 	let loadingAction = $state<ActionType | null>(null);
 	let showSkipDialog = $state(false);
+	let showCompletionModal = $state(false);
 
-	/** Determine available actions for the current task status. */
-	function getActions(status: TaskStatus, assignedToId: string | null | undefined): ActionType[] {
+	/** Determine available actions for the current task status.
+	 *  Always shown regardless of assignment. Anyone can perform any action. */
+	function getActions(status: TaskStatus): ActionType[] {
 		switch (status) {
 			case 'open':
-				return assignedToId ? ['skip'] : ['claim', 'skip'];
+				return ['start', 'skip'];
 			case 'active':
-				return ['complete', 'pause', 'skip'];
+				return ['pause', 'complete', 'skip'];
 			case 'paused':
-				return ['resume', 'skip'];
+				return ['resume', 'complete', 'skip'];
 			default:
 				return [];
 		}
 	}
 
-	let actions = $derived(getActions(task.status, task.assignedToId));
+	/** Actions excluded from compact layout (board cards) to prevent accidental taps.
+	 *  Users should open the task detail to start/resume/skip. */
+	const compactExcluded: ActionType[] = ['start', 'resume', 'skip'];
+
+	let actions = $derived(
+		layout === 'compact'
+			? getActions(task.status).filter((a) => !compactExcluded.includes(a))
+			: getActions(task.status),
+	);
 
 	const actionConfig: Record<ActionType, {
 		label: string;
 		variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost';
 		class?: string;
 	}> = {
-		claim: { label: 'Claim', variant: 'default' },
+		start: { label: 'Start', variant: 'default' },
 		complete: { label: 'Complete', variant: 'default', class: 'bg-green-600 hover:bg-green-700 text-white' },
 		pause: { label: 'Pause', variant: 'secondary' },
 		resume: { label: 'Resume', variant: 'default' },
@@ -64,7 +76,21 @@
 			return;
 		}
 
+		// Complete opens the completion modal (time confirmation + next task nav)
+		if (action === 'complete') {
+			showCompletionModal = true;
+			return;
+		}
+
 		await performAction(action);
+	}
+
+	/** Handle completion modal result — notify parent with both callbacks. */
+	function handleCompletionDone(response: CompleteTaskResponse): void {
+		// Notify parent about the task update (so tree reloads)
+		onaction?.(response);
+		// Notify parent about completion navigation info
+		oncomplete?.(response);
 	}
 
 	async function confirmSkip(): Promise<void> {
@@ -77,11 +103,8 @@
 		try {
 			let updated: TaskResponse;
 			switch (action) {
-				case 'claim':
-					updated = await taskApi.claimTask(task.id);
-					break;
-				case 'complete':
-					updated = await taskApi.completeTask(task.id);
+				case 'start':
+					updated = await taskApi.startTask(task.id);
 					break;
 				case 'pause':
 					updated = await taskApi.pauseTask(task.id);
@@ -92,6 +115,8 @@
 				case 'skip':
 					updated = await taskApi.skipTask(task.id);
 					break;
+				default:
+					return; // 'complete' handled by modal
 			}
 			onaction?.(updated);
 		} catch (e) {
@@ -118,8 +143,8 @@
 				>
 					{#if loadingAction === action}
 						<Loader2 class="size-4 animate-spin" />
-					{:else if action === 'claim'}
-						<UserPlus class="size-4" />
+					{:else if action === 'start'}
+						<Play class="size-4" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-4" />
 					{:else if action === 'pause'}
@@ -148,8 +173,8 @@
 				>
 					{#if loadingAction === action}
 						<Loader2 class="size-3.5 animate-spin" />
-					{:else if action === 'claim'}
-						<UserPlus class="size-3.5" />
+					{:else if action === 'start'}
+						<Play class="size-3.5" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-3.5" />
 					{:else if action === 'pause'}
@@ -191,3 +216,10 @@
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+
+<!-- Completion flow modal (time confirmation + next task navigation) -->
+<CompletionModal
+	{task}
+	bind:open={showCompletionModal}
+	oncomplete={handleCompletionDone}
+/>

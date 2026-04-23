@@ -85,11 +85,36 @@ function createSpaceStore() {
       }
     },
 
-    async createSpace(name: string) {
+    async loadSpaceBySlug(slug: string) {
+      if (!browser) return;
+
+      update(state => ({ ...state, isLoading: true, error: null }));
+
+      try {
+        const space = await spaceApi.getBySlug(slug);
+        await spaceApi.recordVisit(space.id); // Record the visit
+        update(state => ({
+          ...state,
+          currentSpace: space,
+          isLoading: false,
+        }));
+        // Refresh recent spaces after visit
+        this.loadRecentSpaces();
+      } catch (error) {
+        console.error('Failed to load space:', error);
+        update(state => ({
+          ...state,
+          error: error instanceof Error ? error.message : 'Failed to load space',
+          isLoading: false,
+        }));
+      }
+    },
+
+    async createSpace(name: string, slug?: string) {
       if (!browser) return null;
 
       try {
-        const newSpace = await spaceApi.create({ name });
+        const newSpace = await spaceApi.create({ name, slug });
         update(state => ({
           ...state,
           spaces: [...state.spaces, newSpace],
@@ -105,11 +130,11 @@ function createSpaceStore() {
       }
     },
 
-    async updateSpace(id: string, name: string) {
+    async updateSpace(id: string, data: { name?: string; slug?: string }) {
       if (!browser) return null;
 
       try {
-        const updatedSpace = await spaceApi.update(id, { name });
+        const updatedSpace = await spaceApi.update(id, data);
         update(state => ({
           ...state,
           spaces: state.spaces.map(s => (s.id === id ? updatedSpace : s)),

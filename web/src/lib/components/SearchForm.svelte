@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Search } from 'lucide-svelte';
+	import { Search } from '@lucide/svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 
 	let searchQuery = $state('');

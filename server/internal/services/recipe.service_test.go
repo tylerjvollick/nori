@@ -153,7 +153,7 @@ func (m *mockTaskDepRepo) RemoveDep(_, _ string) error { return nil }
 func (m *mockTaskDepRepo) GetBlockers(taskID string) ([]models.TaskDep, error) {
 	var result []models.TaskDep
 	for _, d := range m.deps {
-		if d.ToTaskID == taskID && d.Type == models.DepTypeBlocks {
+		if d.FromTaskID == taskID && d.Type == models.DepTypeBlocks {
 			result = append(result, d)
 		}
 	}
@@ -163,7 +163,7 @@ func (m *mockTaskDepRepo) GetBlockers(taskID string) ([]models.TaskDep, error) {
 func (m *mockTaskDepRepo) GetDependents(taskID string) ([]models.TaskDep, error) {
 	var result []models.TaskDep
 	for _, d := range m.deps {
-		if d.FromTaskID == taskID {
+		if d.ToTaskID == taskID {
 			result = append(result, d)
 		}
 	}

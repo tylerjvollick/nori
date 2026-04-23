@@ -61,21 +61,21 @@ var (
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks",
-	Long:  "Task lifecycle commands: claim, complete, pause, resume, skip, add, and note.",
+	Long:  "Task lifecycle commands: start, complete, pause, resume, skip, add, and note.",
 }
 
-var taskClaimCmd = &cobra.Command{
-	Use:   "claim <id>",
-	Short: "Claim a task",
-	Long:  "Assign yourself to a task and set it to active. The task must be in open status and unassigned.",
+var taskStartCmd = &cobra.Command{
+	Use:   "start <id>",
+	Short: "Start a task",
+	Long:  "Start an open task, transitioning it to active status.",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runTaskClaim,
+	RunE:  runTaskStart,
 }
 
 var taskCompleteCmd = &cobra.Command{
 	Use:   "complete <id>",
 	Short: "Complete a task",
-	Long:  "Mark a task as done. Only the assigned user can complete it, and it must be in active status.",
+	Long:  "Mark a task as done. The task must be in active status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskComplete,
 }
@@ -83,7 +83,7 @@ var taskCompleteCmd = &cobra.Command{
 var taskPauseCmd = &cobra.Command{
 	Use:   "pause <id>",
 	Short: "Pause a task",
-	Long:  "Pause an active task. Only the assigned user can pause it.",
+	Long:  "Pause an active task.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskPause,
 }
@@ -91,7 +91,7 @@ var taskPauseCmd = &cobra.Command{
 var taskResumeCmd = &cobra.Command{
 	Use:   "resume <id>",
 	Short: "Resume a paused task",
-	Long:  "Resume a paused task back to active status. Only the assigned user can resume it.",
+	Long:  "Resume a paused task back to active status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskResume,
 }
@@ -99,7 +99,7 @@ var taskResumeCmd = &cobra.Command{
 var taskSkipCmd = &cobra.Command{
 	Use:   "skip <id>",
 	Short: "Skip a task",
-	Long:  "Mark a task as skipped. Skipping triggers downstream readiness checks. Only the assigned user can skip it (if assigned).",
+	Long:  "Mark a task as skipped. Skipping triggers downstream readiness checks.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskSkip,
 }
@@ -128,7 +128,7 @@ func init() {
 	taskAddCmd.Flags().StringVar(&taskAddType, "type", "task", "Task type: task, gate, milestone")
 	taskAddCmd.Flags().StringVar(&taskAddParentID, "parent", "", "Parent task ID (defaults to current job)")
 
-	taskCmd.AddCommand(taskClaimCmd)
+	taskCmd.AddCommand(taskStartCmd)
 	taskCmd.AddCommand(taskCompleteCmd)
 	taskCmd.AddCommand(taskPauseCmd)
 	taskCmd.AddCommand(taskResumeCmd)
@@ -138,8 +138,8 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 }
 
-func runTaskClaim(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "claim")
+func runTaskStart(cmd *cobra.Command, args []string) error {
+	return runTaskAction(args[0], "start")
 }
 
 func runTaskComplete(cmd *cobra.Command, args []string) error {
@@ -227,7 +227,7 @@ func findActiveTask(client *cli.Client, creds *cli.Credentials) (*activeTaskResp
 	}
 
 	if len(list.Items) == 0 {
-		return nil, fmt.Errorf("no active task found — claim a task first")
+		return nil, fmt.Errorf("no active task found")
 	}
 
 	return &list.Items[0], nil

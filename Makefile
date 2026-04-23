@@ -24,18 +24,18 @@ dev-db:
 
 # Migration commands (using embedded nori binary)
 migrate-up:
-	cd server && go run . migrate up
+	$(LOAD_ENV) && cd server && go run . migrate up
 
 migrate-down:
-	migrate -path ./server/migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" down 1
+	$(LOAD_ENV) && migrate -path ./server/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@localhost:$$DB_PORT/$$DB_NAME?sslmode=disable" down 1
 
 migrate-status:
-	migrate -path ./server/migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" version
+	$(LOAD_ENV) && migrate -path ./server/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@localhost:$$DB_PORT/$$DB_NAME?sslmode=disable" version
 
 migrate-force:
 	@echo "Usage: make migrate-force VERSION=<version>"
 	@if [ -z "$(VERSION)" ]; then echo "ERROR: VERSION is required"; exit 1; fi
-	migrate -path ./server/migrations -database "postgres://postgres:password@localhost:5432/nori?sslmode=disable" force $(VERSION)
+	$(LOAD_ENV) && migrate -path ./server/migrations -database "postgres://$$DB_USER:$$DB_PASSWORD@localhost:$$DB_PORT/$$DB_NAME?sslmode=disable" force $(VERSION)
 
 # Docker cleanup commands
 docker-clean:
@@ -59,7 +59,8 @@ define LOAD_ENV
 	       DB_USER="$${POSTGRES_USER:-postgres}" \
 	       DB_PASSWORD="$${POSTGRES_PASSWORD}" \
 	       DB_NAME="$${POSTGRES_DB:-nori}" \
-	       DB_PORT=5432
+	       DB_PORT="$${DB_HOST_PORT:-5433}" \
+	       NORI_PORT="$${NORI_HOST_PORT:-8081}"
 endef
 
 # Run migrations natively (against local Postgres)

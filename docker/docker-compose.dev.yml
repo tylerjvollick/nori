@@ -35,13 +35,14 @@ services:
       NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
       NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-Nori Dev}
       NORI_SKIP_PASSWORD_CHANGE: ${NORI_SKIP_PASSWORD_CHANGE:-false}
+      NORI_PORT: ${NORI_PORT:-8080}
     depends_on:
       database:
         condition: service_healthy
       nori-migrate:
         condition: service_completed_successfully
     ports:
-      - "8080:8080"
+      - "${NORI_HOST_PORT:-8081}:${NORI_PORT:-8080}"
     volumes:
       - nori_uploads:/app/uploads
 
@@ -55,14 +56,14 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=development
-      - VITE_API_URL=http://localhost:8080
+      - VITE_API_URL=http://localhost:${NORI_HOST_PORT:-8081}
     command: npm run dev -- --host 0.0.0.0
 
   database:
     image: postgres:16
     container_name: nori-db
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

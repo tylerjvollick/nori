@@ -60,8 +60,8 @@ func New(cfg *config.Config) *App {
 	}
 
 	// Services
-	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo)
-	spaceService := services.NewSpaceService(spaceRepo, userRepo, nil)
+	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo, spaceRepo, spaceMemberRepo)
+	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	taskService := services.NewTaskService(taskRepo, taskDepRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
@@ -11,8 +11,9 @@
 	import type { TaskDepsResponse } from '$lib/api/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
-	import { RefreshCw, AlertCircle, Maximize2 } from 'lucide-svelte';
+	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
+	import { graphDirection, type GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
@@ -22,9 +23,11 @@
 		tasks?: TaskResponse[];
 		deps?: Map<string, TaskDepsResponse>;
 		stationMap?: Map<string, string>;
+		/** When set, this task gets a highlighted ring in the graph (used for neighborhood view). */
+		focusTaskId?: string;
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap }: Props = $props();
+	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -58,6 +61,7 @@
 	let lastClickedNodeId = $state('');
 
 	// ---- Derived filters from URL ----
+	let slug = $derived($page.params.slug);
 	let stationFilter = $derived($page.url.searchParams.get('station') || '');
 	let statusFilter = $derived($page.url.searchParams.get('status') || '');
 	let priorityFilter = $derived($page.url.searchParams.get('priority') || '');
@@ -74,13 +78,32 @@
 
 	// ---- Dagre layout ----
 
+	// Direction label for the toggle button tooltip
+	const DIRECTION_LABELS: Record<GraphDirection, string> = {
+		LR: 'Left → Right',
+		RL: 'Right → Left',
+		TB: 'Top → Bottom',
+		BT: 'Bottom → Top',
+	};
+
+	const DIRECTION_ICONS: Record<GraphDirection, typeof ArrowRight> = {
+		LR: ArrowRight,
+		RL: ArrowLeft,
+		TB: ArrowDown,
+		BT: ArrowUp,
+	};
+
+	let currentDirection = $state<GraphDirection>('LR');
+	const unsubDirection = graphDirection.subscribe((d) => (currentDirection = d));
+
 	function getLayoutedElements(
 		inputNodes: Node[],
 		inputEdges: Edge[],
+		direction: GraphDirection,
 	): { nodes: Node[]; edges: Edge[] } {
 		const g = new dagre.graphlib.Graph();
 		g.setDefaultEdgeLabel(() => ({}));
-		g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 80, marginx: 20, marginy: 20 });
+		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80, marginx: 20, marginy: 20 });
 
 		for (const node of inputNodes) {
 			const isJob = (node.data as { type?: string }).type === 'job';
@@ -187,45 +210,62 @@
 				allDeps.push(...batchResults);
 			}
 
-			// Build nodes
-			const newNodes: Node[] = tasks.map((task) => ({
-				id: task.id,
-				type: 'task',
-				position: { x: 0, y: 0 }, // will be set by dagre
-				data: {
-					title: task.title,
-					taskId: task.id,
-					status: task.status,
-					type: task.type,
-					priority: task.priority,
-					stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
-				},
-			}));
+		// Compute which tasks are blocked (have at least one unresolved dependency)
+		const blockedTaskIds = new Set<string>();
+		for (const { taskId, deps } of allDeps) {
+			for (const dep of deps.blockers) {
+				// In blockers: fromTaskId = this task (blocked), toTaskId = the blocker
+				const blockerTask = taskMap.get(dep.toTaskId);
+				const blockerStatus = blockerTask?.status ?? 'open';
+				if (blockerStatus !== 'done' && blockerStatus !== 'skipped') {
+					blockedTaskIds.add(taskId);
+					break;
+				}
+			}
+		}
+
+		// Build nodes
+		const newNodes: Node[] = tasks.map((task) => ({
+			id: task.id,
+			type: 'task',
+			position: { x: 0, y: 0 }, // will be set by dagre
+			data: {
+				title: task.title,
+				taskId: task.id,
+				status: task.status,
+				type: task.type,
+				priority: task.priority,
+				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
+				isBlocked: blockedTaskIds.has(task.id),
+				direction: currentDirection,
+			},
+		}));
 
 			// Build edges from dependencies
-			// Each dep has fromTaskId (blocker) → toTaskId (dependent)
-			// Edge direction: blocker → dependent (arrow from blocker to dependent)
+			// In blockers: fromTaskId = blocked/downstream, toTaskId = blocker/upstream
+			// In dependents: fromTaskId = downstream task, toTaskId = this task (upstream)
+			// Edge direction: blocker → dependent (arrow from upstream to downstream)
 			const edgeSet = new Set<string>(); // dedupe
 			const newEdges: Edge[] = [];
 
 			for (const { deps } of allDeps) {
-				// Use blockers: from = blocker, to = this task
+				// Use blockers: fromTaskId = this task (blocked), toTaskId = blocker
 				for (const dep of deps.blockers) {
-					const edgeId = `${dep.fromTaskId}->${dep.toTaskId}`;
+					const edgeId = `${dep.toTaskId}->${dep.fromTaskId}`;
 					if (edgeSet.has(edgeId)) continue;
 					edgeSet.add(edgeId);
 
 					// Only include edge if both nodes are in our task set
 					if (!taskMap.has(dep.fromTaskId) || !taskMap.has(dep.toTaskId)) continue;
 
-					const blockerTask = taskMap.get(dep.fromTaskId);
+					const blockerTask = taskMap.get(dep.toTaskId);
 					const blockerStatus = blockerTask?.status ?? 'open';
 					const isResolved = blockerStatus === 'done' || blockerStatus === 'skipped';
 
 					newEdges.push({
 						id: edgeId,
-						source: dep.fromTaskId,
-						target: dep.toTaskId,
+						source: dep.toTaskId,
+						target: dep.fromTaskId,
 						type: 'smoothstep',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
@@ -237,21 +277,22 @@
 				}
 
 				// Also use dependents to catch edges not covered by blockers
+				// In dependents: fromTaskId = downstream task, toTaskId = this task (upstream/blocker)
 				for (const dep of deps.dependents) {
-					const edgeId = `${dep.fromTaskId}->${dep.toTaskId}`;
+					const edgeId = `${dep.toTaskId}->${dep.fromTaskId}`;
 					if (edgeSet.has(edgeId)) continue;
 					edgeSet.add(edgeId);
 
 					if (!taskMap.has(dep.fromTaskId) || !taskMap.has(dep.toTaskId)) continue;
 
-					const blockerTask = taskMap.get(dep.fromTaskId);
+					const blockerTask = taskMap.get(dep.toTaskId);
 					const blockerStatus = blockerTask?.status ?? 'open';
 					const isResolved = blockerStatus === 'done' || blockerStatus === 'skipped';
 
 					newEdges.push({
 						id: edgeId,
-						source: dep.fromTaskId,
-						target: dep.toTaskId,
+						source: dep.toTaskId,
+						target: dep.fromTaskId,
 						type: 'smoothstep',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
@@ -264,7 +305,7 @@
 			}
 
 			// Apply dagre layout
-			const layouted = getLayoutedElements(newNodes, newEdges);
+			const layouted = getLayoutedElements(newNodes, newEdges, currentDirection);
 			nodes = layouted.nodes;
 			edges = layouted.edges;
 			taskCount = tasks.length;
@@ -305,7 +346,7 @@
 		// Double-click detection (within 400ms on the same node)
 		if (lastClickedNodeId === nodeId && now - lastClickTime < 400) {
 			// Navigate to task detail
-			goto(`/flow/${nodeId}`);
+			goto(`/spaces/${slug}/${nodeId}`);
 			lastClickTime = 0;
 			lastClickedNodeId = '';
 			return;
@@ -370,6 +411,22 @@
 			taskMap.set(t.id, t);
 		}
 
+		// Compute which tasks are blocked (have at least one unresolved dependency)
+		const blockedTaskIds = new Set<string>();
+		if (depsMap) {
+			for (const [taskId, deps] of depsMap) {
+				for (const dep of deps.blockers) {
+					// In blockers: fromTaskId = this task (blocked), toTaskId = the blocker
+					const blockerTask = taskMap.get(dep.toTaskId);
+					const blockerStatus = blockerTask?.status ?? 'open';
+					if (blockerStatus !== 'done' && blockerStatus !== 'skipped') {
+						blockedTaskIds.add(taskId);
+						break;
+					}
+				}
+			}
+		}
+
 		// Build nodes
 		const newNodes: Node[] = filtered.map((task) => ({
 			id: task.id,
@@ -382,30 +439,35 @@
 				type: task.type,
 				priority: task.priority,
 				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
+				isFocus: focusTaskId === task.id,
+				isBlocked: blockedTaskIds.has(task.id),
+				direction: currentDirection,
 			},
 		}));
 
 		// Build edges from provided deps
+		// In both blockers and dependents: toTaskId = upstream/blocker, fromTaskId = downstream/blocked
+		// Edge direction: upstream (source) → downstream (target)
 		const edgeSet = new Set<string>();
 		const newEdges: Edge[] = [];
 
 		if (depsMap) {
 			for (const [, deps] of depsMap) {
 				for (const dep of [...deps.blockers, ...deps.dependents]) {
-					const edgeId = `${dep.fromTaskId}->${dep.toTaskId}`;
+					const edgeId = `${dep.toTaskId}->${dep.fromTaskId}`;
 					if (edgeSet.has(edgeId)) continue;
 					edgeSet.add(edgeId);
 
 					if (!taskMap.has(dep.fromTaskId) || !taskMap.has(dep.toTaskId)) continue;
 
-					const blockerTask = taskMap.get(dep.fromTaskId);
+					const blockerTask = taskMap.get(dep.toTaskId);
 					const blockerStatus = blockerTask?.status ?? 'open';
 					const isResolved = blockerStatus === 'done' || blockerStatus === 'skipped';
 
 					newEdges.push({
 						id: edgeId,
-						source: dep.fromTaskId,
-						target: dep.toTaskId,
+						source: dep.toTaskId,
+						target: dep.fromTaskId,
 						type: 'smoothstep',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
@@ -418,7 +480,7 @@
 			}
 		}
 
-		const layouted = getLayoutedElements(newNodes, newEdges);
+		const layouted = getLayoutedElements(newNodes, newEdges, currentDirection);
 		nodes = layouted.nodes;
 		edges = layouted.edges;
 		taskCount = filtered.length;
@@ -427,12 +489,41 @@
 		lastRefreshed = new Date();
 	}
 
-	// When external tasks change, rebuild the graph
+	// When external tasks or deps change, rebuild the graph.
+	// Both externalTasks and externalDeps must be read directly in the $effect
+	// body so Svelte 5 tracks them as dependencies. Previously only externalTasks
+	// was tracked, so the graph never re-rendered when deps loaded asynchronously.
 	$effect(() => {
-		if (externalTasks) {
-			buildFromExternalData(externalTasks, externalDeps);
+		const tasks = externalTasks;
+		const deps = externalDeps;
+		if (tasks) {
+			buildFromExternalData(tasks, deps);
 		}
 	});
+
+	// Re-layout when graph direction changes.
+	// dirTracker.prev starts empty; on first effect run, it learns the current direction
+	// without re-laying out (avoiding a redundant initial layout).
+	const dirTracker = { prev: '' };
+	$effect(() => {
+		const dir = currentDirection;
+		if (dirTracker.prev && dir !== dirTracker.prev) {
+			untrack(() => relayoutForDirection(dir));
+		}
+		dirTracker.prev = dir;
+	});
+
+	function relayoutForDirection(dir: GraphDirection): void {
+		if (nodes.length === 0) return;
+		// Update direction in all node data so TaskNode can adjust handle positions
+		const updatedNodes = nodes.map((n) => ({
+			...n,
+			data: { ...n.data, direction: dir },
+		}));
+		const layouted = getLayoutedElements(updatedNodes, edges, dir);
+		nodes = layouted.nodes;
+		edges = layouted.edges;
+	}
 
 	onMount(async () => {
 		if (isScoped) {
@@ -445,6 +536,7 @@
 
 	onDestroy(() => {
 		stopPolling();
+		unsubDirection();
 	});
 
 	function formatLastRefreshed(date: Date | null): string {
@@ -470,7 +562,7 @@
 			case 'Enter': {
 				if (selectedNodeId) {
 					e.preventDefault();
-					goto(`/flow/${selectedNodeId}`);
+					goto(`/spaces/${slug}/${selectedNodeId}`);
 				}
 				break;
 			}
@@ -512,7 +604,7 @@
 	<!-- Graph header -->
 	<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg font-semibold text-foreground">Graph</h1>
+			<h1 class="text-lg font-semibold text-foreground">{focusTaskId ? 'Neighborhood' : 'Graph'}</h1>
 			{#if !isLoading && taskCount > 0}
 				<span class="text-xs text-muted-foreground">
 					{taskCount} tasks, {edgeCount} dependencies
@@ -525,6 +617,16 @@
 					Updated {formatLastRefreshed(lastRefreshed)}
 				</span>
 			{/if}
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => graphDirection.cycle()}
+				title="Graph direction: {DIRECTION_LABELS[currentDirection]}"
+			>
+				{@const DirIcon = DIRECTION_ICONS[currentDirection]}
+				<DirIcon class="size-4" />
+				<span class="ml-1.5">{DIRECTION_LABELS[currentDirection]}</span>
+			</Button>
 			<Button variant="outline" size="sm" onclick={handleManualRefresh} disabled={isRefreshing}>
 				<RefreshCw class="size-4 {isRefreshing ? 'animate-spin' : ''}" />
 				<span class="ml-1.5">Refresh</span>
@@ -535,7 +637,7 @@
 	<!-- Error banner -->
 	{#if error}
 		<div class="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-			<AlertCircle class="size-4 text-destructive shrink-0" />
+			<CircleAlert class="size-4 text-destructive shrink-0" />
 			<span class="text-destructive">{error}</span>
 			<Button variant="outline" size="sm" class="ml-auto" onclick={() => fetchGraph()}>
 				Retry
@@ -566,7 +668,7 @@
 			</div>
 		</div>
 	{:else}
-		<div class="flex-1">
+		<div class="flex-1 min-h-0">
 			<SvelteFlow
 				{nodes}
 				{edges}
@@ -585,7 +687,10 @@
 				<Controls />
 				<MiniMap
 					nodeColor={(node) => {
-						const status = (node.data as { status?: string }).status ?? 'open';
+						const nodeData = node.data as { status?: string; isBlocked?: boolean };
+						const status = nodeData.status ?? 'open';
+						// Blocked open tasks show red in the minimap
+						if (nodeData.isBlocked && status === 'open') return '#ef4444';
 						const colors: Record<string, string> = {
 							open: '#9ca3af',
 							active: '#3b82f6',

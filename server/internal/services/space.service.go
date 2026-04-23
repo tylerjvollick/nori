@@ -3,7 +3,11 @@ package services
 import (
 	"errors"
 	"fmt"
+	"log"
+	"regexp"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
@@ -12,27 +16,150 @@ import (
 	"gorm.io/gorm"
 )
 
+// slugAlphaRegex matches non-letter characters for slug generation
+var slugAlphaRegex = regexp.MustCompile(`[^A-Z]`)
+
+// validSlugRegex matches valid slug format: 2-5 uppercase alphanumeric characters
+var validSlugRegex = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,4}$`)
+
 type SpaceService struct {
-	spaceRepository *repositories.SpaceRepository
-	userRepository  *repositories.UserRepository
+	spaceRepository       *repositories.SpaceRepository
+	userRepository        *repositories.UserRepository
+	spaceMemberRepository *repositories.SpaceMemberRepository
 }
 
 func NewSpaceService(
 	spaceRepository *repositories.SpaceRepository,
 	userRepository *repositories.UserRepository,
-	spaceTemplateService interface{},
+	spaceMemberRepository *repositories.SpaceMemberRepository,
 ) *SpaceService {
 	return &SpaceService{
-		spaceRepository: spaceRepository,
-		userRepository:  userRepository,
+		spaceRepository:       spaceRepository,
+		userRepository:        userRepository,
+		spaceMemberRepository: spaceMemberRepository,
 	}
 }
 
-// CreateSpace creates a new space for an account
-func (s *SpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO) (*models.Space, error) {
+// GenerateSlug generates a slug from a space name.
+// Takes first letter of each word (like Jira project keys).
+// e.g. "My Workshop" -> "MW", "Default" -> "DEF"
+func GenerateSlug(name string) string {
+	upper := strings.ToUpper(name)
+	words := strings.Fields(upper)
+
+	if len(words) == 0 {
+		return "SPC"
+	}
+
+	if len(words) >= 2 {
+		// Take first letter of each word, up to 5 chars
+		var slug strings.Builder
+		for _, w := range words {
+			// Get first alpha char
+			for _, r := range w {
+				if unicode.IsLetter(r) {
+					slug.WriteRune(r)
+					break
+				}
+			}
+			if slug.Len() >= 5 {
+				break
+			}
+		}
+		result := slugAlphaRegex.ReplaceAllString(slug.String(), "")
+		if len(result) >= 2 {
+			return result
+		}
+	}
+
+	// Single word: take first 3 uppercase alpha characters
+	cleaned := slugAlphaRegex.ReplaceAllString(strings.ToUpper(name), "")
+	if len(cleaned) < 2 {
+		return "SPC"
+	}
+	if len(cleaned) > 3 {
+		cleaned = cleaned[:3]
+	}
+	return cleaned
+}
+
+// ValidateSlug validates that a slug meets the format requirements.
+func ValidateSlug(slug string) error {
+	if len(slug) < 2 || len(slug) > 5 {
+		return fmt.Errorf("slug must be between 2 and 5 characters")
+	}
+	if !validSlugRegex.MatchString(slug) {
+		return fmt.Errorf("slug must be uppercase letters and digits, starting with a letter")
+	}
+	return nil
+}
+
+// ensureUniqueSlug checks if the slug is unique within the account and appends
+// a numeric suffix if needed.
+func (s *SpaceService) ensureUniqueSlug(slug string, accountID uuid.UUID) (string, error) {
+	exists, err := s.spaceRepository.SlugExistsInAccount(slug, accountID)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return slug, nil
+	}
+
+	// Try appending digits 2-99
+	base := slug
+	if len(base) > 4 {
+		base = base[:4] // Leave room for suffix
+	}
+	for i := 2; i < 100; i++ {
+		candidate := fmt.Sprintf("%s%d", base, i)
+		if len(candidate) > 5 {
+			// Shorten base more
+			base = base[:len(base)-1]
+			candidate = fmt.Sprintf("%s%d", base, i)
+		}
+		exists, err := s.spaceRepository.SlugExistsInAccount(candidate, accountID)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("unable to generate unique slug for %q", slug)
+}
+
+// CreateSpace creates a new space for an account and adds the creating user as a member.
+func (s *SpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO, creatorUserID uuid.UUID) (*models.Space, error) {
+	// Determine slug
+	var slug string
+	if dto.Slug != nil && *dto.Slug != "" {
+		slug = strings.ToUpper(*dto.Slug)
+		if err := ValidateSlug(slug); err != nil {
+			return nil, err
+		}
+		// Check uniqueness
+		exists, err := s.spaceRepository.SlugExistsInAccount(slug, accountID)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, fmt.Errorf("slug %q is already in use", slug)
+		}
+	} else {
+		// Auto-generate from name
+		generated := GenerateSlug(dto.Name)
+		unique, err := s.ensureUniqueSlug(generated, accountID)
+		if err != nil {
+			return nil, err
+		}
+		slug = unique
+	}
+
 	space := &models.Space{
 		ID:        uuid.New(),
 		Name:      dto.Name,
+		Slug:      slug,
 		AccountID: accountID,
 		IsDefault: false,
 		CreatedAt: time.Now(),
@@ -43,14 +170,25 @@ func (s *SpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO
 		return nil, err
 	}
 
+	// Auto-add the creating user as a space member
+	if err := s.addMember(creatorUserID, space.ID); err != nil {
+		log.Printf("Warning: failed to add creator as space member for space %s: %v", space.ID, err)
+	}
+
 	return space, nil
 }
 
-// CreateDefaultSpace creates a default space for an account (called during registration)
-func (s *SpaceService) CreateDefaultSpace(accountID uuid.UUID) (*models.Space, error) {
+// CreateDefaultSpace creates a default space for an account and adds the given user as a member.
+func (s *SpaceService) CreateDefaultSpace(accountID uuid.UUID, creatorUserID uuid.UUID) (*models.Space, error) {
+	slug, err := s.ensureUniqueSlug("DEF", accountID)
+	if err != nil {
+		return nil, err
+	}
+
 	space := &models.Space{
 		ID:        uuid.New(),
 		Name:      "Default",
+		Slug:      slug,
 		AccountID: accountID,
 		IsDefault: true,
 		CreatedAt: time.Now(),
@@ -61,7 +199,37 @@ func (s *SpaceService) CreateDefaultSpace(accountID uuid.UUID) (*models.Space, e
 		return nil, err
 	}
 
+	// Auto-add the creating user as a space member
+	if err := s.addMember(creatorUserID, space.ID); err != nil {
+		log.Printf("Warning: failed to add creator as space member for default space %s: %v", space.ID, err)
+	}
+
 	return space, nil
+}
+
+// AddMember adds a user as a member of a space (idempotent — skips if already a member).
+func (s *SpaceService) AddMember(userID uuid.UUID, spaceID uuid.UUID) error {
+	return s.addMember(userID, spaceID)
+}
+
+// addMember is the internal helper that creates a SpaceMember record.
+// It is idempotent: if the user is already a member, it returns nil.
+func (s *SpaceService) addMember(userID uuid.UUID, spaceID uuid.UUID) error {
+	if s.spaceMemberRepository == nil {
+		return nil
+	}
+
+	// Check if already a member
+	existing, _ := s.spaceMemberRepository.GetByUserAndSpace(userID, spaceID)
+	if existing != nil {
+		return nil // Already a member
+	}
+
+	member := &models.SpaceMember{
+		UserID:  userID,
+		SpaceID: spaceID,
+	}
+	return s.spaceMemberRepository.Create(member)
 }
 
 // GetSpaceByID retrieves a space by ID and verifies it belongs to the user's account
@@ -77,6 +245,19 @@ func (s *SpaceService) GetSpaceByID(spaceID uuid.UUID, accountID uuid.UUID) (*mo
 	// Verify the space belongs to the user's account
 	if space.AccountID != accountID {
 		return nil, fmt.Errorf("unauthorized access to space")
+	}
+
+	return space, nil
+}
+
+// GetSpaceBySlug retrieves a space by slug within an account
+func (s *SpaceService) GetSpaceBySlug(slug string, accountID uuid.UUID) (*models.Space, error) {
+	space, err := s.spaceRepository.FindBySlugAndAccountID(strings.ToUpper(slug), accountID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("space not found")
+		}
+		return nil, err
 	}
 
 	return space, nil
@@ -127,9 +308,26 @@ func (s *SpaceService) UpdateSpace(spaceID uuid.UUID, accountID uuid.UUID, dto *
 		return nil, err
 	}
 
-	// Update fields if provided
+	// Update name if provided
 	if dto.Name != nil {
 		space.Name = *dto.Name
+	}
+
+	// Update slug if provided
+	if dto.Slug != nil && *dto.Slug != "" {
+		newSlug := strings.ToUpper(*dto.Slug)
+		if err := ValidateSlug(newSlug); err != nil {
+			return nil, err
+		}
+		// Check uniqueness (excluding current space)
+		existing, err := s.spaceRepository.FindBySlugAndAccountID(newSlug, accountID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if existing != nil && existing.ID != spaceID {
+			return nil, fmt.Errorf("slug %q is already in use", newSlug)
+		}
+		space.Slug = newSlug
 	}
 
 	space.UpdatedAt = time.Now()

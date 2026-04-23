@@ -20,10 +20,10 @@ CREATE TABLE task_dep (
     CONSTRAINT chk_task_dep_no_self CHECK (from_task_id <> to_task_id)
 );
 
--- Index on from_task_id for GetDependents queries
+-- Index on from_task_id for GetBlockers queries (from_task_id = the blocked task)
 CREATE INDEX idx_task_dep_from_task_id ON task_dep(from_task_id);
 
--- Index on to_task_id for GetBlockers queries
+-- Index on to_task_id for GetDependents queries (to_task_id = the blocker/upstream task)
 CREATE INDEX idx_task_dep_to_task_id ON task_dep(to_task_id);
 
 -- Index on type for filtering by dependency kind

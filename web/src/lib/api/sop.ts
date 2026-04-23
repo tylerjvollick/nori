@@ -227,7 +227,7 @@ class SOPApi {
 
   getMediaUrl(uuid: string): string {
     // Return the full URL for the media
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8081';
     return `${baseUrl}/media/${uuid}`;
   }
 

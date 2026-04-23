@@ -10,18 +10,27 @@
 	import CreateSOPModal from '$lib/components/CreateSOPModal.svelte';
 	import SearchForm from '$lib/components/SearchForm.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import * as Avatar from '$lib/components/ui/avatar';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Button } from '$lib/components/ui/button';
-	import { Moon, Sun, Plus } from 'lucide-svelte';
+	import { Moon, Sun, Plus, FileText } from '@lucide/svelte';
 
 	let { children } = $props();
 
 	let showCreateSOPModal = $state(false);
-	let showCreateDropdown = $state(false);
 	let theme: 'light' | 'dark' = $state('light');
 
 	// Use server-provided user from hooks.server.ts via +layout.server.ts
 	let user = $derived($page.data.user);
+
+	// Derive user initials for Avatar fallback
+	let userInitials = $derived(() => {
+		const first = user?.firstName?.[0] ?? '';
+		const last = user?.lastName?.[0] ?? '';
+		return (first + last).toUpperCase() || '?';
+	});
 
 	// Subscribe to theme store
 	themeStore.subscribe((value) => {
@@ -45,7 +54,6 @@
 
 	function handleOpenCreateSOP() {
 		showCreateSOPModal = true;
-		showCreateDropdown = false;
 	}
 
 	function handleCloseCreateSOP() {
@@ -60,18 +68,12 @@
 	function toggleTheme() {
 		themeStore.toggle();
 	}
-
-	function closeDropdown() {
-		showCreateDropdown = false;
-	}
 </script>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
 	<title>Nori - Process Management</title>
 </svelte:head>
-
-<svelte:window onclick={closeDropdown} />
 
 {#if !isAuthPage() && user}
 	<Sidebar.Provider class="h-svh overflow-hidden">
@@ -90,66 +92,48 @@
 				<!-- Right side actions -->
 				<div class="ml-auto flex items-center gap-3">
 					<!-- Create Dropdown -->
-					<div class="relative">
-						<Button
-							onclick={(e) => {
-								e.stopPropagation();
-								showCreateDropdown = !showCreateDropdown;
-							}}
-							class="flex items-center gap-2"
-							size="sm"
-						>
-							<Plus class="w-4 h-4" />
-							Create
-						</Button>
-
-						{#if showCreateDropdown}
-							<div
-								role="menu"
-								tabindex="-1"
-								class="absolute right-0 mt-2 w-56 bg-card rounded-lg shadow-lg border border-border py-1 z-50"
-								onclick={(e) => e.stopPropagation()}
-								onkeydown={(e) => e.key === 'Escape' && closeDropdown()}
-							>
-								<Button
-								onclick={handleOpenCreateSOP}
-									variant="ghost"
-									class="w-full px-4 py-3 text-left hover:bg-accent transition-colors flex items-start gap-3 h-auto justify-start"
-								>
-									<svg
-										class="w-5 h-5 text-primary mt-0.5"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-										/>
-									</svg>
-									<div>
-										<div class="text-sm font-medium text-foreground">SOP</div>
-										<div class="text-xs text-muted-foreground">Create new template</div>
-									</div>
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
+							{#snippet child({ props })}
+								<Button {...props} size="sm" class="flex items-center gap-2">
+									<Plus class="w-4 h-4" />
+									Create
 								</Button>
-							</div>
-						{/if}
-					</div>
+							{/snippet}
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="end" class="w-56">
+							<DropdownMenu.Item onclick={handleOpenCreateSOP} class="flex items-start gap-3 py-3">
+								<FileText class="w-5 h-5 text-primary mt-0.5" />
+								<div>
+									<div class="text-sm font-medium">SOP</div>
+									<div class="text-xs text-muted-foreground">Create new template</div>
+								</div>
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 
 					<!-- Theme Toggle -->
-					<Button onclick={toggleTheme} variant="ghost" size="icon" aria-label="Toggle theme">
-						{#if theme === 'dark'}
-							<Sun class="w-5 h-5" />
-						{:else}
-							<Moon class="w-5 h-5" />
-						{/if}
-					</Button>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							{#snippet child({ props })}
+								<Button {...props} onclick={toggleTheme} variant="ghost" size="icon" aria-label="Toggle theme">
+									{#if theme === 'dark'}
+										<Sun class="w-5 h-5" />
+									{:else}
+										<Moon class="w-5 h-5" />
+									{/if}
+								</Button>
+							{/snippet}
+						</Tooltip.Trigger>
+						<Tooltip.Content>Toggle light/dark mode</Tooltip.Content>
+					</Tooltip.Root>
 
 					<!-- User Menu -->
 					{#if user}
 						<div class="flex items-center gap-3 pl-3 border-l border-border">
+							<Avatar.Root size="sm">
+								<Avatar.Fallback>{userInitials()}</Avatar.Fallback>
+							</Avatar.Root>
 							<span class="text-sm text-foreground hidden sm:inline">
 								{user.firstName ?? ''} {user.lastName ?? ''}
 							</span>

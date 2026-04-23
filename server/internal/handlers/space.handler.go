@@ -11,8 +11,9 @@ import (
 
 // SpaceServiceInterface defines the methods needed by SpaceHandler
 type SpaceServiceInterface interface {
-	CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO) (*models.Space, error)
+	CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO, creatorUserID uuid.UUID) (*models.Space, error)
 	GetSpaceByID(spaceID uuid.UUID, accountID uuid.UUID) (*models.Space, error)
+	GetSpaceBySlug(slug string, accountID uuid.UUID) (*models.Space, error)
 	GetSpacesByAccountID(accountID uuid.UUID) ([]models.Space, error)
 	GetRecentSpaces(userID uuid.UUID, accountID uuid.UUID) ([]models.Space, error)
 	UpdateSpace(spaceID uuid.UUID, accountID uuid.UUID, dto *dtos.UpdateSpaceDTO) (*models.Space, error)
@@ -38,10 +39,25 @@ func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, middlewares ...fiber.
 	group.Post("", h.CreateSpace)
 	group.Get("", h.GetSpaces)
 	group.Get("/recent", h.GetRecentSpaces)
+	group.Get("/by-slug/:slug", h.GetSpaceBySlug)
 	group.Get("/:id", h.GetSpaceByID)
 	group.Put("/:id", h.UpdateSpace)
 	group.Delete("/:id", h.DeleteSpace)
 	group.Post("/:id/visit", h.RecordSpaceVisit)
+	group.Get("/:id/members", h.GetSpaceMembers)
+}
+
+// spaceToDTO converts a Space model to a SpaceResponseDTO
+func spaceToDTO(space *models.Space) dtos.SpaceResponseDTO {
+	return dtos.SpaceResponseDTO{
+		ID:        space.ID,
+		Name:      space.Name,
+		Slug:      space.Slug,
+		AccountID: space.AccountID,
+		IsDefault: space.IsDefault,
+		CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
 }
 
 // isAdmin returns true if the authenticated user has admin role
@@ -80,22 +96,14 @@ func (h *SpaceHandler) CreateSpace(c *fiber.Ctx) error {
 		})
 	}
 
-	space, err := h.spaceService.CreateSpace(authDTO.AccountID, &dto)
+	space, err := h.spaceService.CreateSpace(authDTO.AccountID, &dto, authDTO.User.ID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
 
-	response := &dtos.SpaceResponseDTO{
-		ID:        space.ID,
-		Name:      space.Name,
-		AccountID: space.AccountID,
-		IsDefault: space.IsDefault,
-		CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
-
+	response := spaceToDTO(space)
 	return c.Status(http.StatusCreated).JSON(response)
 }
 
@@ -129,14 +137,7 @@ func (h *SpaceHandler) GetSpaces(c *fiber.Ctx) error {
 		if space.AccountID != authDTO.AccountID {
 			continue
 		}
-		response = append(response, dtos.SpaceResponseDTO{
-			ID:        space.ID,
-			Name:      space.Name,
-			AccountID: space.AccountID,
-			IsDefault: space.IsDefault,
-			CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
+		response = append(response, spaceToDTO(&space))
 	}
 
 	return c.Status(http.StatusOK).JSON(response)
@@ -158,14 +159,7 @@ func (h *SpaceHandler) GetRecentSpaces(c *fiber.Ctx) error {
 
 	response := []dtos.SpaceResponseDTO{}
 	for _, space := range spaces {
-		response = append(response, dtos.SpaceResponseDTO{
-			ID:        space.ID,
-			Name:      space.Name,
-			AccountID: space.AccountID,
-			IsDefault: space.IsDefault,
-			CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
+		response = append(response, spaceToDTO(&space))
 	}
 
 	return c.Status(http.StatusOK).JSON(response)
@@ -199,15 +193,39 @@ func (h *SpaceHandler) GetSpaceByID(c *fiber.Ctx) error {
 		})
 	}
 
-	response := &dtos.SpaceResponseDTO{
-		ID:        space.ID,
-		Name:      space.Name,
-		AccountID: space.AccountID,
-		IsDefault: space.IsDefault,
-		CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	response := spaceToDTO(space)
+	return c.Status(http.StatusOK).JSON(response)
+}
+
+// GetSpaceBySlug retrieves a space by its slug (admin or space member)
+func (h *SpaceHandler) GetSpaceBySlug(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
 	}
 
+	slug := c.Params("slug")
+	if slug == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "slug is required",
+		})
+	}
+
+	space, err := h.spaceService.GetSpaceBySlug(slug, authDTO.AccountID)
+	if err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, space.ID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
+		})
+	}
+
+	response := spaceToDTO(space)
 	return c.Status(http.StatusOK).JSON(response)
 }
 
@@ -246,15 +264,7 @@ func (h *SpaceHandler) UpdateSpace(c *fiber.Ctx) error {
 		})
 	}
 
-	response := &dtos.SpaceResponseDTO{
-		ID:        space.ID,
-		Name:      space.Name,
-		AccountID: space.AccountID,
-		IsDefault: space.IsDefault,
-		CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
-
+	response := spaceToDTO(space)
 	return c.Status(http.StatusOK).JSON(response)
 }
 
@@ -328,4 +338,52 @@ func (h *SpaceHandler) RecordSpaceVisit(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(fiber.Map{
 		"message": "space visit recorded",
 	})
+}
+
+// GetSpaceMembers lists all members of a space (admin or space member)
+func (h *SpaceHandler) GetSpaceMembers(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	spaceID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid space ID",
+		})
+	}
+
+	// Check space access (admin or member)
+	if !h.hasSpaceAccess(authDTO, spaceID) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "access to this space is not permitted",
+		})
+	}
+
+	members, err := h.spaceMemberRepo.GetBySpace(spaceID)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	// Convert to DTOs (no password hashes)
+	response := make([]dtos.SpaceMemberDTO, 0, len(members))
+	for _, m := range members {
+		response = append(response, dtos.SpaceMemberDTO{
+			ID:        m.ID,
+			UserID:    m.UserID,
+			SpaceID:   m.SpaceID,
+			CreatedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			User: dtos.SpaceMemberUserDTO{
+				ID:        m.User.ID,
+				Email:     m.User.Email,
+				FirstName: m.User.FirstName,
+				LastName:  m.User.LastName,
+			},
+		})
+	}
+
+	return c.Status(http.StatusOK).JSON(response)
 }

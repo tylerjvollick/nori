@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
 	import type { TaskStatus, TaskType } from '$lib/types/task';
+	import type { GraphDirection } from '$lib/stores/graph';
 	import {
 		Circle,
 		CircleDot,
@@ -8,7 +9,8 @@
 		CirclePause,
 		CircleMinus,
 		CircleX,
-	} from 'lucide-svelte';
+		Ban,
+	} from '@lucide/svelte';
 
 	// Props from xyflow NodeProps — we receive these automatically
 	let {
@@ -22,10 +24,31 @@
 			type: TaskType;
 			priority: number;
 			stationName?: string;
+			isFocus?: boolean;
+			isBlocked?: boolean;
+			direction?: GraphDirection;
 		};
 		selected: boolean;
 		[key: string]: unknown;
 	} = $props();
+
+	// Handle positions based on graph layout direction
+	// Target = incoming (predecessors/blockers), Source = outgoing (dependents/successors)
+	const TARGET_POSITIONS: Record<GraphDirection, Position> = {
+		LR: Position.Left,
+		RL: Position.Right,
+		TB: Position.Top,
+		BT: Position.Bottom,
+	};
+	const SOURCE_POSITIONS: Record<GraphDirection, Position> = {
+		LR: Position.Right,
+		RL: Position.Left,
+		TB: Position.Bottom,
+		BT: Position.Top,
+	};
+
+	let targetPosition = $derived(TARGET_POSITIONS[data.direction ?? 'LR']);
+	let sourcePosition = $derived(SOURCE_POSITIONS[data.direction ?? 'LR']);
 
 	// Status → color mapping (matches TaskCard/TaskTree patterns)
 	const STATUS_CONFIG: Record<
@@ -79,16 +102,28 @@
 		4: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',
 	};
 
-	let config = $derived(STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open);
+	// Blocked tasks get red styling to make blockers immediately visible
+	const BLOCKED_CONFIG = {
+		bg: 'bg-red-50 dark:bg-red-950/50',
+		border: 'border-red-400 dark:border-red-600',
+		text: 'text-red-500',
+		icon: Ban,
+	};
+
+	let config = $derived(
+		data.isBlocked && data.status === 'open'
+			? BLOCKED_CONFIG
+			: (STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open),
+	);
 	let StatusIcon = $derived(config.icon);
 	let isJob = $derived(data.type === 'job');
 </script>
 
 <!-- Target handle (incoming deps — this task depends on something) -->
-<Handle type="target" position={Position.Left} class="!bg-muted-foreground !border-background !w-2 !h-2" />
+<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
 <div
-	class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {isJob ? 'min-w-[180px]' : 'min-w-[160px]'}"
+	class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[180px]' : 'min-w-[160px]'}"
 >
 	<!-- Header: status icon + title -->
 	<div class="flex items-center gap-1.5">
@@ -118,4 +153,4 @@
 </div>
 
 <!-- Source handle (outgoing deps — something depends on this task) -->
-<Handle type="source" position={Position.Right} class="!bg-muted-foreground !border-background !w-2 !h-2" />
+<Handle type="source" position={sourcePosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />

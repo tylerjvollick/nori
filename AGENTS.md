@@ -30,7 +30,7 @@ system that understands physical production flow.
    Docker Compose for deployment. Designed for other small shops to use.
 
 5. **Pull, not push**: Downstream stations signal readiness. Work is released
-   to the floor based on actual capacity (drum-buffer-rope from *The Goal*).
+   to the floor based on actual capacity (drum-buffer-rope from _The Goal_).
 
 ### Key Workflow
 
@@ -46,6 +46,7 @@ from accumulated data.
 ## Specs
 
 **Read `specs/readme.md` before starting any feature work.** It contains:
+
 - A priority-ordered table of all feature specifications with search keywords
 - Instructions for creating implementation checklists
 - The workflow for moving specs from Planned to Implemented
@@ -66,16 +67,19 @@ with a checklist of small, committable units of work.
 ## Build/Lint/Test Commands
 
 ### Building
+
 - `go build -o nori .` - Build the Go server binary
 - `make dev` - Start full development environment with Docker
 - `make dev-server` - Start only the server container
 
 ### Testing
+
 - `go test ./...` - Run all tests
 - `go test -run TestName ./path/to/package` - Run a specific test
 - `go test -v ./...` - Run tests with verbose output
 
 ### Linting & Formatting
+
 - `gofmt -w .` - Format Go code
 - `go vet ./...` - Run Go vet for static analysis
 - `go mod tidy` - Clean up go.mod dependencies
@@ -83,6 +87,7 @@ with a checklist of small, committable units of work.
 ## Code Style Guidelines
 
 ### Go Imports
+
 - Standard library imports first
 - Third-party packages second
 - Internal packages last
@@ -101,18 +106,21 @@ import (
 ```
 
 ### Naming Conventions
+
 - **Types/Structs**: PascalCase for exported, camelCase for unexported
 - **Functions**: PascalCase for exported, camelCase for unexported
 - **Variables**: camelCase, descriptive names
 - **Constants**: PascalCase for exported, camelCase for unexported
 
 ### Error Handling
+
 - Return errors from functions, don't panic
 - Use `log.Println()` for logging errors
 - Check errors immediately after operations
 - Return descriptive error messages
 
 ### Types & Structs
+
 - Use pointers for optional fields (`*string`)
 - Use `uuid.UUID` for IDs
 - Include JSON and GORM struct tags
@@ -127,18 +135,21 @@ type User struct {
 ```
 
 ### Functions
+
 - Keep functions short and focused
 - Use receiver methods for struct operations
 - Return pointers for structs that may be nil
 - Use dependency injection for services
 
 ### Database
+
 - Use GORM for ORM operations
 - Define models in `internal/models/`
 - Use repositories for data access in `internal/repositories/`
 - Handle migrations with SQL files in `migrations/`
 
 ### API Design
+
 - Use Fiber for HTTP framework
 - Group routes logically
 - Return consistent JSON responses
@@ -178,11 +189,13 @@ nori/
 ## Existing Code
 
 The repo has a working (but dated) implementation of:
+
 - User / Account / UserAccount / Space models and auth
 - TUS-based chunked media upload
 - Basic SvelteKit web UI (Svelte 4 / Tailwind v3 — needs upgrade)
 
 New features being added (see specs for details):
+
 - Task model with hierarchical string IDs and dependency graph
 - Recipe + RecipeVersion models (TOML stored in database)
 - Formula engine (extracted from beads project) for pouring Recipes into Tasks
@@ -212,6 +225,7 @@ If you're starting a fresh context window, here's what matters:
    sensors → marketplace.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -252,6 +266,7 @@ bd close <id>         # Complete work
 7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
+
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
@@ -260,23 +275,26 @@ bd close <id>         # Complete work
 
 <!-- bv-agent-instructions-v2 -->
 
+````
+
 ---
 
 ## Beads Workflow Integration
 
-This project uses [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) for issue tracking and [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) (`bv`) for graph-aware triage. Issues are stored in `.beads/` and tracked in git.
+This project uses [beads](https://github.com/Dicklesworthstone/beads_rust) (`bd`) for issue tracking and [beads_viewer](https://github.com/Dicklesworthstone/beads_viewer) (`bv`) for graph-aware triage. Issues are stored in `.beads/` and tracked in git.
 
 ### Using bv as an AI sidecar
 
 bv is a graph-aware triage engine for Beads projects (.beads/beads.jsonl). Instead of parsing JSONL or hallucinating graph traversal, use robot flags for deterministic, dependency-aware outputs with precomputed metrics (PageRank, betweenness, critical path, cycles, HITS, eigenvector, k-core).
 
-**Scope boundary:** bv handles *what to work on* (triage, priority, planning). `br` handles creating, modifying, and closing beads.
+**Scope boundary:** bv handles _what to work on_ (triage, priority, planning). `bd` handles creating, modifying, and closing beads.
 
-**CRITICAL: Use ONLY --robot-* flags. Bare bv launches an interactive TUI that blocks your session.**
+**CRITICAL: Use ONLY --robot-\* flags. Bare bv launches an interactive TUI that blocks your session.**
 
 #### The Workflow: Start With Triage
 
 **`bv --robot-triage` is your single entry point.** It returns everything you need in one call:
+
 - `quick_ref`: at-a-glance counts + top 3 picks
 - `recommendations`: ranked actionable items with scores, reasons, unblock info
 - `quick_wins`: low-effort high-impact items
@@ -290,19 +308,19 @@ bv --robot-next          # Minimal: just the single top pick + claim command
 
 # Token-optimized output (TOON) for lower LLM context usage:
 bv --robot-triage --format toon
-```
+````
 
 #### Other bv Commands
 
-| Command | Returns |
-|---------|---------|
-| `--robot-plan` | Parallel execution tracks with unblocks lists |
-| `--robot-priority` | Priority misalignment detection with confidence |
-| `--robot-insights` | Full metrics: PageRank, betweenness, HITS, eigenvector, critical path, cycles, k-core |
-| `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |
-| `--robot-suggest` | Hygiene: duplicates, missing deps, label suggestions, cycle breaks |
-| `--robot-diff --diff-since <ref>` | Changes since ref: new/closed/modified issues |
-| `--robot-graph [--graph-format=json\|dot\|mermaid]` | Dependency graph export |
+| Command                                             | Returns                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `--robot-plan`                                      | Parallel execution tracks with unblocks lists                                         |
+| `--robot-priority`                                  | Priority misalignment detection with confidence                                       |
+| `--robot-insights`                                  | Full metrics: PageRank, betweenness, HITS, eigenvector, critical path, cycles, k-core |
+| `--robot-alerts`                                    | Stale issues, blocking cascades, priority mismatches                                  |
+| `--robot-suggest`                                   | Hygiene: duplicates, missing deps, label suggestions, cycle breaks                    |
+| `--robot-diff --diff-since <ref>`                   | Changes since ref: new/closed/modified issues                                         |
+| `--robot-graph [--graph-format=json\|dot\|mermaid]` | Dependency graph export                                                               |
 
 #### Scoping & Filtering
 
@@ -313,40 +331,80 @@ bv --recipe actionable --robot-plan          # Pre-filter: ready to work (no blo
 bv --recipe high-impact --robot-triage       # Pre-filter: top PageRank scores
 ```
 
-### br Commands for Issue Management
+### bd Commands for Issue Management
 
 ```bash
-br ready              # Show issues ready to work (no blockers)
-br list --status=open # All open issues
-br show <id>          # Full issue details with dependencies
-br create --title="..." --type=task --priority=2
-br update <id> --status=in_progress
-br close <id> --reason="Completed"
-br close <id1> <id2>  # Close multiple issues at once
-br sync --flush-only  # Export DB to JSONL
+bd ready              # Show issues ready to work (no blockers)
+bd list --status=open # All open issues
+bd show <id>          # Full issue details with dependencies
+bd create --title="..." --type=task --priority=2
+bd update <id> --status=in_progress
+bd close <id> --reason="Completed"
+bd close <id1> <id2>  # Close multiple issues at once
+bd export -o .beads/beads.jsonl # Export DB to JSONL
 ```
+
+### Parallel Development with bd Worktrees
+
+Use `bd worktree` to work on multiple features/bugs in parallel within the same repo. All worktrees share a single beads database via a redirect file — no data duplication, no cross-branch contamination.
+
+**Worktree location:** All worktrees go in `.factories/` (gitignored).
+
+**IMPORTANT:** Always use `bd worktree create`, never raw `git worktree add`. Raw git worktrees don't set up the beads redirect, causing the database to diverge and issues to leak between branches.
+
+```bash
+# Create a worktree (branches off current HEAD)
+bd worktree create .factories/bugfix-name --branch fix/MYN-XXXX-description
+
+# Create from master instead
+git worktree add .factories/bugfix-name master
+echo "../.beads" > .factories/bugfix-name/.beads/redirect
+
+# List all worktrees
+bd worktree list
+
+# Remove when done (after PR merged)
+bd worktree remove .factories/bugfix-name
+```
+
+**Workflow per worktree:**
+
+```bash
+cd .factories/bugfix-name
+bd create --type=bug --title="..." --priority=2    # Create beads
+ralph-tui run --epic <epic-id>                     # Or work manually
+git push -u origin fix/MYN-XXXX-description        # PR as normal
+```
+
+**How it works:** The worktree's `.beads/redirect` file points back to the main repo's `.beads/` directory. Both worktrees read/write the same Dolt database with file-based locking. Different epics on different branches — no interference.
+
+**Caveats:**
+
+- Lock contention if both worktrees write beads simultaneously (brief delay, not an error)
+- Each worktree needs its own `npm ci` if dependencies differ
+- Run `ralph-tui` independently in each worktree terminal
 
 ### Workflow Pattern
 
 1. **Triage**: Run `bv --robot-triage` to find the highest-impact actionable work
-2. **Claim**: Use `br update <id> --status=in_progress`
+2. **Claim**: Use `bd update <id> --status=in_progress`
 3. **Work**: Implement the task
-4. **Complete**: Use `br close <id>`
-5. **Sync**: Always run `br sync --flush-only` at session end
+4. **Complete**: Use `bd close <id>`
+5. **Sync**: Always run `bd export -o .beads/beads.jsonl` at session end
 
 ### Key Concepts
 
 - **Dependencies**: Issues can block other issues. `br ready` shows only unblocked work.
 - **Priority**: P0=critical, P1=high, P2=medium, P3=low, P4=backlog (use numbers 0-4, not words)
 - **Types**: task, bug, feature, epic, chore, docs, question
-- **Blocking**: `br dep add <issue> <depends-on>` to add dependencies
+- **Blocking**: `bd dep add <issue> <depends-on>` to add dependencies
 
 ### Session Protocol
 
 ```bash
 git status              # Check what changed
 git add <files>         # Stage code changes
-br sync --flush-only    # Export beads changes to JSONL
+bd export -o .beads/beads.jsonl   # Export beads changes to JSONL
 git commit -m "..."     # Commit everything
 git push                # Push to remote
 ```

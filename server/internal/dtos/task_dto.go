@@ -19,11 +19,12 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest represents the request body for updating a task.
 type UpdateTaskRequest struct {
-	Title       *string            `json:"title,omitempty"`
-	Description *string            `json:"description,omitempty"`
-	StationID   *uuid.UUID         `json:"stationId,omitempty"`
-	Priority    *int               `json:"priority,omitempty"`
-	Status      *models.TaskStatus `json:"status,omitempty"`
+	Title        *string            `json:"title,omitempty"`
+	Description  *string            `json:"description,omitempty"`
+	StationID    *uuid.UUID         `json:"stationId,omitempty"`
+	Priority     *int               `json:"priority,omitempty"`
+	Status       *models.TaskStatus `json:"status,omitempty"`
+	AssignedToID *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
 }
 
 // AddChildTaskRequest represents the request body for adding a child task.
@@ -33,6 +34,19 @@ type AddChildTaskRequest struct {
 	Type        models.TaskType `json:"type,omitempty"`
 	StationID   *uuid.UUID      `json:"stationId,omitempty"`
 	AfterID     *string         `json:"afterId,omitempty"` // Task ID to add a dependency on
+}
+
+// CompleteTaskRequest represents the optional request body for completing a task.
+// All fields are optional — if no body is sent, defaults apply.
+type CompleteTaskRequest struct {
+	ActualTimeSecs *int `json:"actualTimeSeconds,omitempty"` // Override the logged time (in seconds)
+}
+
+// CompleteTaskResponse extends the standard task response with navigation hints.
+type CompleteTaskResponse struct {
+	TaskResponse
+	NextTaskId    *string `json:"nextTaskId,omitempty"`    // First downstream task unblocked by this completion
+	NextTaskTitle *string `json:"nextTaskTitle,omitempty"` // Title of the next task for display
 }
 
 // AddNoteRequest represents the request body for adding a deviation note.

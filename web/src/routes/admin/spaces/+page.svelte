@@ -7,7 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
-	import { Plus, Trash2, LayoutGrid, Users, User as UserIcon } from 'lucide-svelte';
+	import { Plus, Trash2, LayoutGrid, Users, User as UserIcon } from '@lucide/svelte';
 
 	let spaces = $state<Space[]>([]);
 	let selectedSpaceId = $state<string>('');

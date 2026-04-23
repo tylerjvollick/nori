@@ -5,7 +5,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { Plus, Trash2, Key, Copy, Check } from 'lucide-svelte';
+	import { Plus, Trash2, Key, Copy, Check } from '@lucide/svelte';
 
 	let apiKeys = $state<APIKey[]>([]);
 	let isLoading = $state(true);
