@@ -112,6 +112,7 @@ var (
 	createFromTOMLFlag string
 	createNameFlag     string
 	createJSONFlag     bool
+	createDescFlag     string
 
 	publishJSONFlag bool
 
@@ -119,6 +120,12 @@ var (
 	listActiveFlag string
 
 	showJSONFlag bool
+
+	recipeTasksJSONFlag bool
+
+	rollTitleFlag    string
+	rollOrderQtyFlag int
+	rollJSONFlag     bool
 )
 
 var recipeCmd = &cobra.Command{
@@ -136,10 +143,27 @@ var recipePourCmd = &cobra.Command{
 }
 
 var recipeCreateCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create a new recipe from a TOML file",
-	Long:  "Import a TOML file as a new recipe. Creates the recipe, adds version 1, and auto-publishes it.",
+	Use:   "create <name>",
+	Short: "Create a new recipe",
+	Long:  "Create a new recipe. Use --from-toml to import from a TOML file, or just provide a name to create a blank task-tree recipe.",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runRecipeCreate,
+}
+
+var recipeTasksCmd = &cobra.Command{
+	Use:   "tasks <slug>",
+	Short: "Show recipe task tree",
+	Long:  "Display the task tree for a recipe's current version.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRecipeTasks,
+}
+
+var recipeRollCmd = &cobra.Command{
+	Use:   "roll <slug>",
+	Short: "Roll a recipe into a new job",
+	Long:  "Clone a published recipe's task tree into a new job.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runRecipeRoll,
 }
 
 var recipeListCmd = &cobra.Command{
@@ -170,10 +194,10 @@ func init() {
 	recipePourCmd.Flags().StringVar(&pourOrderFlag, "order", "", "Order ID to link to the job")
 	recipePourCmd.Flags().BoolVar(&pourJSONFlag, "json", false, "Output as JSON")
 
-	recipeCreateCmd.Flags().StringVar(&createFromTOMLFlag, "from-toml", "", "Path to TOML file to import (required)")
-	recipeCreateCmd.Flags().StringVar(&createNameFlag, "name", "", "Recipe name (defaults to 'formula' field from TOML)")
+	recipeCreateCmd.Flags().StringVar(&createFromTOMLFlag, "from-toml", "", "Path to TOML file to import (uses old TOML engine)")
+	recipeCreateCmd.Flags().StringVar(&createNameFlag, "name", "", "Recipe name (defaults to 'formula' field from TOML, or positional arg)")
+	recipeCreateCmd.Flags().StringVar(&createDescFlag, "description", "", "Recipe description")
 	recipeCreateCmd.Flags().BoolVar(&createJSONFlag, "json", false, "Output as JSON")
-	recipeCreateCmd.MarkFlagRequired("from-toml")
 
 	recipePublishCmd.Flags().BoolVar(&publishJSONFlag, "json", false, "Output as JSON")
 
@@ -182,11 +206,19 @@ func init() {
 
 	recipeShowCmd.Flags().BoolVar(&showJSONFlag, "json", false, "Output as JSON")
 
+	recipeTasksCmd.Flags().BoolVar(&recipeTasksJSONFlag, "json", false, "Output as JSON")
+
+	recipeRollCmd.Flags().StringVar(&rollTitleFlag, "title", "", "Job title (defaults to recipe name)")
+	recipeRollCmd.Flags().IntVar(&rollOrderQtyFlag, "qty", 0, "Order quantity")
+	recipeRollCmd.Flags().BoolVar(&rollJSONFlag, "json", false, "Output as JSON")
+
 	recipeCmd.AddCommand(recipeListCmd)
 	recipeCmd.AddCommand(recipeShowCmd)
 	recipeCmd.AddCommand(recipePourCmd)
 	recipeCmd.AddCommand(recipeCreateCmd)
 	recipeCmd.AddCommand(recipePublishCmd)
+	recipeCmd.AddCommand(recipeTasksCmd)
+	recipeCmd.AddCommand(recipeRollCmd)
 	rootCmd.AddCommand(recipeCmd)
 }
 
@@ -452,11 +484,81 @@ type tomlFormula struct {
 }
 
 func runRecipeCreate(cmd *cobra.Command, args []string) error {
-	// 1. Read and validate the TOML file.
-	tomlPath := createFromTOMLFlag
-	if tomlPath == "" {
-		return fmt.Errorf("--from-toml is required")
+	// If --from-toml is provided, use the TOML import path.
+	if createFromTOMLFlag != "" {
+		return runRecipeCreateFromTOML(cmd, args)
 	}
+
+	// Otherwise, create a blank task-tree recipe.
+	name := createNameFlag
+	if name == "" && len(args) > 0 {
+		name = args[0]
+	}
+	if name == "" {
+		return fmt.Errorf("recipe name is required — provide as argument or use --name")
+	}
+
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return err
+	}
+
+	client := newClientWithSpace(creds)
+
+	createBody := map[string]interface{}{
+		"name": name,
+	}
+	if createDescFlag != "" {
+		createBody["description"] = createDescFlag
+	}
+
+	resp, err := client.Post("/api/v1/recipes", createBody)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("create recipe failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var recipe struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		Slug           string `json:"slug"`
+		CurrentVersion *struct {
+			ID         int     `json:"id"`
+			RootTaskID *string `json:"rootTaskId,omitempty"`
+		} `json:"currentVersion,omitempty"`
+	}
+	if err := cli.ReadJSON(resp, &recipe); err != nil {
+		return fmt.Errorf("failed to parse recipe response: %w", err)
+	}
+
+	if createJSONFlag {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(recipe)
+	}
+
+	fmt.Printf("Recipe %q created (slug: %s)\n", recipe.Name, recipe.Slug)
+	if recipe.CurrentVersion != nil && recipe.CurrentVersion.RootTaskID != nil {
+		fmt.Printf("  Root task: %s\n", *recipe.CurrentVersion.RootTaskID)
+		fmt.Printf("  Add tasks: nori task add <title> --parent %s\n", *recipe.CurrentVersion.RootTaskID)
+	}
+
+	return nil
+}
+
+func runRecipeCreateFromTOML(cmd *cobra.Command, args []string) error {
+	tomlPath := createFromTOMLFlag
 
 	// Resolve relative paths.
 	if !filepath.IsAbs(tomlPath) {
@@ -477,8 +579,11 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("TOML file is empty")
 	}
 
-	// 2. Determine the recipe name: --name flag takes precedence, else extract from TOML.
+	// Determine the recipe name: --name flag > positional arg > TOML formula field.
 	name := createNameFlag
+	if name == "" && len(args) > 0 {
+		name = args[0]
+	}
 	if name == "" {
 		var f tomlFormula
 		if err := toml.Unmarshal(data, &f); err == nil && f.Formula != "" {
@@ -489,7 +594,6 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not determine recipe name — set 'formula' in the TOML or use --name")
 	}
 
-	// 3. Connect to the server.
 	creds, err := cli.LoadCredentials()
 	if err != nil {
 		return err
@@ -497,7 +601,7 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	// 4. POST /api/v1/recipes — create the recipe.
+	// POST /api/v1/recipes — create the recipe.
 	createBody := map[string]interface{}{
 		"name": name,
 	}
@@ -524,7 +628,7 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse recipe response: %w", err)
 	}
 
-	// 5. POST /api/v1/recipes/:id/versions — create version 1 with the TOML content.
+	// POST /api/v1/recipes/:id/versions — create version with TOML content.
 	versionBody := map[string]interface{}{
 		"content":       content,
 		"changeSummary": "Initial import from TOML file",
@@ -549,7 +653,7 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse version response: %w", err)
 	}
 
-	// 6. POST /api/v1/recipes/:id/versions/:vid/publish — auto-publish the first version.
+	// POST /api/v1/recipes/:id/versions/:vid/publish — auto-publish.
 	publishPath := fmt.Sprintf("/api/v1/recipes/%s/versions/%d/publish", recipe.ID, version.ID)
 	resp, err = client.Post(publishPath, nil)
 	if err != nil {
@@ -565,7 +669,6 @@ func runRecipeCreate(cmd *cobra.Command, args []string) error {
 	}
 	resp.Body.Close()
 
-	// 7. Output result.
 	if createJSONFlag {
 		output := map[string]interface{}{
 			"recipeId": recipe.ID,
@@ -680,6 +783,235 @@ func runRecipePublish(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Recipe %q version %d published\n", slug, published.VersionNumber)
+	return nil
+}
+
+func runRecipeTasks(cmd *cobra.Command, args []string) error {
+	slug := args[0]
+
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return err
+	}
+
+	client := newClientWithSpace(creds)
+
+	// Resolve slug to recipe ID.
+	recipeID, err := resolveRecipeSlug(client, slug)
+	if err != nil {
+		return err
+	}
+
+	// GET /api/v1/recipes/:id — includes task tree in currentVersion.
+	path := fmt.Sprintf("/api/v1/recipes/%s", recipeID)
+	resp, err := client.Get(path)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("server error: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var recipe struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		CurrentVersion *struct {
+			RootTaskID *string         `json:"rootTaskId,omitempty"`
+			TaskTree   *cliTaskTree    `json:"taskTree,omitempty"`
+		} `json:"currentVersion,omitempty"`
+	}
+	if err := cli.ReadJSON(resp, &recipe); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	rootTaskID := ""
+	if recipe.CurrentVersion != nil && recipe.CurrentVersion.RootTaskID != nil {
+		rootTaskID = *recipe.CurrentVersion.RootTaskID
+	}
+
+	if rootTaskID == "" {
+		fmt.Println("No task tree found for this recipe.")
+		return nil
+	}
+
+	// Fetch the task tree via GET /api/v1/tasks/:id/tree.
+	treePath := fmt.Sprintf("/api/v1/tasks/%s/tree", rootTaskID)
+	resp, err = client.Get(treePath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("server error: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var tree cliTaskTree
+	if err := cli.ReadJSON(resp, &tree); err != nil {
+		return fmt.Errorf("failed to parse task tree: %w", err)
+	}
+
+	if recipeTasksJSONFlag {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(tree)
+	}
+
+	// Also fetch deps for all tasks in the tree to show dependency info.
+	allTasks := flattenTree(&tree)
+	depMap := fetchAllDeps(client, allTasks)
+
+	fmt.Printf("Recipe: %s (root: %s)\n\n", recipe.Name, tree.ID)
+	printTaskTree(&tree, "", true, depMap)
+
+	return nil
+}
+
+// cliTaskTree mirrors the task tree response for CLI display.
+type cliTaskTree struct {
+	ID                string        `json:"id"`
+	Title             string        `json:"title"`
+	Type              string        `json:"type"`
+	Status            string        `json:"status"`
+	StationID         *string       `json:"stationId,omitempty"`
+	Description       *string       `json:"description,omitempty"`
+	EstimatedTimeSecs *int          `json:"estimatedTimeSeconds,omitempty"`
+	Children          []cliTaskTree `json:"children"`
+}
+
+// printTaskTree recursively prints a task tree with indentation.
+func printTaskTree(node *cliTaskTree, prefix string, isLast bool, depMap map[string][]string) {
+	connector := "├── "
+	childPrefix := "│   "
+	if isLast {
+		connector = "└── "
+		childPrefix = "    "
+	}
+
+	// For the root node, don't print a connector.
+	if prefix == "" {
+		fmt.Printf("%s [%s]\n", node.Title, node.ID)
+	} else {
+		line := fmt.Sprintf("%s%s%s [%s]", prefix, connector, node.Title, node.ID)
+		fmt.Print(line)
+
+		// Show deps inline.
+		if deps, ok := depMap[node.ID]; ok && len(deps) > 0 {
+			fmt.Printf("  (after: %s)", strings.Join(deps, ", "))
+		}
+		fmt.Println()
+	}
+
+	for i, child := range node.Children {
+		isChildLast := i == len(node.Children)-1
+		printTaskTree(&child, prefix+childPrefix, isChildLast, depMap)
+	}
+}
+
+// flattenTree collects all task IDs from a tree.
+func flattenTree(node *cliTaskTree) []string {
+	ids := []string{node.ID}
+	for i := range node.Children {
+		ids = append(ids, flattenTree(&node.Children[i])...)
+	}
+	return ids
+}
+
+// fetchAllDeps fetches dependencies for all tasks and returns a map of taskID -> blocker IDs.
+func fetchAllDeps(client *cli.Client, taskIDs []string) map[string][]string {
+	depMap := make(map[string][]string)
+	for _, id := range taskIDs {
+		path := fmt.Sprintf("/api/v1/tasks/%s/deps", id)
+		resp, err := client.Get(path)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+
+		var deps struct {
+			Blockers []struct {
+				ToTaskID string `json:"toTaskId"`
+			} `json:"blockers"`
+		}
+		if err := cli.ReadJSON(resp, &deps); err != nil {
+			continue
+		}
+
+		for _, b := range deps.Blockers {
+			depMap[id] = append(depMap[id], b.ToTaskID)
+		}
+	}
+	return depMap
+}
+
+func runRecipeRoll(cmd *cobra.Command, args []string) error {
+	slug := args[0]
+
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return err
+	}
+
+	client := newClientWithSpace(creds)
+
+	recipeID, err := resolveRecipeSlug(client, slug)
+	if err != nil {
+		return err
+	}
+
+	rollBody := map[string]interface{}{}
+	if rollTitleFlag != "" {
+		rollBody["title"] = rollTitleFlag
+	}
+	if rollOrderQtyFlag > 0 {
+		rollBody["orderQty"] = rollOrderQtyFlag
+	}
+
+	path := fmt.Sprintf("/api/v1/recipes/%s/roll", recipeID)
+	resp, err := client.Post(path, rollBody)
+	if err != nil {
+		return fmt.Errorf("failed to connect to server: %w", err)
+	}
+
+	if err := cli.Handle401(resp); err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var errResp errorResponse
+		if err := cli.ReadJSON(resp, &errResp); err == nil && errResp.Error != "" {
+			return fmt.Errorf("roll failed: %s", errResp.Error)
+		}
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var job pourResponse
+	if err := cli.ReadJSON(resp, &job); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if rollJSONFlag {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(job)
+	}
+
+	fmt.Printf("Job %s created: %s\n", job.ID, job.Title)
 	return nil
 }
 

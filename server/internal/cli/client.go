@@ -95,6 +95,11 @@ func (c *Client) Put(path string, body interface{}) (*http.Response, error) {
 	return c.doRequest(http.MethodPut, path, body)
 }
 
+// Delete sends a DELETE request and returns the response.
+func (c *Client) Delete(path string) (*http.Response, error) {
+	return c.doRequest(http.MethodDelete, path, nil)
+}
+
 // ReadJSON reads and unmarshals a JSON response body. Caller is responsible for
 // closing the response body after this call.
 func ReadJSON(resp *http.Response, target interface{}) error {

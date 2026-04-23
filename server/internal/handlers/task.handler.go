@@ -95,7 +95,7 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 		// from the tasks list. Use GET /api/v1/jobs for jobs and
 		// GET /api/v1/recipes/:id/tasks for recipe trees.
 		filter.ExcludeTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
-		filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
+		filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeRecipe}
 	}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
@@ -507,7 +507,7 @@ func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 	taskType := models.TaskTypeTask
 	var filter services.ReadyTaskFilter
 	filter.Type = &taskType
-	filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
+	filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeRecipe}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
 			filter.StationID = &id
