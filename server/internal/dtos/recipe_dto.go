@@ -83,7 +83,7 @@ type RecipeVersionResponse struct {
 	VersionNumber int                        `json:"versionNumber"`
 	Status        models.RecipeVersionStatus `json:"status"`
 	Content       *string                    `json:"content,omitempty"`
-	RootTaskID    *uuid.UUID                 `json:"rootTaskId,omitempty"`
+	RootTaskID    *string                     `json:"rootTaskId,omitempty"`
 	ChangeSummary *string                    `json:"changeSummary,omitempty"`
 	AuthorID      uuid.UUID                  `json:"authorId"`
 	PublishedAt   *time.Time                 `json:"publishedAt,omitempty"`
@@ -123,7 +123,7 @@ func RecipeVersionResponseWithTree(v *models.RecipeVersion, tasks []models.Task)
 	resp := RecipeVersionResponseFromModel(v)
 	if v.RootTaskID != nil && len(tasks) > 0 {
 		// Find the root task in the tasks slice.
-		rootID := v.RootTaskID.String()
+		rootID := *v.RootTaskID
 		for i := range tasks {
 			if tasks[i].ID == rootID {
 				tree := BuildTaskTree(&tasks[i], tasks)

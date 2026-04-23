@@ -145,7 +145,7 @@ func (r *RecipeRepository) GetVersionWithTaskTree(id int) (*models.RecipeVersion
 
 	// Load the root task.
 	var rootTask models.Task
-	if err := r.db.First(&rootTask, "id = ?", version.RootTaskID.String()).Error; err != nil {
+	if err := r.db.First(&rootTask, "id = ?", *version.RootTaskID).Error; err != nil {
 		return nil, nil, fmt.Errorf("loading root task: %w", err)
 	}
 	version.RootTask = &rootTask

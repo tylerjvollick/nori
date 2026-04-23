@@ -621,8 +621,7 @@ func (s *RecipeService) CreateRecipeWithTaskTree(
 	}
 
 	recipeID := uuid.New()
-	rootTaskUUID := uuid.New()
-	rootTaskID := rootTaskUUID.String()
+	rootTaskID := uuid.New().String()
 	now := time.Now()
 
 	recipe := &models.Recipe{
@@ -655,7 +654,7 @@ func (s *RecipeService) CreateRecipeWithTaskTree(
 		RecipeID:      recipeID,
 		VersionNumber: 1,
 		Status:        models.RecipeVersionStatusDraft,
-		RootTaskID:    &rootTaskUUID,
+		RootTaskID:    &rootTaskID,
 		AuthorID:      createdByID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -709,7 +708,7 @@ func (s *RecipeService) AddRecipeStep(
 		return nil, err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if !isTaskInTree(parentTaskID, rootTaskID) {
 		return nil, fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
 	}
@@ -762,7 +761,7 @@ func (s *RecipeService) RemoveRecipeStep(recipeID uuid.UUID, taskID string) erro
 		return err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if taskID == rootTaskID {
 		return fmt.Errorf("cannot remove the root task of a recipe")
 	}
@@ -811,7 +810,7 @@ func (s *RecipeService) ReorderRecipeSteps(recipeID uuid.UUID, parentTaskID stri
 		return err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if !isTaskInTree(parentTaskID, rootTaskID) {
 		return fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
 	}
@@ -844,7 +843,7 @@ func (s *RecipeService) UpdateRecipeStep(recipeID uuid.UUID, taskID string, opts
 		return nil, err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if !isTaskInTree(taskID, rootTaskID) {
 		return nil, fmt.Errorf("task %q is not in recipe %s tree", taskID, recipeID)
 	}
@@ -886,7 +885,7 @@ func (s *RecipeService) AddStepDependency(recipeID uuid.UUID, fromTaskID string,
 		return err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if !isTaskInTree(fromTaskID, rootTaskID) {
 		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
 	}
@@ -916,7 +915,7 @@ func (s *RecipeService) RemoveStepDependency(recipeID uuid.UUID, fromTaskID stri
 		return err
 	}
 
-	rootTaskID := version.RootTaskID.String()
+	rootTaskID := *version.RootTaskID
 	if !isTaskInTree(fromTaskID, rootTaskID) {
 		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
 	}
@@ -951,9 +950,8 @@ func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersio
 	}
 
 	// 2. Deep-clone the draft task tree.
-	sourceRootID := version.RootTaskID.String()
-	clonedRootUUID := uuid.New()
-	clonedRootID := clonedRootUUID.String()
+	sourceRootID := *version.RootTaskID
+	clonedRootID := uuid.New().String()
 
 	_, err = s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
 		NewRootID: clonedRootID,
@@ -963,7 +961,7 @@ func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersio
 	}
 
 	// 3. Update the version's RootTaskID to the cloned root.
-	version.RootTaskID = &clonedRootUUID
+	version.RootTaskID = &clonedRootID
 	if err := s.recipeRepo.UpdateVersion(version); err != nil {
 		return nil, fmt.Errorf("updating version root task: %w", err)
 	}
@@ -1021,10 +1019,9 @@ func (s *RecipeService) CreateDraftFromPublished(
 	}
 
 	// 4. Clone the published task tree.
-	clonedRootUUID := uuid.New()
-	clonedRootID := clonedRootUUID.String()
+	clonedRootID := uuid.New().String()
 
-	_, err = s.DeepCloneTaskTree(publishedVersion.RootTaskID.String(), TaskTreeCloneOptions{
+	_, err = s.DeepCloneTaskTree(*publishedVersion.RootTaskID, TaskTreeCloneOptions{
 		NewRootID: clonedRootID,
 		RecipeID:  &recipeID,
 	})
@@ -1044,7 +1041,7 @@ func (s *RecipeService) CreateDraftFromPublished(
 		RecipeID:      recipeID,
 		VersionNumber: nextVersion,
 		Status:        models.RecipeVersionStatusDraft,
-		RootTaskID:    &clonedRootUUID,
+		RootTaskID:    &clonedRootID,
 		ChangeSummary: changeSummary,
 		AuthorID:      authorID,
 		CreatedAt:     now,
@@ -1447,7 +1444,7 @@ func (s *RecipeService) RollRecipe(
 		return nil, fmt.Errorf("published version %d has no root task tree", version.ID)
 	}
 
-	sourceRootID := version.RootTaskID.String()
+	sourceRootID := *version.RootTaskID
 	newRootID := generateTaskID()
 	orderQty := 1
 	if opts.OrderQty != nil {
@@ -1750,8 +1747,7 @@ func (s *RecipeService) SaveAsRecipe(
 
 	// 2. Prepare IDs and timestamps.
 	recipeID := uuid.New()
-	rootTaskUUID := uuid.New()
-	newRootID := rootTaskUUID.String()
+	newRootID := uuid.New().String()
 	now := time.Now()
 
 	// 3. Create Recipe record.
@@ -1797,7 +1793,7 @@ func (s *RecipeService) SaveAsRecipe(
 		RecipeID:      recipeID,
 		VersionNumber: 1,
 		Status:        models.RecipeVersionStatusDraft,
-		RootTaskID:    &rootTaskUUID,
+		RootTaskID:    &newRootID,
 		AuthorID:      createdByID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
