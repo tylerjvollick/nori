@@ -113,6 +113,10 @@ func (r *RecipeRepository) CreateVersion(version *models.RecipeVersion) error {
 	return r.db.Create(version).Error
 }
 
+func (r *RecipeRepository) UpdateVersion(version *models.RecipeVersion) error {
+	return r.db.Save(version).Error
+}
+
 func (r *RecipeRepository) GetVersionByID(id int) (*models.RecipeVersion, error) {
 	var version models.RecipeVersion
 	err := r.db.First(&version, "id = ?", id).Error

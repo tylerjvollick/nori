@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -75,7 +76,33 @@ func (m *mockRecipeRepo) GetVersionWithTaskTree(id int) (*models.RecipeVersion, 
 	return v, nil, nil
 }
 
-func (m *mockRecipeRepo) PublishVersion(_ int) error {
+func (m *mockRecipeRepo) UpdateVersion(version *models.RecipeVersion) error {
+	m.versions[version.ID] = version
+	return nil
+}
+
+func (m *mockRecipeRepo) PublishVersion(versionID int) error {
+	v, ok := m.versions[versionID]
+	if !ok {
+		return errNotFound("recipe version not found")
+	}
+
+	// Archive previously published versions for the same recipe.
+	for _, other := range m.versions {
+		if other.RecipeID == v.RecipeID && other.Status == models.RecipeVersionStatusPublished && other.ID != versionID {
+			other.Status = models.RecipeVersionStatusArchived
+		}
+	}
+
+	now := time.Now()
+	v.Status = models.RecipeVersionStatusPublished
+	v.PublishedAt = &now
+
+	// Update Recipe.CurrentVersionID.
+	if r, ok := m.recipes[v.RecipeID]; ok {
+		r.CurrentVersionID = &v.ID
+	}
+
 	return nil
 }
 
@@ -2837,5 +2864,286 @@ func TestServiceSlugify(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("serviceSlugify(%q) = %q, want %q", tt.input, result, tt.expected)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PublishVersion Tests
+// ---------------------------------------------------------------------------
+
+// setupRecipeWithDraftTree creates a recipe with a draft version and a task tree
+// (root + children + deps) for testing PublishVersion.
+func setupRecipeWithDraftTree(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	// Create recipe with task tree via the service.
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Publish Test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	// Add child steps under the root.
+	rootTaskID := version.RootTaskID.String()
+	step1, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step 1", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep 1: %v", err)
+	}
+	step2, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Step 2", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep 2: %v", err)
+	}
+
+	// Add a dependency: step2 depends on step1.
+	if err := svc.AddStepDependency(recipe.ID, step2.ID, step1.ID); err != nil {
+		t.Fatalf("AddStepDependency: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipe.ID
+}
+
+func TestPublishVersion_ClonesTaskTree(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupRecipeWithDraftTree(t)
+
+	// Count tasks before publish.
+	tasksBefore := len(taskRepo.tasks)
+
+	published, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	// The published version should have status=published.
+	if published.Status != models.RecipeVersionStatusPublished {
+		t.Errorf("expected status=published, got %s", published.Status)
+	}
+	if published.PublishedAt == nil {
+		t.Error("expected PublishedAt to be set")
+	}
+
+	// The published RootTaskID should differ from the draft's (it's a clone).
+	// The cloned tree should have the same number of tasks as the draft tree.
+	tasksAfter := len(taskRepo.tasks)
+	if tasksAfter != tasksBefore*2 {
+		t.Errorf("expected %d tasks after clone (draft + clone), got %d", tasksBefore*2, tasksAfter)
+	}
+
+	// The published version's RootTaskID should point to a cloned root that exists.
+	if published.RootTaskID == nil {
+		t.Fatal("published version has no RootTaskID")
+	}
+	clonedRootID := published.RootTaskID.String()
+	if _, err := taskRepo.GetByID(clonedRootID); err != nil {
+		t.Errorf("cloned root task %q not found: %v", clonedRootID, err)
+	}
+}
+
+func TestPublishVersion_ClonesDependencies(t *testing.T) {
+	svc, _, _, depRepo, recipeID := setupRecipeWithDraftTree(t)
+
+	// Before publish: 1 dep (step2 → step1).
+	depsBefore := len(depRepo.deps)
+	if depsBefore != 1 {
+		t.Fatalf("expected 1 dep before publish, got %d", depsBefore)
+	}
+
+	_, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	// After publish: 2 deps (original + cloned).
+	depsAfter := len(depRepo.deps)
+	if depsAfter != 2 {
+		t.Errorf("expected 2 deps after publish, got %d", depsAfter)
+	}
+}
+
+func TestPublishVersion_UpdatesRecipeCurrentVersion(t *testing.T) {
+	svc, recipeRepo, _, _, recipeID := setupRecipeWithDraftTree(t)
+
+	published, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	recipe := recipeRepo.recipes[recipeID]
+	if recipe.CurrentVersionID == nil || *recipe.CurrentVersionID != published.ID {
+		t.Errorf("expected Recipe.CurrentVersionID=%d, got %v", published.ID, recipe.CurrentVersionID)
+	}
+}
+
+func TestPublishVersion_ArchivesPreviouslyPublished(t *testing.T) {
+	svc, recipeRepo, _, _, recipeID := setupRecipeWithDraftTree(t)
+
+	// Publish the first version.
+	v1, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion v1: %v", err)
+	}
+
+	// Create a new draft version for the same recipe.
+	versions, _ := recipeRepo.ListVersions(recipeID)
+	draftVersion := versions[0] // The existing draft
+	// We need a new draft. Since the original draft was just published,
+	// create a new one manually.
+	rootUUID := uuid.New()
+	newDraft := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: 2,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &rootUUID,
+		AuthorID:      v1.AuthorID,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	_ = draftVersion // suppress unused
+	if err := recipeRepo.CreateVersion(newDraft); err != nil {
+		t.Fatalf("CreateVersion: %v", err)
+	}
+
+	// Create a root task for the new draft.
+	rootTask := &models.Task{
+		ID:      rootUUID.String(),
+		SpaceID: uuid.New(),
+		Type:    models.TaskTypeRecipe,
+		Status:  models.TaskStatusOpen,
+		Title:   "v2 root",
+	}
+	svc.taskRepo.Create(rootTask)
+
+	// Publish the new version.
+	v2, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion v2: %v", err)
+	}
+
+	// v1 should now be archived.
+	v1After := recipeRepo.versions[v1.ID]
+	if v1After.Status != models.RecipeVersionStatusArchived {
+		t.Errorf("expected v1 status=archived, got %s", v1After.Status)
+	}
+
+	// v2 should be published.
+	if v2.Status != models.RecipeVersionStatusPublished {
+		t.Errorf("expected v2 status=published, got %s", v2.Status)
+	}
+
+	// Recipe should point to v2.
+	recipe := recipeRepo.recipes[recipeID]
+	if recipe.CurrentVersionID == nil || *recipe.CurrentVersionID != v2.ID {
+		t.Errorf("expected Recipe.CurrentVersionID=%d, got %v", v2.ID, recipe.CurrentVersionID)
+	}
+}
+
+func TestPublishVersion_DraftTreeRemainsEditable(t *testing.T) {
+	svc, recipeRepo, taskRepo, _, recipeID := setupRecipeWithDraftTree(t)
+
+	// Get the draft root task ID before publishing.
+	versions, _ := recipeRepo.ListVersions(recipeID)
+	var draftVersion *models.RecipeVersion
+	for i := range versions {
+		if versions[i].Status == models.RecipeVersionStatusDraft {
+			draftVersion = &versions[i]
+			break
+		}
+	}
+	draftRootID := draftVersion.RootTaskID.String()
+
+	_, err := svc.PublishVersion(recipeID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	// The original draft root task should still exist.
+	draftRoot, err := taskRepo.GetByID(draftRootID)
+	if err != nil {
+		t.Fatalf("draft root task %q should still exist: %v", draftRootID, err)
+	}
+
+	// Draft root should be unmodified — still has its title.
+	if draftRoot.Title != "Publish Test" {
+		t.Errorf("draft root title changed unexpectedly: got %q", draftRoot.Title)
+	}
+}
+
+func TestPublishVersion_ErrorNoDraftVersion(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	recipeID := uuid.New()
+	recipeRepo.recipes[recipeID] = &models.Recipe{
+		ID:   recipeID,
+		Name: "No Draft",
+	}
+
+	_, err := svc.PublishVersion(recipeID)
+	if err == nil {
+		t.Fatal("expected error when no draft version exists")
+	}
+}
+
+func TestPublishVersion_PreservesClonedTaskFields(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+	stationID := uuid.New()
+	estTime := 300
+	batchSize := 10
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Fields Test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Detailed Step", AddStepOptions{
+		StationID:         &stationID,
+		EstimatedTimeSecs: &estTime,
+		BatchSize:         &batchSize,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	published, err := svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	// Find the cloned child task.
+	clonedRootID := published.RootTaskID.String()
+	clonedChildren, err := taskRepo.GetChildren(clonedRootID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+	if len(clonedChildren) != 1 {
+		t.Fatalf("expected 1 cloned child, got %d", len(clonedChildren))
+	}
+
+	child := clonedChildren[0]
+	if child.Title != "Detailed Step" {
+		t.Errorf("cloned title = %q, want %q", child.Title, "Detailed Step")
+	}
+	if child.StationID == nil || *child.StationID != stationID {
+		t.Errorf("cloned StationID = %v, want %v", child.StationID, stationID)
+	}
+	if child.EstimatedTimeSecs == nil || *child.EstimatedTimeSecs != estTime {
+		t.Errorf("cloned EstimatedTimeSecs = %v, want %d", child.EstimatedTimeSecs, estTime)
+	}
+	if child.BatchSize == nil || *child.BatchSize != batchSize {
+		t.Errorf("cloned BatchSize = %v, want %d", child.BatchSize, batchSize)
 	}
 }

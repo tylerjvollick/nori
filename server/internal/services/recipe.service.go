@@ -24,6 +24,7 @@ type RecipeRepositoryInterface interface {
 	GetVersionByID(id int) (*models.RecipeVersion, error)
 	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
 	CreateVersion(version *models.RecipeVersion) error
+	UpdateVersion(version *models.RecipeVersion) error
 	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
 	PublishVersion(versionID int) error
 }
@@ -919,6 +920,57 @@ func (s *RecipeService) RemoveStepDependency(recipeID uuid.UUID, fromTaskID stri
 	}
 
 	return nil
+}
+
+// PublishVersion publishes a draft recipe version by deep-cloning the draft
+// task tree into a frozen snapshot, then marking the version as published.
+//
+// Steps:
+//  1. Find the draft version and validate it has a root task
+//  2. Deep-clone the draft task tree (new IDs, same structure)
+//  3. Update the version's RootTaskID to the cloned root
+//  4. Publish the version (sets status=published, publishedAt, archives old version,
+//     updates Recipe.CurrentVersionID)
+//
+// The draft task tree remains in the database for future editing. The published
+// version's RootTaskID points to the frozen clone.
+func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersion, error) {
+	// 1. Get the draft version.
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("getting draft version: %w", err)
+	}
+
+	// 2. Deep-clone the draft task tree.
+	sourceRootID := version.RootTaskID.String()
+	clonedRootUUID := uuid.New()
+	clonedRootID := clonedRootUUID.String()
+
+	_, err = s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
+		NewRootID: clonedRootID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning draft task tree: %w", err)
+	}
+
+	// 3. Update the version's RootTaskID to the cloned root.
+	version.RootTaskID = &clonedRootUUID
+	if err := s.recipeRepo.UpdateVersion(version); err != nil {
+		return nil, fmt.Errorf("updating version root task: %w", err)
+	}
+
+	// 4. Publish: set status=published, archive old version, update Recipe.CurrentVersionID.
+	if err := s.recipeRepo.PublishVersion(version.ID); err != nil {
+		return nil, fmt.Errorf("publishing version: %w", err)
+	}
+
+	// Re-fetch the version to get the updated fields (status, publishedAt).
+	published, err := s.recipeRepo.GetVersionByID(version.ID)
+	if err != nil {
+		return nil, fmt.Errorf("re-fetching published version: %w", err)
+	}
+
+	return published, nil
 }
 
 // getDraftVersion finds the draft version for a recipe and validates it has a root task.
