@@ -64,9 +64,11 @@ func New(cfg *config.Config) *App {
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo, stationRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	timeEventRepo := repositories.NewTimeEventRepository(database.DB)
+	costEntryRepo := repositories.NewCostEntryRepository(database.DB)
 	taskService := services.NewTaskService(taskRepo, taskDepRepo, timeEventRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)
 	recipeService := services.NewRecipeService(database.DB, recipeRepo, taskRepo, taskDepRepo)
+	costService := services.NewCostService(costEntryRepo, timeEventRepo, taskRepo, spaceRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
@@ -77,6 +79,7 @@ func New(cfg *config.Config) *App {
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
 	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
+	costHandler := handlers.NewCostHandler(costService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
@@ -111,6 +114,7 @@ func New(cfg *config.Config) *App {
 	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
 	recipeHandler.RegisterRecipeVersionRoutes(app, authMiddleware, requirePasswordChanged)
 	stationHandler.RegisterStationRoutes(app, authMiddleware, requirePasswordChanged)
+	costHandler.RegisterCostRoutes(app, authMiddleware, requirePasswordChanged)
 	taskDepHandler.RegisterTaskDepRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
