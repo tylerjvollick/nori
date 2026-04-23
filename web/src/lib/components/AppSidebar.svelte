@@ -11,6 +11,7 @@
 	import {
 		LayoutGrid,
 		FileText,
+		BookOpen,
 		Package,
 		Wrench,
 		Folder,
@@ -122,6 +123,12 @@
 			url: '/sops',
 			icon: FileText,
 			isActive: isActive('/sops')
+		},
+		{
+			title: 'Recipes',
+			url: '/recipes',
+			icon: BookOpen,
+			isActive: isActive('/recipes')
 		}
 	];
 
