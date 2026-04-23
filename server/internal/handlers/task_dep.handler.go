@@ -40,10 +40,10 @@ func NewTaskDepHandler(taskDepRepo TaskDepRepoInterface, taskService TaskDepTask
 	return &TaskDepHandler{taskDepRepo: taskDepRepo, taskService: taskService}
 }
 
-// RegisterTaskDepRoutes registers task dependency API routes on the Fiber app.
-// Routes are nested under /api/v1/tasks/:id/deps.
-func (h *TaskDepHandler) RegisterTaskDepRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/tasks/:id/deps", middlewares...)
+// RegisterTaskDepRoutes registers task dependency API routes under a space-scoped router.
+// Routes are nested under /tasks/:id/deps.
+func (h *TaskDepHandler) RegisterTaskDepRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/tasks/:id/deps", middlewares...)
 
 	group.Get("", h.GetDeps)
 	group.Post("", h.AddDep)
@@ -51,14 +51,12 @@ func (h *TaskDepHandler) RegisterTaskDepRoutes(app *fiber.App, middlewares ...fi
 }
 
 // getTaskInSpace fetches a task by ID and verifies it belongs to the
-// requester's active space. Returns 404 on mismatch to avoid leaking existence.
+// space from the URL path. Returns 404 on mismatch to avoid leaking existence.
 // On failure, the JSON error response is written to c and a non-nil error is
 // returned so the caller can short-circuit.
-func (h *TaskDepHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID string) (*models.Task, error) {
-	if authDTO.ActiveSpaceID == nil {
-		_ = c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+func (h *TaskDepHandler) getTaskInSpace(c *fiber.Ctx, taskID string) (*models.Task, error) {
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
 		return nil, errResponseSent
 	}
 
@@ -70,7 +68,7 @@ func (h *TaskDepHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, tas
 		return nil, errResponseSent
 	}
 
-	if task.SpaceID != *authDTO.ActiveSpaceID {
+	if task.SpaceID != spaceID {
 		_ = c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "task not found",
 		})
@@ -83,8 +81,7 @@ func (h *TaskDepHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, tas
 // GetDeps returns all dependencies for a task (both directions).
 // GET /api/v1/tasks/:id/deps
 func (h *TaskDepHandler) GetDeps(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -95,7 +92,7 @@ func (h *TaskDepHandler) GetDeps(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return nil
 	}
 
@@ -152,7 +149,7 @@ func (h *TaskDepHandler) AddDep(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return nil
 	}
 
@@ -176,7 +173,7 @@ func (h *TaskDepHandler) AddDep(c *fiber.Ctx) error {
 	}
 
 	// Verify the target task also belongs to the same space.
-	if _, err := h.getTaskInSpace(c, authDTO, req.TargetTaskID); err != nil {
+	if _, err := h.getTaskInSpace(c, req.TargetTaskID); err != nil {
 		return nil
 	}
 
@@ -219,7 +216,7 @@ func (h *TaskDepHandler) RemoveDep(c *fiber.Ctx) error {
 		})
 	}
 
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return nil
 	}
 

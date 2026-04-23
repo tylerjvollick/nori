@@ -113,8 +113,6 @@ func New(cfg *config.Config) *App {
 
 	// ── Fully guarded routes (auth + password changed) ─────────────────
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
-	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
-	taskDepHandler.RegisterTaskDepRoutes(app, authMiddleware, requirePasswordChanged)
 
 	// ── Space-scoped routes (/api/v1/spaces/:spaceId/...) ─────────────
 	spaceScoped := app.Group("/api/v1/spaces/:spaceId", authMiddleware, requirePasswordChanged, middleware.RequireSpace(spaceMemberRepo))
@@ -124,6 +122,8 @@ func New(cfg *config.Config) *App {
 	recipeHandler.RegisterRecipeRoutes(spaceScoped)
 	recipeHandler.RegisterRecipeVersionRoutes(spaceScoped)
 	jobHandler.RegisterJobRoutes(spaceScoped)
+	taskHandler.RegisterTaskRoutes(spaceScoped)
+	taskDepHandler.RegisterTaskDepRoutes(spaceScoped)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())

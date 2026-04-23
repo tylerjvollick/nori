@@ -115,14 +115,20 @@ func (m *mockTaskDepTaskService) GetTaskByID(id string) (*models.Task, error) {
 
 // --- Test helpers ---
 
-func setupTaskDepApp(handler *TaskDepHandler, authDTO *dtos.AuthDTO) *fiber.App {
+func setupTaskDepApp(handler *TaskDepHandler, authDTO *dtos.AuthDTO, spaceID uuid.UUID) *fiber.App {
 	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("authDTO", authDTO)
+		c.Locals("spaceID", spaceID)
 		return c.Next()
 	})
-	handler.RegisterTaskDepRoutes(app)
+	spaceGroup := app.Group("/api/v1/spaces/:spaceId")
+	handler.RegisterTaskDepRoutes(spaceGroup)
 	return app
+}
+
+func taskDepURL(spaceID uuid.UUID, taskID, rest string) string {
+	return "/api/v1/spaces/" + spaceID.String() + "/tasks/" + taskID + "/deps" + rest
 }
 
 // --- GetDeps tests ---
@@ -149,9 +155,9 @@ func TestGetDeps_Success(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -189,9 +195,9 @@ func TestGetDeps_WithBlockers(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -214,9 +220,9 @@ func TestGetDeps_EmptyResults(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -235,9 +241,9 @@ func TestGetDeps_TaskNotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/nonexistent/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, "nonexistent", ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -255,9 +261,9 @@ func TestGetDeps_WrongSpace(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -276,9 +282,9 @@ func TestGetDeps_GetBlockersError(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
@@ -301,9 +307,9 @@ func TestGetDeps_GetDependentsError(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/deps", nil)
+	req := httptest.NewRequest(http.MethodGet, taskDepURL(spaceID, taskID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
@@ -311,32 +317,6 @@ func TestGetDeps_GetDependentsError(t *testing.T) {
 	var result map[string]string
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.Equal(t, "failed to get dependents", result["error"])
-}
-
-func TestGetDeps_NoSpaceID(t *testing.T) {
-	depRepo := newMockTaskDepRepo()
-	taskSvc := newMockTaskDepTaskService()
-
-	handler := NewTaskDepHandler(depRepo, taskSvc)
-	adminRole := models.RoleAdmin
-	auth := &dtos.AuthDTO{
-		User: models.User{
-			ID:   uuid.New(),
-			Role: &adminRole,
-		},
-		AccountID:     uuid.New(),
-		ActiveSpaceID: nil,
-	}
-	app := setupTaskDepApp(handler, auth)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/ORD-1.1/deps", nil)
-	resp, err := app.Test(req, -1)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-
-	var result map[string]string
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	assert.Equal(t, "X-Space-ID header is required", result["error"])
 }
 
 // --- AddDep tests ---
@@ -354,13 +334,13 @@ func TestAddDep_AdminSuccess(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": targetTaskID,
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -391,13 +371,13 @@ func TestAddDep_NonAdminForbidden(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := userAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": "ORD-1.1",
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -413,13 +393,13 @@ func TestAddDep_TaskNotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": "ORD-1.1",
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/nonexistent/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, "nonexistent", ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -439,13 +419,13 @@ func TestAddDep_TargetTaskNotFound(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": "ORD-1.1",
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -467,13 +447,13 @@ func TestAddDep_TargetTaskWrongSpace(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": targetTaskID,
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -492,12 +472,12 @@ func TestAddDep_MissingTargetTaskId(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"type": "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -520,12 +500,12 @@ func TestAddDep_MissingType(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": "ORD-1.1",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -548,9 +528,9 @@ func TestAddDep_InvalidBody(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader([]byte("not json")))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -573,13 +553,13 @@ func TestAddDep_RepoAddError(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"targetTaskId": targetTaskID,
 		"type":         "blocks",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID+"/deps", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, taskDepURL(spaceID, taskID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -615,9 +595,9 @@ func TestRemoveDep_AdminSuccess(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+taskID+"/deps/"+depID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, taskID, "/"+depID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
@@ -635,9 +615,9 @@ func TestRemoveDep_NonAdminForbidden(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := userAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+taskID+"/deps/"+depID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, taskID, "/"+depID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
@@ -651,10 +631,10 @@ func TestRemoveDep_TaskNotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
 	depID := uuid.New()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/nonexistent/deps/"+depID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, "nonexistent", "/"+depID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -671,9 +651,9 @@ func TestRemoveDep_InvalidDepID(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+taskID+"/deps/not-a-uuid", nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, taskID, "/not-a-uuid"), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -697,9 +677,9 @@ func TestRemoveDep_DepNotFound(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+taskID+"/deps/"+depID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, taskID, "/"+depID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -722,9 +702,9 @@ func TestRemoveDep_WrongSpace(t *testing.T) {
 	handler := NewTaskDepHandler(depRepo, taskSvc)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupTaskDepApp(handler, auth)
+	app := setupTaskDepApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+taskID+"/deps/"+depID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, taskDepURL(spaceID, taskID, "/"+depID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
