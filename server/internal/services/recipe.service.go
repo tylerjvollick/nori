@@ -84,7 +84,7 @@ func (s *RecipeService) PourRecipe(
 
 	// 2. Parse TOML content through formula engine.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(version.Content))
+	f, err := parser.ParseTOML([]byte(*version.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing recipe TOML: %w", err)
 	}
@@ -500,7 +500,7 @@ func (s *RecipeService) DiffJobToRecipe(jobID string, recipeVersionID int) (*Rec
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(version.Content))
+	f, err := parser.ParseTOML([]byte(*version.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing recipe TOML: %w", err)
 	}
@@ -760,7 +760,7 @@ func (s *RecipeService) PromoteJobToRecipe(
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(sourceVersion.Content))
+	f, err := parser.ParseTOML([]byte(*sourceVersion.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing source TOML: %w", err)
 	}
@@ -792,7 +792,7 @@ func (s *RecipeService) PromoteJobToRecipe(
 		RecipeID:      recipeID,
 		VersionNumber: nextVersionNumber,
 		Status:        models.RecipeVersionStatusDraft,
-		Content:       newContent,
+		Content:       &newContent,
 		AuthorID:      rootTask.CreatedByID,
 		CreatedAt:     now,
 		UpdatedAt:     now,

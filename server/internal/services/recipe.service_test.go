@@ -267,7 +267,7 @@ func setupRecipeService(tomlContent string) (*RecipeService, uuid.UUID, uuid.UUI
 		RecipeID:      recipeID,
 		VersionNumber: 1,
 		Status:        models.RecipeVersionStatusPublished,
-		Content:       tomlContent,
+		Content:       &tomlContent,
 		AuthorID:      userID,
 	}
 
@@ -868,7 +868,7 @@ func TestPromoteJobToRecipe_NoDiff(t *testing.T) {
 	}
 
 	// Content should be valid TOML.
-	if newVersion.Content == "" {
+	if newVersion.Content == nil || *newVersion.Content == "" {
 		t.Error("expected non-empty content")
 	}
 }
@@ -892,7 +892,7 @@ func TestPromoteJobToRecipe_ModifiedTitle(t *testing.T) {
 
 	// Parse the new content and verify the title was updated.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}
@@ -931,7 +931,7 @@ func TestPromoteJobToRecipe_AddedTask(t *testing.T) {
 
 	// Parse the new content and verify the added step.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}
@@ -969,7 +969,7 @@ func TestPromoteJobToRecipe_RemovedTask(t *testing.T) {
 
 	// Parse the new content and verify the step was removed.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}
@@ -1017,7 +1017,7 @@ func TestPromoteJobToRecipe_MixedChanges(t *testing.T) {
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}
@@ -1111,7 +1111,7 @@ func TestPromoteJobToRecipe_PreservesFormulaMetadata(t *testing.T) {
 
 	// Parse the new content and verify formula metadata is preserved.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}
@@ -1145,7 +1145,7 @@ func TestPromoteJobToRecipe_PreservesDependencies(t *testing.T) {
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(newVersion.Content))
+	f, err := parser.ParseTOML([]byte(*newVersion.Content))
 	if err != nil {
 		t.Fatalf("failed to parse new version TOML: %v", err)
 	}

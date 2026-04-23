@@ -395,7 +395,7 @@ func (h *RecipeHandler) CreateVersion(c *fiber.Ctx) error {
 		RecipeID:      recipeID,
 		VersionNumber: nextVersion,
 		Status:        models.RecipeVersionStatusDraft,
-		Content:       dto.Content,
+		Content:       &dto.Content,
 		ChangeSummary: dto.ChangeSummary,
 		AuthorID:      authDTO.User.ID,
 		CreatedAt:     now,

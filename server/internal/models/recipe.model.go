@@ -52,7 +52,8 @@ type RecipeVersion struct {
 	RecipeID      uuid.UUID           `gorm:"type:uuid;not null" json:"recipeId"`
 	VersionNumber int                 `gorm:"not null" json:"versionNumber"`
 	Status        RecipeVersionStatus `gorm:"type:varchar(50);not null;default:'draft'" json:"status"`
-	Content       string              `gorm:"type:text;not null" json:"content"`
+	Content       *string             `gorm:"type:text" json:"content,omitempty"`
+	RootTaskID    *uuid.UUID          `gorm:"type:uuid" json:"rootTaskId,omitempty"`
 	ChangeSummary *string             `json:"changeSummary,omitempty"`
 	AuthorID      uuid.UUID           `gorm:"type:uuid;not null" json:"authorId"`
 	PublishedAt   *time.Time          `json:"publishedAt,omitempty"`

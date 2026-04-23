@@ -65,7 +65,8 @@ type RecipeVersionResponse struct {
 	RecipeID      uuid.UUID                  `json:"recipeId"`
 	VersionNumber int                        `json:"versionNumber"`
 	Status        models.RecipeVersionStatus `json:"status"`
-	Content       string                     `json:"content"`
+	Content       *string                    `json:"content,omitempty"`
+	RootTaskID    *uuid.UUID                 `json:"rootTaskId,omitempty"`
 	ChangeSummary *string                    `json:"changeSummary,omitempty"`
 	AuthorID      uuid.UUID                  `json:"authorId"`
 	PublishedAt   *time.Time                 `json:"publishedAt,omitempty"`
@@ -106,6 +107,7 @@ func RecipeVersionResponseFromModel(v *models.RecipeVersion) RecipeVersionRespon
 		VersionNumber: v.VersionNumber,
 		Status:        v.Status,
 		Content:       v.Content,
+		RootTaskID:    v.RootTaskID,
 		ChangeSummary: v.ChangeSummary,
 		AuthorID:      v.AuthorID,
 		PublishedAt:   v.PublishedAt,
