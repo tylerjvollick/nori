@@ -118,6 +118,16 @@ class TaskApi {
 	async getTaskDeps(id: string): Promise<TaskDepsResponse> {
 		return apiClient.get<TaskDepsResponse>(`${BASE}/${id}/deps`);
 	}
+
+	/** Add a dependency: blockerId blocks targetTaskId. */
+	async addDep(blockerId: string, targetTaskId: string, type: string = 'finish_to_start'): Promise<TaskDep> {
+		return apiClient.post<TaskDep>(`${BASE}/${blockerId}/deps`, { targetTaskId, type });
+	}
+
+	/** Remove a dependency edge by its UUID. */
+	async removeDep(taskId: string, depId: string): Promise<void> {
+		return apiClient.delete<void>(`${BASE}/${taskId}/deps/${depId}`);
+	}
 }
 
 export const taskApi = new TaskApi();
