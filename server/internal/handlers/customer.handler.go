@@ -24,26 +24,25 @@ func NewCustomerHandler(customerRepo CustomerRepoInterface) *CustomerHandler {
 	return &CustomerHandler{customerRepo: customerRepo}
 }
 
-// RegisterCustomerRoutes registers customer API routes on the Fiber app.
-func (h *CustomerHandler) RegisterCustomerRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/customers", middlewares...)
+// RegisterCustomerRoutes registers customer API routes under a space-scoped router.
+// Expects the router to already have :spaceId in its path and RequireSpace middleware applied.
+func (h *CustomerHandler) RegisterCustomerRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/customers", middlewares...)
 	group.Get("", h.ListCustomers)
 }
 
-// ListCustomers returns all customers for the active space.
+// ListCustomers returns all customers for the space.
 func (h *CustomerHandler) ListCustomers(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
-	customers, err := h.customerRepo.GetBySpaceID(*authDTO.ActiveSpaceID)
+	customers, err := h.customerRepo.GetBySpaceID(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to list customers",

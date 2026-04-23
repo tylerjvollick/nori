@@ -30,9 +30,10 @@ func NewStationHandler(stationRepo StationRepoInterface) *StationHandler {
 	return &StationHandler{stationRepo: stationRepo}
 }
 
-// RegisterStationRoutes registers station API routes on the Fiber app.
-func (h *StationHandler) RegisterStationRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/stations", middlewares...)
+// RegisterStationRoutes registers station API routes under a space-scoped router.
+// Expects the router to already have :spaceId in its path and RequireSpace middleware applied.
+func (h *StationHandler) RegisterStationRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/stations", middlewares...)
 
 	group.Get("", h.ListStations)
 	group.Post("", h.CreateStation)
@@ -41,27 +42,25 @@ func (h *StationHandler) RegisterStationRoutes(app *fiber.App, middlewares ...fi
 	group.Delete("/:id", h.DeleteStation)
 }
 
-// ListStations returns all stations for the active space, ordered by display_order.
+// ListStations returns all stations for the space, ordered by display_order.
 func (h *StationHandler) ListStations(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
-	stations, err := h.stationRepo.GetBySpaceID(*authDTO.ActiveSpaceID)
+	stations, err := h.stationRepo.GetBySpaceID(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to list stations",
 		})
 	}
 
-	wipCounts, err := h.stationRepo.GetWIPCounts(*authDTO.ActiveSpaceID)
+	wipCounts, err := h.stationRepo.GetWIPCounts(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get WIP counts",
@@ -76,7 +75,7 @@ func (h *StationHandler) ListStations(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
-// CreateStation creates a new station in the active space (admin only).
+// CreateStation creates a new station in the space (admin only).
 func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
@@ -90,10 +89,9 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 		})
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	var req dtos.CreateStationRequest
@@ -110,7 +108,7 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 	}
 
 	// Auto-assign displayOrder = max existing + 1
-	maxOrder, err := h.stationRepo.GetMaxDisplayOrder(*authDTO.ActiveSpaceID)
+	maxOrder, err := h.stationRepo.GetMaxDisplayOrder(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to determine display order",
@@ -129,7 +127,7 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 
 	station := &models.Station{
 		ID:           uuid.New(),
-		SpaceID:      *authDTO.ActiveSpaceID,
+		SpaceID:      spaceID,
 		Name:         req.Name,
 		Description:  req.Description,
 		DisplayOrder: maxOrder + 1,
@@ -149,15 +147,13 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 
 // GetStation returns a single station by ID.
 func (h *StationHandler) GetStation(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -174,14 +170,14 @@ func (h *StationHandler) GetStation(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify the station belongs to the requester's active space.
-	if station.SpaceID != *authDTO.ActiveSpaceID {
+	// Verify the station belongs to the requested space.
+	if station.SpaceID != spaceID {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "station not found",
 		})
 	}
 
-	wipCounts, err := h.stationRepo.GetWIPCounts(*authDTO.ActiveSpaceID)
+	wipCounts, err := h.stationRepo.GetWIPCounts(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get WIP counts",
@@ -205,10 +201,9 @@ func (h *StationHandler) UpdateStation(c *fiber.Ctx) error {
 		})
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -225,8 +220,8 @@ func (h *StationHandler) UpdateStation(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify the station belongs to the requester's active space.
-	if station.SpaceID != *authDTO.ActiveSpaceID {
+	// Verify the station belongs to the requested space.
+	if station.SpaceID != spaceID {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "station not found",
 		})
@@ -261,7 +256,7 @@ func (h *StationHandler) UpdateStation(c *fiber.Ctx) error {
 		})
 	}
 
-	wipCounts, err := h.stationRepo.GetWIPCounts(*authDTO.ActiveSpaceID)
+	wipCounts, err := h.stationRepo.GetWIPCounts(spaceID)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to get WIP counts",
@@ -285,10 +280,9 @@ func (h *StationHandler) DeleteStation(c *fiber.Ctx) error {
 		})
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	id, err := uuid.Parse(c.Params("id"))
@@ -305,8 +299,8 @@ func (h *StationHandler) DeleteStation(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify the station belongs to the requester's active space.
-	if station.SpaceID != *authDTO.ActiveSpaceID {
+	// Verify the station belongs to the requested space.
+	if station.SpaceID != spaceID {
 		return c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "station not found",
 		})

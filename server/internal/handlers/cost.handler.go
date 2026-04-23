@@ -29,9 +29,10 @@ func NewCostHandler(costService CostServiceInterface) *CostHandler {
 	return &CostHandler{costService: costService}
 }
 
-// RegisterCostRoutes registers cost API routes on the Fiber app.
-func (h *CostHandler) RegisterCostRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/costs", middlewares...)
+// RegisterCostRoutes registers cost API routes under a space-scoped router.
+// Expects the router to already have :spaceId in its path and RequireSpace middleware applied.
+func (h *CostHandler) RegisterCostRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/costs", middlewares...)
 
 	group.Get("/tasks/:id", h.GetTaskCosts)
 	group.Post("/tasks/:id/compute-labor", h.ComputeTaskLaborCost)
@@ -111,19 +112,17 @@ func (h *CostHandler) GetJobCostSummary(c *fiber.Ctx) error {
 
 // EstimateRecipeLaborCost computes estimated labor cost from recipe step times.
 func (h *CostHandler) EstimateRecipeLaborCost(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
 	rootTaskID := c.Params("rootTaskId")
-	result, err := h.costService.EstimateRecipeLaborCost(rootTaskID, *authDTO.ActiveSpaceID)
+	result, err := h.costService.EstimateRecipeLaborCost(rootTaskID, spaceID)
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
 			"error": err.Error(),
