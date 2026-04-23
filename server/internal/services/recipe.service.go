@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 // RecipeRepositoryInterface defines the methods needed from a recipe repository.
 type RecipeRepositoryInterface interface {
+	Create(recipe *models.Recipe) error
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
 	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
@@ -570,6 +572,392 @@ func (s *RecipeService) DeepCloneTaskTree(
 	}
 
 	return clonedRoot, nil
+}
+
+// ---------------------------------------------------------------------------
+// Recipe Authoring (Task-Tree Model)
+// ---------------------------------------------------------------------------
+
+// AddStepOptions configures optional fields when adding a recipe step.
+type AddStepOptions struct {
+	Description       *string
+	StationID         *uuid.UUID
+	EstimatedTimeSecs *int
+	BatchSize         *int
+}
+
+// UpdateStepOptions configures which fields to update on a recipe step.
+type UpdateStepOptions struct {
+	Title             *string
+	Description       *string
+	StationID         *uuid.UUID
+	EstimatedTimeSecs *int
+	BatchSize         *int
+}
+
+// CreateRecipeWithTaskTree creates a new recipe with a root task (Type='recipe')
+// as the draft task tree, and a draft RecipeVersion pointing to the root task.
+// This is the entry point for the visual recipe editor, as opposed to the
+// TOML-based CreateVersion flow.
+func (s *RecipeService) CreateRecipeWithTaskTree(
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	name string,
+	description *string,
+	categoryID *uuid.UUID,
+) (*models.Recipe, *models.RecipeVersion, error) {
+	if name == "" {
+		return nil, nil, fmt.Errorf("recipe name is required")
+	}
+
+	recipeID := uuid.New()
+	rootTaskUUID := uuid.New()
+	rootTaskID := rootTaskUUID.String()
+	now := time.Now()
+
+	recipe := &models.Recipe{
+		ID:          recipeID,
+		SpaceID:     spaceID,
+		Name:        name,
+		Slug:        serviceSlugify(name),
+		Description: description,
+		CategoryID:  categoryID,
+		CreatedByID: createdByID,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	rootTask := &models.Task{
+		ID:          rootTaskID,
+		SpaceID:     spaceID,
+		CreatedByID: createdByID,
+		RecipeID:    &recipeID,
+		Type:        models.TaskTypeRecipe,
+		Status:      models.TaskStatusOpen,
+		Title:       name,
+		Description: description,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	version := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: 1,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &rootTaskUUID,
+		AuthorID:      createdByID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	createFn := func(recipeRepo RecipeRepositoryInterface, taskRepo TaskRepositoryInterface) error {
+		if err := recipeRepo.Create(recipe); err != nil {
+			return fmt.Errorf("creating recipe: %w", err)
+		}
+		if err := taskRepo.Create(rootTask); err != nil {
+			return fmt.Errorf("creating root task: %w", err)
+		}
+		if err := recipeRepo.CreateVersion(version); err != nil {
+			return fmt.Errorf("creating draft version: %w", err)
+		}
+		return nil
+	}
+
+	var err error
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txRecipeRepo := repositories.NewRecipeRepository(tx)
+			txTaskRepo := repositories.NewTaskRepository(tx)
+			return createFn(txRecipeRepo, txTaskRepo)
+		})
+	} else {
+		err = createFn(s.recipeRepo, s.taskRepo)
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return recipe, version, nil
+}
+
+// AddRecipeStep adds a child task under a parent task in a recipe's draft tree.
+// The parent can be the recipe root or another step.
+func (s *RecipeService) AddRecipeStep(
+	recipeID uuid.UUID,
+	parentTaskID string,
+	title string,
+	opts AddStepOptions,
+) (*models.Task, error) {
+	if title == "" {
+		return nil, fmt.Errorf("step title is required")
+	}
+
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if !isTaskInTree(parentTaskID, rootTaskID) {
+		return nil, fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
+	}
+
+	// Get existing children to determine next sequence number.
+	children, err := s.taskRepo.GetChildren(parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("getting children: %w", err)
+	}
+
+	parent, err := s.taskRepo.GetByID(parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("parent task %q not found: %w", parentTaskID, err)
+	}
+
+	nextSeq := len(children) + 1
+	childID := fmt.Sprintf("%s.%d", parentTaskID, nextSeq)
+	now := time.Now()
+
+	child := &models.Task{
+		ID:                childID,
+		SpaceID:           parent.SpaceID,
+		ParentID:          &parentTaskID,
+		CreatedByID:       parent.CreatedByID,
+		RecipeID:          &recipeID,
+		Type:              models.TaskTypeTask,
+		Status:            models.TaskStatusOpen,
+		Title:             title,
+		Description:       opts.Description,
+		StationID:         opts.StationID,
+		EstimatedTimeSecs: opts.EstimatedTimeSecs,
+		BatchSize:         opts.BatchSize,
+		DisplayOrder:      nextSeq,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	if err := s.taskRepo.Create(child); err != nil {
+		return nil, fmt.Errorf("creating step: %w", err)
+	}
+
+	return child, nil
+}
+
+// RemoveRecipeStep removes a step and all its descendants from a recipe's
+// draft tree, including any dependency edges that reference removed tasks.
+func (s *RecipeService) RemoveRecipeStep(recipeID uuid.UUID, taskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if taskID == rootTaskID {
+		return fmt.Errorf("cannot remove the root task of a recipe")
+	}
+	if !isTaskInTree(taskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", taskID, recipeID)
+	}
+
+	// Get all descendants (including the task itself).
+	descendants, err := s.taskRepo.GetDescendants(taskID)
+	if err != nil {
+		return fmt.Errorf("getting descendants: %w", err)
+	}
+
+	// Clean up dependency edges referencing any of the removed tasks.
+	for _, task := range descendants {
+		deps, err := s.taskDepRepo.GetAllForTask(task.ID)
+		if err != nil {
+			return fmt.Errorf("getting deps for %q: %w", task.ID, err)
+		}
+		for _, dep := range deps {
+			if err := s.taskDepRepo.RemoveDep(dep.FromTaskID, dep.ToTaskID); err != nil {
+				return fmt.Errorf("removing dep %s→%s: %w", dep.FromTaskID, dep.ToTaskID, err)
+			}
+		}
+	}
+
+	// Delete tasks deepest-first to avoid FK violations on parent_id.
+	sort.Slice(descendants, func(i, j int) bool {
+		return len(descendants[i].ID) > len(descendants[j].ID)
+	})
+	for _, task := range descendants {
+		if err := s.taskRepo.Delete(task.ID); err != nil {
+			return fmt.Errorf("deleting task %q: %w", task.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// ReorderRecipeSteps updates the DisplayOrder of steps under a parent task.
+// orderedTaskIDs must contain the IDs of all children of parentTaskID in the
+// desired order.
+func (s *RecipeService) ReorderRecipeSteps(recipeID uuid.UUID, parentTaskID string, orderedTaskIDs []string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if !isTaskInTree(parentTaskID, rootTaskID) {
+		return fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
+	}
+
+	for i, taskID := range orderedTaskIDs {
+		if !isTaskInTree(taskID, rootTaskID) {
+			return fmt.Errorf("task %q is not in recipe tree", taskID)
+		}
+		task, err := s.taskRepo.GetByID(taskID)
+		if err != nil {
+			return fmt.Errorf("task %q not found: %w", taskID, err)
+		}
+		if task.ParentID == nil || *task.ParentID != parentTaskID {
+			return fmt.Errorf("task %q is not a child of %q", taskID, parentTaskID)
+		}
+		task.DisplayOrder = i + 1
+		task.UpdatedAt = time.Now()
+		if err := s.taskRepo.Update(task); err != nil {
+			return fmt.Errorf("updating display order for %q: %w", taskID, err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateRecipeStep updates fields on a step in a recipe's draft tree.
+func (s *RecipeService) UpdateRecipeStep(recipeID uuid.UUID, taskID string, opts UpdateStepOptions) (*models.Task, error) {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if !isTaskInTree(taskID, rootTaskID) {
+		return nil, fmt.Errorf("task %q is not in recipe %s tree", taskID, recipeID)
+	}
+
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("task %q not found: %w", taskID, err)
+	}
+
+	if opts.Title != nil {
+		task.Title = *opts.Title
+	}
+	if opts.Description != nil {
+		task.Description = opts.Description
+	}
+	if opts.StationID != nil {
+		task.StationID = opts.StationID
+	}
+	if opts.EstimatedTimeSecs != nil {
+		task.EstimatedTimeSecs = opts.EstimatedTimeSecs
+	}
+	if opts.BatchSize != nil {
+		task.BatchSize = opts.BatchSize
+	}
+	task.UpdatedAt = time.Now()
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, fmt.Errorf("updating step: %w", err)
+	}
+
+	return task, nil
+}
+
+// AddStepDependency adds a dependency edge between two steps in a recipe's
+// draft tree. fromTaskID depends on toTaskID (toTaskID blocks fromTaskID).
+func (s *RecipeService) AddStepDependency(recipeID uuid.UUID, fromTaskID string, toTaskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if !isTaskInTree(fromTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
+	}
+	if !isTaskInTree(toTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", toTaskID, recipeID)
+	}
+
+	dep := &models.TaskDep{
+		ID:         uuid.New(),
+		FromTaskID: fromTaskID,
+		ToTaskID:   toTaskID,
+		Type:       models.DepTypeBlocks,
+	}
+
+	if err := s.taskDepRepo.AddDep(dep); err != nil {
+		return fmt.Errorf("adding dependency: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveStepDependency removes a dependency edge between two steps in a
+// recipe's draft tree.
+func (s *RecipeService) RemoveStepDependency(recipeID uuid.UUID, fromTaskID string, toTaskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	if !isTaskInTree(fromTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
+	}
+	if !isTaskInTree(toTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", toTaskID, recipeID)
+	}
+
+	if err := s.taskDepRepo.RemoveDep(fromTaskID, toTaskID); err != nil {
+		return fmt.Errorf("removing dependency: %w", err)
+	}
+
+	return nil
+}
+
+// getDraftVersion finds the draft version for a recipe and validates it has a root task.
+func (s *RecipeService) getDraftVersion(recipeID uuid.UUID) (*models.RecipeVersion, error) {
+	versions, err := s.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing versions: %w", err)
+	}
+	for i := range versions {
+		if versions[i].Status == models.RecipeVersionStatusDraft {
+			if versions[i].RootTaskID == nil {
+				return nil, fmt.Errorf("draft version has no root task")
+			}
+			return &versions[i], nil
+		}
+	}
+	return nil, fmt.Errorf("recipe %s has no draft version", recipeID)
+}
+
+// isTaskInTree checks if a task ID belongs to a recipe tree rooted at rootTaskID.
+func isTaskInTree(taskID string, rootTaskID string) bool {
+	return taskID == rootTaskID || strings.HasPrefix(taskID, rootTaskID+".")
+}
+
+// serviceSlugify converts a name to a URL-friendly slug.
+func serviceSlugify(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteRune('-')
+			prevDash = true
+		}
+	}
+	result := b.String()
+	return strings.TrimRight(result, "-")
 }
 
 // ---------------------------------------------------------------------------

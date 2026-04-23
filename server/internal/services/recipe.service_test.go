@@ -27,6 +27,11 @@ func newMockRecipeRepo() *mockRecipeRepo {
 	}
 }
 
+func (m *mockRecipeRepo) Create(recipe *models.Recipe) error {
+	m.recipes[recipe.ID] = recipe
+	return nil
+}
+
 func (m *mockRecipeRepo) GetByID(id uuid.UUID) (*models.Recipe, error) {
 	r, ok := m.recipes[id]
 	if !ok {
@@ -160,7 +165,15 @@ func (m *mockTaskDepRepo) AddDep(dep *models.TaskDep) error {
 	return nil
 }
 
-func (m *mockTaskDepRepo) RemoveDep(_, _ string) error { return nil }
+func (m *mockTaskDepRepo) RemoveDep(fromID, toID string) error {
+	for i, d := range m.deps {
+		if d.FromTaskID == fromID && d.ToTaskID == toID {
+			m.deps = append(m.deps[:i], m.deps[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
 
 func (m *mockTaskDepRepo) GetBlockers(taskID string) ([]models.TaskDep, error) {
 	var result []models.TaskDep
@@ -2347,6 +2360,482 @@ func TestPourRecipe_ChairRecipe_FullWorkflow(t *testing.T) {
 		}
 		if !foundSpray {
 			t.Errorf("install-seat (%s): expected dep → spray-finish (%s)", installSeatID, sprayFinishID)
+		}
+	}
+}
+
+// ==========================================================================
+// Recipe Authoring (Task-Tree Model) Tests
+// ==========================================================================
+
+func TestCreateRecipeWithTaskTree_Basic(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+	desc := "A test recipe"
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Test Recipe", &desc, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree failed: %v", err)
+	}
+
+	// Recipe should be created.
+	if recipe.Name != "Test Recipe" {
+		t.Errorf("expected name %q, got %q", "Test Recipe", recipe.Name)
+	}
+	if recipe.Slug != "test-recipe" {
+		t.Errorf("expected slug %q, got %q", "test-recipe", recipe.Slug)
+	}
+	if recipe.SpaceID != spaceID {
+		t.Errorf("expected spaceID %s, got %s", spaceID, recipe.SpaceID)
+	}
+	if recipe.CreatedByID != userID {
+		t.Errorf("expected createdByID %s, got %s", userID, recipe.CreatedByID)
+	}
+	if !recipe.IsActive {
+		t.Error("expected recipe to be active")
+	}
+
+	// Version should be a draft with RootTaskID set.
+	if version.Status != models.RecipeVersionStatusDraft {
+		t.Errorf("expected status %q, got %q", models.RecipeVersionStatusDraft, version.Status)
+	}
+	if version.VersionNumber != 1 {
+		t.Errorf("expected version number 1, got %d", version.VersionNumber)
+	}
+	if version.RootTaskID == nil {
+		t.Fatal("expected RootTaskID to be set")
+	}
+	if version.RecipeID != recipe.ID {
+		t.Errorf("expected version.RecipeID %s, got %s", recipe.ID, version.RecipeID)
+	}
+
+	// Root task should exist with Type='recipe'.
+	rootTaskID := version.RootTaskID.String()
+	rootTask, ok := taskRepo.tasks[rootTaskID]
+	if !ok {
+		t.Fatalf("expected root task at %q", rootTaskID)
+	}
+	if rootTask.Type != models.TaskTypeRecipe {
+		t.Errorf("expected root task type %q, got %q", models.TaskTypeRecipe, rootTask.Type)
+	}
+	if rootTask.Title != "Test Recipe" {
+		t.Errorf("expected root task title %q, got %q", "Test Recipe", rootTask.Title)
+	}
+	if rootTask.RecipeID == nil || *rootTask.RecipeID != recipe.ID {
+		t.Errorf("expected root task RecipeID %s, got %v", recipe.ID, rootTask.RecipeID)
+	}
+}
+
+func TestCreateRecipeWithTaskTree_EmptyName(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	_, _, err := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
+	}
+}
+
+func TestAddRecipeStep_Basic(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	rootTaskID := version.RootTaskID.String()
+	desc := "Cut the wood"
+	batchSize := 6
+	estTime := 300
+
+	step, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut parts", AddStepOptions{
+		Description:       &desc,
+		BatchSize:         &batchSize,
+		EstimatedTimeSecs: &estTime,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep failed: %v", err)
+	}
+
+	if step.Title != "Cut parts" {
+		t.Errorf("expected title %q, got %q", "Cut parts", step.Title)
+	}
+	if step.ParentID == nil || *step.ParentID != rootTaskID {
+		t.Errorf("expected parentID %q, got %v", rootTaskID, step.ParentID)
+	}
+	if step.ID != rootTaskID+".1" {
+		t.Errorf("expected ID %q, got %q", rootTaskID+".1", step.ID)
+	}
+	if step.RecipeID == nil || *step.RecipeID != recipe.ID {
+		t.Errorf("expected recipeID %s, got %v", recipe.ID, step.RecipeID)
+	}
+	if step.BatchSize == nil || *step.BatchSize != 6 {
+		t.Errorf("expected batchSize 6, got %v", step.BatchSize)
+	}
+	if step.EstimatedTimeSecs == nil || *step.EstimatedTimeSecs != 300 {
+		t.Errorf("expected estimatedTimeSecs 300, got %v", step.EstimatedTimeSecs)
+	}
+
+	// Add a second step.
+	step2, err := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand parts", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep (2nd) failed: %v", err)
+	}
+	if step2.ID != rootTaskID+".2" {
+		t.Errorf("expected ID %q, got %q", rootTaskID+".2", step2.ID)
+	}
+}
+
+func TestAddRecipeStep_NestedChild(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	// Add parent step.
+	parent, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Assembly", AddStepOptions{})
+
+	// Add child under the parent step.
+	child, err := svc.AddRecipeStep(recipe.ID, parent.ID, "Glue joints", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep (nested) failed: %v", err)
+	}
+	if child.ID != parent.ID+".1" {
+		t.Errorf("expected ID %q, got %q", parent.ID+".1", child.ID)
+	}
+	if child.ParentID == nil || *child.ParentID != parent.ID {
+		t.Errorf("expected parentID %q, got %v", parent.ID, child.ParentID)
+	}
+}
+
+func TestAddRecipeStep_NoDraftVersion(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	recipeID := uuid.New()
+	versionID := 1
+	recipeRepo.recipes[recipeID] = &models.Recipe{
+		ID:               recipeID,
+		Name:             "Published Recipe",
+		CurrentVersionID: &versionID,
+	}
+	content := "some content"
+	recipeRepo.versions[versionID] = &models.RecipeVersion{
+		ID:       versionID,
+		RecipeID: recipeID,
+		Status:   models.RecipeVersionStatusPublished,
+		Content:  &content,
+	}
+
+	_, err := svc.AddRecipeStep(recipeID, "some-task", "Step", AddStepOptions{})
+	if err == nil {
+		t.Fatal("expected error for no draft version, got nil")
+	}
+}
+
+func TestAddRecipeStep_TaskNotInTree(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, _, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+
+	_, err := svc.AddRecipeStep(recipe.ID, "not-in-tree", "Step", AddStepOptions{})
+	if err == nil {
+		t.Fatal("expected error for task not in tree, got nil")
+	}
+}
+
+func TestRemoveRecipeStep_Basic(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	// Add two steps.
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+	svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
+
+	// Remove the first step.
+	err := svc.RemoveRecipeStep(recipe.ID, step1.ID)
+	if err != nil {
+		t.Fatalf("RemoveRecipeStep failed: %v", err)
+	}
+
+	// Step should be gone.
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	if _, ok := taskRepo.tasks[step1.ID]; ok {
+		t.Error("expected step to be deleted")
+	}
+}
+
+func TestRemoveRecipeStep_CascadesChildren(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	// Add parent and child steps.
+	parent, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Assembly", AddStepOptions{})
+	child, _ := svc.AddRecipeStep(recipe.ID, parent.ID, "Glue", AddStepOptions{})
+
+	// Remove parent should cascade to child.
+	err := svc.RemoveRecipeStep(recipe.ID, parent.ID)
+	if err != nil {
+		t.Fatalf("RemoveRecipeStep failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	if _, ok := taskRepo.tasks[parent.ID]; ok {
+		t.Error("expected parent to be deleted")
+	}
+	if _, ok := taskRepo.tasks[child.ID]; ok {
+		t.Error("expected child to be cascaded-deleted")
+	}
+}
+
+func TestRemoveRecipeStep_CleansUpDeps(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
+
+	// Add dependency: step2 depends on step1.
+	svc.AddStepDependency(recipe.ID, step2.ID, step1.ID)
+
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 1 {
+		t.Fatalf("expected 1 dep, got %d", len(depRepo.deps))
+	}
+
+	// Remove step1 — should clean up the dep.
+	err := svc.RemoveRecipeStep(recipe.ID, step1.ID)
+	if err != nil {
+		t.Fatalf("RemoveRecipeStep failed: %v", err)
+	}
+
+	if len(depRepo.deps) != 0 {
+		t.Errorf("expected 0 deps after removal, got %d", len(depRepo.deps))
+	}
+}
+
+func TestRemoveRecipeStep_CannotRemoveRoot(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	err := svc.RemoveRecipeStep(recipe.ID, rootTaskID)
+	if err == nil {
+		t.Fatal("expected error when removing root task, got nil")
+	}
+}
+
+func TestReorderRecipeSteps_Basic(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
+	step3, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Finish", AddStepOptions{})
+
+	// Reorder: Finish, Cut, Sand.
+	err := svc.ReorderRecipeSteps(recipe.ID, rootTaskID, []string{step3.ID, step1.ID, step2.ID})
+	if err != nil {
+		t.Fatalf("ReorderRecipeSteps failed: %v", err)
+	}
+
+	taskRepo := svc.taskRepo.(*mockTaskRepo)
+	if taskRepo.tasks[step3.ID].DisplayOrder != 1 {
+		t.Errorf("expected Finish DisplayOrder 1, got %d", taskRepo.tasks[step3.ID].DisplayOrder)
+	}
+	if taskRepo.tasks[step1.ID].DisplayOrder != 2 {
+		t.Errorf("expected Cut DisplayOrder 2, got %d", taskRepo.tasks[step1.ID].DisplayOrder)
+	}
+	if taskRepo.tasks[step2.ID].DisplayOrder != 3 {
+		t.Errorf("expected Sand DisplayOrder 3, got %d", taskRepo.tasks[step2.ID].DisplayOrder)
+	}
+}
+
+func TestUpdateRecipeStep_Basic(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+
+	newTitle := "Rough cut parts"
+	newDesc := "Use the table saw"
+	stationID := uuid.New()
+	estTime := 600
+	batchSize := 4
+
+	updated, err := svc.UpdateRecipeStep(recipe.ID, step.ID, UpdateStepOptions{
+		Title:             &newTitle,
+		Description:       &newDesc,
+		StationID:         &stationID,
+		EstimatedTimeSecs: &estTime,
+		BatchSize:         &batchSize,
+	})
+	if err != nil {
+		t.Fatalf("UpdateRecipeStep failed: %v", err)
+	}
+
+	if updated.Title != "Rough cut parts" {
+		t.Errorf("expected title %q, got %q", "Rough cut parts", updated.Title)
+	}
+	if updated.Description == nil || *updated.Description != "Use the table saw" {
+		t.Errorf("expected description %q, got %v", "Use the table saw", updated.Description)
+	}
+	if updated.StationID == nil || *updated.StationID != stationID {
+		t.Errorf("expected stationID %s, got %v", stationID, updated.StationID)
+	}
+	if updated.EstimatedTimeSecs == nil || *updated.EstimatedTimeSecs != 600 {
+		t.Errorf("expected estimatedTimeSecs 600, got %v", updated.EstimatedTimeSecs)
+	}
+	if updated.BatchSize == nil || *updated.BatchSize != 4 {
+		t.Errorf("expected batchSize 4, got %v", updated.BatchSize)
+	}
+}
+
+func TestUpdateRecipeStep_PartialUpdate(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	origDesc := "Original description"
+	step, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{Description: &origDesc})
+
+	// Update only the title, description should stay.
+	newTitle := "Rough cut"
+	updated, err := svc.UpdateRecipeStep(recipe.ID, step.ID, UpdateStepOptions{Title: &newTitle})
+	if err != nil {
+		t.Fatalf("UpdateRecipeStep failed: %v", err)
+	}
+
+	if updated.Title != "Rough cut" {
+		t.Errorf("expected title %q, got %q", "Rough cut", updated.Title)
+	}
+	if updated.Description == nil || *updated.Description != "Original description" {
+		t.Errorf("expected description preserved, got %v", updated.Description)
+	}
+}
+
+func TestAddStepDependency_Basic(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
+
+	err := svc.AddStepDependency(recipe.ID, step2.ID, step1.ID)
+	if err != nil {
+		t.Fatalf("AddStepDependency failed: %v", err)
+	}
+
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 1 {
+		t.Fatalf("expected 1 dep, got %d", len(depRepo.deps))
+	}
+
+	dep := depRepo.deps[0]
+	if dep.FromTaskID != step2.ID {
+		t.Errorf("expected FromTaskID %q, got %q", step2.ID, dep.FromTaskID)
+	}
+	if dep.ToTaskID != step1.ID {
+		t.Errorf("expected ToTaskID %q, got %q", step1.ID, dep.ToTaskID)
+	}
+	if dep.Type != models.DepTypeBlocks {
+		t.Errorf("expected dep type %q, got %q", models.DepTypeBlocks, dep.Type)
+	}
+}
+
+func TestRemoveStepDependency_Basic(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+	step2, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Sand", AddStepOptions{})
+
+	svc.AddStepDependency(recipe.ID, step2.ID, step1.ID)
+
+	depRepo := svc.taskDepRepo.(*mockTaskDepRepo)
+	if len(depRepo.deps) != 1 {
+		t.Fatalf("expected 1 dep before removal, got %d", len(depRepo.deps))
+	}
+
+	err := svc.RemoveStepDependency(recipe.ID, step2.ID, step1.ID)
+	if err != nil {
+		t.Fatalf("RemoveStepDependency failed: %v", err)
+	}
+
+	if len(depRepo.deps) != 0 {
+		t.Errorf("expected 0 deps after removal, got %d", len(depRepo.deps))
+	}
+}
+
+func TestAddStepDependency_TaskNotInTree(t *testing.T) {
+	svc := NewRecipeService(nil, newMockRecipeRepo(), newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipe, version, _ := svc.CreateRecipeWithTaskTree(uuid.New(), uuid.New(), "Recipe", nil, nil)
+	rootTaskID := version.RootTaskID.String()
+
+	step1, _ := svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{})
+
+	// Try adding dep with a task not in the tree.
+	err := svc.AddStepDependency(recipe.ID, step1.ID, "not-in-tree")
+	if err == nil {
+		t.Fatal("expected error for task not in tree, got nil")
+	}
+}
+
+func TestGetDraftVersion_NoDraft(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	svc := NewRecipeService(nil, recipeRepo, newMockTaskRepo(), newMockTaskDepRepo())
+
+	recipeID := uuid.New()
+	recipeRepo.recipes[recipeID] = &models.Recipe{ID: recipeID, Name: "Test"}
+
+	_, err := svc.getDraftVersion(recipeID)
+	if err == nil {
+		t.Fatal("expected error for no draft version, got nil")
+	}
+}
+
+func TestServiceSlugify(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Test Recipe", "test-recipe"},
+		{"  Hello World  ", "hello-world"},
+		{"Café Table", "caf-table"},
+		{"123-abc", "123-abc"},
+		{"Already-Slugged", "already-slugged"},
+	}
+	for _, tt := range tests {
+		result := serviceSlugify(tt.input)
+		if result != tt.expected {
+			t.Errorf("serviceSlugify(%q) = %q, want %q", tt.input, result, tt.expected)
 		}
 	}
 }
