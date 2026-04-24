@@ -841,6 +841,104 @@
 		return sel?.id ?? null;
 	});
 
+	// Reference to the flow container div, used to restore focus on Escape.
+	let flowContainer: HTMLDivElement | undefined = $state(undefined);
+
+	/** Programmatically select a node and notify the detail panel. */
+	function selectNode(nodeId: string): void {
+		nodes = nodes.map((n) => ({ ...n, selected: n.id === nodeId }));
+		onselect?.(nodeId);
+	}
+
+	/**
+	 * Vim-style graph navigation.
+	 * - upstream / downstream: walk along dependency edges (k=upstream, j=downstream).
+	 * - prev-sibling / next-sibling: move among nodes that share the same upstream
+	 *   parent (h=prev, l=next), sorted by visual position.
+	 */
+	function navigateVim(dir: 'upstream' | 'downstream' | 'prev-sibling' | 'next-sibling'): void {
+		if (nodes.length === 0) return;
+
+		// No selection → select the first visible node.
+		if (!selectedNodeId) {
+			const sorted = [...nodes].sort(
+				(a, b) => a.position.x - b.position.x || a.position.y - b.position.y,
+			);
+			selectNode(sorted[0].id);
+			return;
+		}
+
+		// Helper: sort sibling/fork candidates by visual position.
+		// In LR/RL layouts siblings are stacked vertically; in TB/BT they're horizontal.
+		function sortByPosition(ns: Node[]): Node[] {
+			if (currentDirection === 'LR' || currentDirection === 'RL') {
+				return [...ns].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+			}
+			return [...ns].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
+		}
+
+		switch (dir) {
+			case 'upstream': {
+				// k — go to upstream node (edge where selected is target)
+				const upEdges = edges.filter((e) => e.target === selectedNodeId);
+				if (upEdges.length === 0) return; // at root, do nothing
+				const candidates = upEdges
+					.map((e) => nodes.find((n) => n.id === e.source))
+					.filter(Boolean) as Node[];
+				if (candidates.length === 0) return;
+				const sorted = sortByPosition(candidates);
+				selectNode(sorted[0].id);
+				break;
+			}
+			case 'downstream': {
+				// j — go to downstream node (edge where selected is source), prefer left branch
+				const downEdges = edges.filter((e) => e.source === selectedNodeId);
+				if (downEdges.length === 0) return; // at leaf, do nothing
+				const candidates = downEdges
+					.map((e) => nodes.find((n) => n.id === e.target))
+					.filter(Boolean) as Node[];
+				if (candidates.length === 0) return;
+				// "prefer left branch at forks" = sort by X asc (leftmost first)
+				const sorted = [...candidates].sort(
+					(a, b) => a.position.x - b.position.x || a.position.y - b.position.y,
+				);
+				selectNode(sorted[0].id);
+				break;
+			}
+			case 'prev-sibling':
+			case 'next-sibling': {
+				// h/l — move among nodes that share the same upstream parent
+				const upEdges = edges.filter((e) => e.target === selectedNodeId);
+				let siblings: Node[];
+
+				if (upEdges.length > 0) {
+					// All nodes downstream of the same parent
+					const parentId = upEdges[0].source;
+					const sibEdges = edges.filter((e) => e.source === parentId);
+					siblings = sibEdges
+						.map((e) => nodes.find((n) => n.id === e.target))
+						.filter(Boolean) as Node[];
+				} else {
+					// Root nodes: all nodes with no incoming edges
+					const targetIds = new Set(edges.map((e) => e.target));
+					siblings = nodes.filter((n) => !targetIds.has(n.id));
+				}
+
+				if (siblings.length <= 1) return;
+				const sorted = sortByPosition(siblings);
+				const idx = sorted.findIndex((n) => n.id === selectedNodeId);
+				if (idx === -1) return;
+
+				const nextIdx =
+					dir === 'prev-sibling'
+						? (idx - 1 + sorted.length) % sorted.length
+						: (idx + 1) % sorted.length;
+				selectNode(sorted[nextIdx].id);
+				break;
+			}
+		}
+	}
+
 	function handleKeydown(e: KeyboardEvent): void {
 		if (isEditableTarget(e)) return;
 
@@ -869,12 +967,41 @@
 			return;
 		}
 
+		// Vim-style navigation — skip if any modifier is held (avoid clashing with Alt+L etc.)
+		if (!e.altKey && !e.metaKey && !e.ctrlKey) {
+			switch (e.key) {
+				case 'h':
+					e.preventDefault();
+					navigateVim('prev-sibling');
+					return;
+				case 'j':
+					e.preventDefault();
+					navigateVim('downstream');
+					return;
+				case 'k':
+					e.preventDefault();
+					navigateVim('upstream');
+					return;
+				case 'l':
+					e.preventDefault();
+					navigateVim('next-sibling');
+					return;
+			}
+		}
+
 		switch (e.key) {
 			case 'Enter': {
 				if (selectedNodeId) {
 					e.preventDefault();
-					goto(`/spaces/${slug}/${selectedNodeId}`);
+					// Open / focus the detail panel for the selected node.
+					onselect?.(selectedNodeId);
 				}
+				break;
+			}
+			case 'Escape': {
+				// Return focus to the graph canvas.
+				e.preventDefault();
+				flowContainer?.focus();
 				break;
 			}
 			case '+':
@@ -1037,7 +1164,7 @@
 			</div>
 		</div>
 	{:else}
-		<div class="flex-1 min-h-0">
+		<div bind:this={flowContainer} class="flex-1 min-h-0" tabindex="-1">
 			<SvelteFlow
 				{nodes}
 				{edges}
