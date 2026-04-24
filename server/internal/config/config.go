@@ -13,16 +13,29 @@ type Config struct {
 	AdminPassword      string
 	AccountName        string
 	SkipPasswordChange bool // When true, seed creates admin without forced password change
+
+	// E2E test account — creates a completely isolated account + user + space
+	E2EAccountEnabled  bool
+	E2EAccountEmail    string
+	E2EAccountPassword string
 }
 
 // Load reads configuration from environment variables and validates them
 func Load() (*Config, error) {
+	accountName := os.Getenv("NORI_ACCOUNT_NAME")
+	if accountName == "" {
+		accountName = "My Shop"
+	}
+
 	cfg := &Config{
 		JWTSecret:          os.Getenv("NORI_JWT_SECRET"),
 		AdminEmail:         os.Getenv("NORI_ADMIN_EMAIL"),
 		AdminPassword:      os.Getenv("NORI_ADMIN_PASSWORD"),
-		AccountName:        os.Getenv("NORI_ACCOUNT_NAME"),
+		AccountName:        accountName,
 		SkipPasswordChange: parseBool(os.Getenv("NORI_SKIP_PASSWORD_CHANGE")),
+		E2EAccountEnabled:  parseBool(os.Getenv("E2E_ACCOUNT_ENABLED")),
+		E2EAccountEmail:    os.Getenv("E2E_ACCOUNT_EMAIL"),
+		E2EAccountPassword: os.Getenv("E2E_ACCOUNT_PASSWORD"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -46,8 +59,13 @@ func (c *Config) Validate() error {
 		return errors.New("NORI_ADMIN_PASSWORD is required")
 	}
 
-	if c.AccountName == "" {
-		return errors.New("NORI_ACCOUNT_NAME is required")
+	if c.E2EAccountEnabled {
+		if c.E2EAccountEmail == "" {
+			return errors.New("E2E_ACCOUNT_EMAIL is required when E2E_ACCOUNT_ENABLED is true")
+		}
+		if c.E2EAccountPassword == "" {
+			return errors.New("E2E_ACCOUNT_PASSWORD is required when E2E_ACCOUNT_ENABLED is true")
+		}
 	}
 
 	return nil

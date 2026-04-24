@@ -55,15 +55,17 @@ func New(cfg *config.Config) *App {
 		}
 	}
 
+	// Services (SpaceService created early so seed can use it for E2E)
+	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo, stationRepo)
+
 	// First-boot seed
-	seedService := services.NewSeedService(accountRepo, userRepo, userRepo, accountRepo, userAccountRepo, cfg)
+	seedService := services.NewSeedService(accountRepo, userRepo, userRepo, accountRepo, userAccountRepo, userRepo, spaceService, cfg)
 	if err := seedService.SeedIfNeeded(); err != nil {
 		log.Fatal("Failed to seed database: " + err.Error())
 	}
 
 	// Services
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo, spaceRepo, spaceMemberRepo)
-	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo, stationRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
 	timeEventRepo := repositories.NewTimeEventRepository(database.DB)
 	costEntryRepo := repositories.NewCostEntryRepository(database.DB)

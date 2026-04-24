@@ -9,6 +9,7 @@ import (
 	"github.com/tylerjvollick/nori/internal/config"
 	"github.com/tylerjvollick/nori/internal/models"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // Mock implementations for seed service interfaces
@@ -64,6 +65,22 @@ func (m *mockUserUpdater) ClearMustChangePassword(userID uuid.UUID) error {
 	return nil
 }
 
+type mockUserFinder struct {
+	getUserByEmailFunc func(string) (*models.User, error)
+}
+
+func (m *mockUserFinder) GetUserByEmail(email string) (*models.User, error) {
+	return m.getUserByEmailFunc(email)
+}
+
+type mockDefaultSpaceCreator struct {
+	createDefaultSpaceFunc func(uuid.UUID, uuid.UUID) (*models.Space, error)
+}
+
+func (m *mockDefaultSpaceCreator) CreateDefaultSpace(accountID uuid.UUID, creatorUserID uuid.UUID) (*models.Space, error) {
+	return m.createDefaultSpaceFunc(accountID, creatorUserID)
+}
+
 // noopUserUpdater is a convenience mock that does nothing.
 func noopUserUpdater() *mockUserUpdater {
 	return &mockUserUpdater{}
@@ -78,54 +95,45 @@ func newTestSeedConfig() *config.Config {
 	}
 }
 
+func newTestSeedService(counter AccountCounter, userCreator UserCreator, userUpdater UserUpdater, accountCreator AccountCreator, userAccountCreator UserAccountCreator, cfg *config.Config) *SeedService {
+	return NewSeedService(counter, userCreator, userUpdater, accountCreator, userAccountCreator, nil, nil, cfg)
+}
+
 func TestSeedIfNeeded_SkipsWhenAccountExists(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 1, nil },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
+	svc := newTestSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.NoError(t, err)
 }
 
 func TestSeedIfNeeded_SkipsWhenMultipleAccountsExist(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 5, nil },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
+	svc := newTestSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.NoError(t, err)
 }
 
 func TestSeedIfNeeded_ErrorCheckingAccountCount(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 0, errors.New("database connection failed") },
 	}
 
-	svc := NewSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
+	svc := newTestSeedService(counter, nil, nil, nil, nil, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to check account count")
 }
 
 func TestSeedIfNeeded_CreatesAdminUserAccountAndRelationship(t *testing.T) {
-	// Arrange
 	cfg := newTestSeedConfig()
 
 	var createdUser *models.User
@@ -166,15 +174,12 @@ func TestSeedIfNeeded_CreatesAdminUserAccountAndRelationship(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 
-	// Verify admin user was created correctly
 	assert.NotNil(t, createdUser)
 	assert.Equal(t, cfg.AdminEmail, createdUser.Email)
 	assert.NotNil(t, createdUser.Password)
@@ -183,11 +188,9 @@ func TestSeedIfNeeded_CreatesAdminUserAccountAndRelationship(t *testing.T) {
 	assert.True(t, createdUser.MustChangePassword)
 	assert.NotEqual(t, uuid.Nil, createdUser.ID)
 
-	// Verify password was hashed (not stored in plain text)
 	assert.NotEqual(t, cfg.AdminPassword, *createdUser.Password)
 	assert.NoError(t, bcrypt.CompareHashAndPassword([]byte(*createdUser.Password), []byte(cfg.AdminPassword)))
 
-	// Verify account was created correctly
 	assert.NotNil(t, createdAccount)
 	assert.NotNil(t, createdAccount.Name)
 	assert.Equal(t, cfg.AccountName, *createdAccount.Name)
@@ -195,18 +198,12 @@ func TestSeedIfNeeded_CreatesAdminUserAccountAndRelationship(t *testing.T) {
 	assert.Equal(t, createdUser.ID, createdAccount.CreatedByUserID)
 	assert.NotEqual(t, uuid.Nil, createdAccount.ID)
 
-	// Verify UserAccount was created with admin role
 	assert.Equal(t, createdUser.ID, createdUserAccountUserID)
 	assert.Equal(t, createdAccount.ID, createdUserAccountAccountID)
 	assert.Equal(t, models.RoleAdmin, createdUserAccountRole)
 }
 
 func TestSeedIfNeeded_DoesNotCreateSpaces(t *testing.T) {
-	// This test verifies the spec requirement:
-	// "Do not create any Spaces" during first boot.
-	// The seed service has no space dependency, so if it completes
-	// without error, no spaces were created.
-
 	cfg := newTestSeedConfig()
 
 	counter := &mockAccountCounter{
@@ -227,17 +224,13 @@ func TestSeedIfNeeded_DoesNotCreateSpaces(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert: no error, and the service has no SpaceService dependency at all
 	assert.NoError(t, err)
 }
 
 func TestSeedIfNeeded_ErrorCreatingUser(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 0, nil },
 	}
@@ -248,18 +241,14 @@ func TestSeedIfNeeded_ErrorCreatingUser(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, nil, nil, nil, newTestSeedConfig())
+	svc := newTestSeedService(counter, userCreator, nil, nil, nil, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create admin user")
 }
 
 func TestSeedIfNeeded_ErrorCreatingAccount(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 0, nil },
 	}
@@ -274,18 +263,14 @@ func TestSeedIfNeeded_ErrorCreatingAccount(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, nil, newTestSeedConfig())
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, nil, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create account")
 }
 
 func TestSeedIfNeeded_ErrorCreatingUserAccountRelationship(t *testing.T) {
-	// Arrange
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) { return 0, nil },
 	}
@@ -304,26 +289,22 @@ func TestSeedIfNeeded_ErrorCreatingUserAccountRelationship(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
 
-	// Act
 	err := svc.SeedIfNeeded()
-
-	// Assert
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create user-account relationship")
 }
 
 func TestSeedIfNeeded_IsIdempotent(t *testing.T) {
-	// Arrange: simulate first call seeds, second call sees account exists
 	callCount := 0
 	counter := &mockAccountCounter{
 		countFunc: func() (int64, error) {
 			callCount++
 			if callCount == 1 {
-				return 0, nil // first call: no accounts
+				return 0, nil
 			}
-			return 1, nil // second call: account exists
+			return 1, nil
 		},
 	}
 
@@ -345,22 +326,17 @@ func TestSeedIfNeeded_IsIdempotent(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, newTestSeedConfig())
 
-	// Act: call twice
 	err1 := svc.SeedIfNeeded()
 	err2 := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err1)
 	assert.NoError(t, err2)
 	assert.Equal(t, 1, userCreateCount, "User should only be created once (on first call)")
 }
 
 func TestSeedIfNeeded_UserHasNoDefaultAccountID(t *testing.T) {
-	// Verify that the seed user is created without a DefaultAccountID,
-	// since the account doesn't exist yet when the user is created.
-
 	cfg := newTestSeedConfig()
 
 	counter := &mockAccountCounter{
@@ -385,21 +361,16 @@ func TestSeedIfNeeded_UserHasNoDefaultAccountID(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, createdUser)
 	assert.Nil(t, createdUser.DefaultAccountID, "User should be created without DefaultAccountID (chicken-and-egg)")
 }
 
 func TestSeedIfNeeded_UserHasNoFirstOrLastName(t *testing.T) {
-	// The seed user is created from env vars which only provide email/password.
-	// FirstName and LastName should be nil.
-
 	cfg := newTestSeedConfig()
 
 	counter := &mockAccountCounter{
@@ -424,12 +395,10 @@ func TestSeedIfNeeded_UserHasNoFirstOrLastName(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, createdUser)
 	assert.Nil(t, createdUser.FirstName)
@@ -437,8 +406,6 @@ func TestSeedIfNeeded_UserHasNoFirstOrLastName(t *testing.T) {
 }
 
 func TestSeedIfNeeded_AccountReferencesUser(t *testing.T) {
-	// Verify the account's CreatedByUserID matches the created user's ID
-
 	cfg := newTestSeedConfig()
 
 	counter := &mockAccountCounter{
@@ -467,12 +434,10 @@ func TestSeedIfNeeded_AccountReferencesUser(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotEqual(t, uuid.Nil, createdUserID)
 	assert.NotNil(t, createdAccount)
@@ -504,19 +469,16 @@ func TestSeedIfNeeded_AccountPlanIsTrial(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, createdAccount)
 	assert.Equal(t, models.Trial, createdAccount.Plan)
 }
 
 func TestSeedIfNeeded_SkipPasswordChange(t *testing.T) {
-	// When SkipPasswordChange is true, user should be created with MustChangePassword: false
 	cfg := newTestSeedConfig()
 	cfg.SkipPasswordChange = true
 
@@ -542,21 +504,17 @@ func TestSeedIfNeeded_SkipPasswordChange(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, createdUser)
 	assert.False(t, createdUser.MustChangePassword, "MustChangePassword should be false when SkipPasswordChange is true")
 }
 
 func TestSeedIfNeeded_DefaultRequiresPasswordChange(t *testing.T) {
-	// Default config (SkipPasswordChange = false) should create user with MustChangePassword: true
 	cfg := newTestSeedConfig()
-	// SkipPasswordChange defaults to false
 
 	var createdUser *models.User
 	counter := &mockAccountCounter{
@@ -580,13 +538,176 @@ func TestSeedIfNeeded_DefaultRequiresPasswordChange(t *testing.T) {
 		},
 	}
 
-	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
 
-	// Act
 	err := svc.SeedIfNeeded()
 
-	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, createdUser)
 	assert.True(t, createdUser.MustChangePassword, "MustChangePassword should be true by default")
+}
+
+// ── E2E Account Seeding Tests ──
+
+func newE2ETestConfig() *config.Config {
+	cfg := newTestSeedConfig()
+	cfg.E2EAccountEnabled = true
+	cfg.E2EAccountEmail = "e2e-test@nori.dev"
+	cfg.E2EAccountPassword = "TestPass123!"
+	return cfg
+}
+
+func fullMocks() (*mockAccountCounter, *mockUserCreator, *mockAccountCreator, *mockUserAccountCreator) {
+	return &mockAccountCounter{
+			countFunc: func() (int64, error) { return 1, nil }, // admin already exists
+		},
+		&mockUserCreator{
+			createUserFunc: func(user *models.User) error { return nil },
+		},
+		&mockAccountCreator{
+			createAccountFunc: func(account *models.Account) error { return nil },
+		},
+		&mockUserAccountCreator{
+			createWithRoleFunc: func(userID uuid.UUID, accountID uuid.UUID, role models.Role) (*models.UserAccount, error) {
+				return &models.UserAccount{}, nil
+			},
+		}
+}
+
+func TestSeedIfNeeded_E2EAccountCreatedWhenEnabled(t *testing.T) {
+	cfg := newE2ETestConfig()
+	counter, userCreator, accountCreator, userAccountCreator := fullMocks()
+
+	var createdUsers []*models.User
+	userCreator.createUserFunc = func(user *models.User) error {
+		createdUsers = append(createdUsers, user)
+		return nil
+	}
+
+	var createdAccounts []*models.Account
+	accountCreator.createAccountFunc = func(account *models.Account) error {
+		createdAccounts = append(createdAccounts, account)
+		return nil
+	}
+
+	userFinder := &mockUserFinder{
+		getUserByEmailFunc: func(email string) (*models.User, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+
+	spaceCreated := false
+	spaceCreator := &mockDefaultSpaceCreator{
+		createDefaultSpaceFunc: func(accountID uuid.UUID, creatorUserID uuid.UUID) (*models.Space, error) {
+			spaceCreated = true
+			return &models.Space{ID: uuid.New()}, nil
+		},
+	}
+
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, userFinder, spaceCreator, cfg)
+	err := svc.SeedIfNeeded()
+
+	assert.NoError(t, err)
+	assert.Len(t, createdUsers, 1)
+	assert.Equal(t, cfg.E2EAccountEmail, createdUsers[0].Email)
+	assert.Equal(t, "E2E", *createdUsers[0].FirstName)
+	assert.Equal(t, "Test", *createdUsers[0].LastName)
+	assert.False(t, createdUsers[0].MustChangePassword)
+	assert.Len(t, createdAccounts, 1)
+	assert.Equal(t, "E2E Test Account", *createdAccounts[0].Name)
+	assert.True(t, spaceCreated)
+}
+
+func TestSeedIfNeeded_E2EAccountSkippedWhenDisabled(t *testing.T) {
+	cfg := newTestSeedConfig()
+	cfg.E2EAccountEnabled = false
+	counter, userCreator, accountCreator, userAccountCreator := fullMocks()
+
+	userCreateCount := 0
+	userCreator.createUserFunc = func(user *models.User) error {
+		userCreateCount++
+		return nil
+	}
+
+	svc := newTestSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, cfg)
+	err := svc.SeedIfNeeded()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, userCreateCount, "No users should be created when E2E is disabled and admin already exists")
+}
+
+func TestSeedIfNeeded_E2EAccountIdempotent(t *testing.T) {
+	cfg := newE2ETestConfig()
+	counter, userCreator, accountCreator, userAccountCreator := fullMocks()
+
+	userCreateCount := 0
+	userCreator.createUserFunc = func(user *models.User) error {
+		userCreateCount++
+		return nil
+	}
+
+	// User already exists
+	userFinder := &mockUserFinder{
+		getUserByEmailFunc: func(email string) (*models.User, error) {
+			return &models.User{ID: uuid.New(), Email: email}, nil
+		},
+	}
+
+	spaceCreator := &mockDefaultSpaceCreator{
+		createDefaultSpaceFunc: func(accountID uuid.UUID, creatorUserID uuid.UUID) (*models.Space, error) {
+			t.Fatal("CreateDefaultSpace should not be called when E2E user already exists")
+			return nil, nil
+		},
+	}
+
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, userFinder, spaceCreator, cfg)
+	err := svc.SeedIfNeeded()
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, userCreateCount)
+}
+
+func TestSeedIfNeeded_E2EAccountCreatedEvenWhenAdminExists(t *testing.T) {
+	cfg := newE2ETestConfig()
+
+	// Admin account already exists
+	counter := &mockAccountCounter{
+		countFunc: func() (int64, error) { return 1, nil },
+	}
+
+	e2eUserCreated := false
+	userCreator := &mockUserCreator{
+		createUserFunc: func(user *models.User) error {
+			e2eUserCreated = true
+			return nil
+		},
+	}
+
+	accountCreator := &mockAccountCreator{
+		createAccountFunc: func(account *models.Account) error { return nil },
+	}
+
+	userAccountCreator := &mockUserAccountCreator{
+		createWithRoleFunc: func(userID uuid.UUID, accountID uuid.UUID, role models.Role) (*models.UserAccount, error) {
+			return &models.UserAccount{}, nil
+		},
+	}
+
+	userFinder := &mockUserFinder{
+		getUserByEmailFunc: func(email string) (*models.User, error) {
+			return nil, gorm.ErrRecordNotFound
+		},
+	}
+
+	spaceCreator := &mockDefaultSpaceCreator{
+		createDefaultSpaceFunc: func(accountID uuid.UUID, creatorUserID uuid.UUID) (*models.Space, error) {
+			return &models.Space{ID: uuid.New()}, nil
+		},
+	}
+
+	svc := NewSeedService(counter, userCreator, noopUserUpdater(), accountCreator, userAccountCreator, userFinder, spaceCreator, cfg)
+	err := svc.SeedIfNeeded()
+
+	assert.NoError(t, err)
+	assert.True(t, e2eUserCreated, "E2E user should be created even when admin account already exists")
 }

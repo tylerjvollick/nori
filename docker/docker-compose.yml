@@ -1,7 +1,7 @@
-name: nori-dev
+name: nori
 
+# Production compose — no web dev server, no E2E vars, no NORI_ENV.
 # Create docker/.env from docker/.env.example before running.
-# Pass --env-file docker/.env when invoking docker compose.
 
 services:
   nori-migrate:
@@ -33,12 +33,7 @@ services:
       NORI_JWT_SECRET: ${NORI_JWT_SECRET}
       NORI_ADMIN_EMAIL: ${NORI_ADMIN_EMAIL:-admin@nori.dev}
       NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
-      NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-Nori Dev}
-      NORI_SKIP_PASSWORD_CHANGE: ${NORI_SKIP_PASSWORD_CHANGE:-false}
-      NORI_ENV: development
-      E2E_ACCOUNT_ENABLED: ${E2E_ACCOUNT_ENABLED:-true}
-      E2E_ACCOUNT_EMAIL: ${E2E_ACCOUNT_EMAIL:-e2e-test@nori.dev}
-      E2E_ACCOUNT_PASSWORD: ${E2E_ACCOUNT_PASSWORD:-TestPass123!}
+      NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-My Shop}
       NORI_PORT: ${NORI_PORT:-8080}
     depends_on:
       database:
@@ -49,19 +44,6 @@ services:
       - "${NORI_HOST_PORT:-8081}:${NORI_PORT:-8080}"
     volumes:
       - nori_uploads:/app/uploads
-
-  nori-web:
-    container_name: nori-web
-    build: ../web
-    ports:
-      - "5173:5173"
-    volumes:
-      - ../web:/app
-      - /app/node_modules
-    environment:
-      - NODE_ENV=development
-      - VITE_API_URL=http://localhost:${NORI_HOST_PORT:-8081}
-    command: npm run dev -- --host 0.0.0.0
 
   database:
     image: postgres:16
