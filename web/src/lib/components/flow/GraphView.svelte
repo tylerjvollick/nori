@@ -13,7 +13,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2 } from '@lucide/svelte';
+	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import { graphDirection, type GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
@@ -546,6 +546,10 @@
 		edges = layouted.edges;
 	}
 
+	function handleRelayout(): void {
+		relayoutForDirection(currentDirection);
+	}
+
 	onMount(async () => {
 		if (isScoped) {
 			// In scoped mode, tasks are provided externally. No fetching needed.
@@ -834,6 +838,13 @@
 			return;
 		}
 
+		// Alt+L: Re-run dagre layout
+		if ((e.altKey || e.metaKey) && e.key === 'l') {
+			e.preventDefault();
+			handleRelayout();
+			return;
+		}
+
 		switch (e.key) {
 			case 'Enter': {
 				if (selectedNodeId) {
@@ -906,6 +917,10 @@
 			<Button variant="outline" size="sm" onclick={handleAddUnconnected} title="Add unconnected node">
 				<Plus class="size-4" />
 				<span class="ml-1.5">Add Node</span>
+			</Button>
+			<Button variant="outline" size="sm" onclick={handleRelayout} title="Re-run dagre layout (Alt+L)" disabled={taskCount === 0}>
+				<LayoutDashboard class="size-4" />
+				<span class="ml-1.5">Re-layout</span>
 			</Button>
 			<Button variant="outline" size="sm" onclick={handleManualRefresh} disabled={isRefreshing}>
 				<RefreshCw class="size-4 {isRefreshing ? 'animate-spin' : ''}" />

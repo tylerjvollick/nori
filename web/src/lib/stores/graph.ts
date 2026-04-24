@@ -5,7 +5,7 @@ import { browser } from '$app/environment';
 export type GraphDirection = 'LR' | 'RL' | 'TB' | 'BT';
 
 const STORAGE_KEY = 'graph-direction';
-const DEFAULT_DIRECTION: GraphDirection = 'LR';
+const DEFAULT_DIRECTION: GraphDirection = 'TB';
 
 const VALID_DIRECTIONS = new Set<GraphDirection>(['LR', 'RL', 'TB', 'BT']);
 
