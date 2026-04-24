@@ -12,9 +12,9 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
+	import { RefreshCw, CircleAlert, Maximize2, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
-	import { graphDirection, type GraphDirection } from '$lib/stores/graph';
+	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
@@ -100,23 +100,7 @@
 
 	// ---- Dagre layout ----
 
-	// Direction label for the toggle button tooltip
-	const DIRECTION_LABELS: Record<GraphDirection, string> = {
-		LR: 'Left → Right',
-		RL: 'Right → Left',
-		TB: 'Top → Bottom',
-		BT: 'Bottom → Top',
-	};
-
-	const DIRECTION_ICONS: Record<GraphDirection, typeof ArrowRight> = {
-		LR: ArrowRight,
-		RL: ArrowLeft,
-		TB: ArrowDown,
-		BT: ArrowUp,
-	};
-
-	let currentDirection = $state<GraphDirection>('LR');
-	const unsubDirection = graphDirection.subscribe((d) => (currentDirection = d));
+	const currentDirection: GraphDirection = 'TB';
 
 	function getLayoutedElements(
 		inputNodes: Node[],
@@ -574,7 +558,6 @@
 
 	onDestroy(() => {
 		stopPolling();
-		unsubDirection();
 	});
 
 	function formatLastRefreshed(date: Date | null): string {
@@ -880,9 +863,6 @@
 		// Helper: sort sibling/fork candidates by visual position.
 		// In LR/RL layouts siblings are stacked vertically; in TB/BT they're horizontal.
 		function sortByPosition(ns: Node[]): Node[] {
-			if (currentDirection === 'LR' || currentDirection === 'RL') {
-				return [...ns].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
-			}
 			return [...ns].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
 		}
 
@@ -1064,16 +1044,6 @@
 					Updated {formatLastRefreshed(lastRefreshed)}
 				</span>
 			{/if}
-			<Button
-				variant="outline"
-				size="sm"
-				onclick={() => graphDirection.cycle()}
-				title="Graph direction: {DIRECTION_LABELS[currentDirection]}"
-			>
-				{@const DirIcon = DIRECTION_ICONS[currentDirection]}
-				<DirIcon class="size-4" />
-				<span class="ml-1.5">{DIRECTION_LABELS[currentDirection]}</span>
-			</Button>
 			<Button variant="outline" size="sm" onclick={handleAddUnconnected} title="Add unconnected node">
 				<Plus class="size-4" />
 				<span class="ml-1.5">Add Node</span>
