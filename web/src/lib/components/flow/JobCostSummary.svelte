@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { costApi, type CostSummary } from '$lib/api/cost';
-	import { spaceStore } from '$lib/stores/space';
 	import type { TaskTreeResponse } from '$lib/api/task';
 	import * as Card from '$lib/components/ui/card';
 	import * as Table from '$lib/components/ui/table';
@@ -24,13 +23,12 @@
 
 	interface Props {
 		jobId: string;
+		spaceId: string;
 		tree: TaskTreeResponse;
 		stationMap: Map<string, string>;
 	}
 
-	let { jobId, tree, stationMap }: Props = $props();
-
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
+	let { jobId, spaceId, tree, stationMap }: Props = $props();
 
 	let costSummary = $state<CostSummary | null>(null);
 	let isLoading = $state(true);

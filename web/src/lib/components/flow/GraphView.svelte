@@ -7,7 +7,6 @@
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
-	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse, TaskStatus } from '$lib/types/task';
 	import type { TaskDepsResponse } from '$lib/api/task';
 	import type { StationResponse } from '$lib/types/station';
@@ -22,6 +21,7 @@
 
 	/** Optional pre-loaded tasks and deps. When provided, the graph uses these instead of fetching. */
 	interface Props {
+		spaceId: string;
 		tasks?: TaskResponse[];
 		deps?: Map<string, TaskDepsResponse>;
 		stationMap?: Map<string, string>;
@@ -40,12 +40,10 @@
 		onmutate?: () => Promise<void> | void;
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate }: Props = $props();
+	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
-
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// ---- Constants ----
 	const POLL_INTERVAL_MS = 30_000;

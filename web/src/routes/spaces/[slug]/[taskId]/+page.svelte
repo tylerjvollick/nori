@@ -500,6 +500,7 @@
 					{#if selectedTask}
 						<TaskDetailPanel
 							task={selectedTask}
+							{spaceId}
 							{stationMap}
 							deps={selectedDeps}
 							onaction={handleTaskAction}
@@ -511,7 +512,7 @@
 				<!-- Right: Neighborhood graph -->
 				<div class="w-1/2 overflow-hidden">
 					{#if neighborhoodLoaded}
-						<GraphView tasks={neighborhoodTasks} deps={neighborhoodDeps} {stationMap} focusTaskId={tree.id} />
+						<GraphView {spaceId} tasks={neighborhoodTasks} deps={neighborhoodDeps} {stationMap} focusTaskId={tree.id} />
 					{:else}
 						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
 							Loading neighborhood...
@@ -521,13 +522,14 @@
 			</div>
 
 		{:else if currentView === 'board'}
-			<BoardView tasks={flatTasks} {stationMap} />
+			<BoardView {spaceId} tasks={flatTasks} {stationMap} />
 
 		{:else if currentView === 'graph'}
 			<div class="flex-1 flex overflow-hidden">
 				<!-- Graph canvas -->
 				<div class="flex-1 min-w-0 overflow-hidden relative">
 					<GraphView
+						{spaceId}
 						tasks={flatTasks}
 						deps={depsMap}
 						{stationMap}
@@ -549,6 +551,7 @@
 					<div class="hidden lg:flex w-80 xl:w-96 flex-col border-l border-border overflow-y-auto shrink-0">
 						<TaskDetailPanel
 							task={graphPanelTask ?? tree ?? undefined}
+							{spaceId}
 							{stationMap}
 							deps={graphPanelDeps}
 							isLoading={graphPanelLoading}
@@ -573,6 +576,7 @@
 						<div class="flex-1 overflow-y-auto">
 							<TaskDetailPanel
 								task={graphPanelTask}
+								{spaceId}
 								{stationMap}
 								deps={graphPanelDeps}
 								isLoading={graphPanelLoading}
@@ -591,11 +595,11 @@
 			</div>
 
 		{:else if currentView === 'list'}
-			<ListView tasks={flatTasks} deps={depsMap} {stationMap} />
+			<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
 
 		{:else if currentView === 'cost'}
 			<div class="flex-1 overflow-y-auto">
-				<JobCostSummary jobId={tree.id} {tree} {stationMap} />
+				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
 			</div>
 		{/if}
 	{/if}

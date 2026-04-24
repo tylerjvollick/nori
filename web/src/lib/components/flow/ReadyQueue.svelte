@@ -8,6 +8,7 @@
 	interface Props {
 		/** Ready tasks to display. Sorted by priority then createdAt internally. */
 		tasks: TaskResponse[];
+		spaceId: string;
 		/** Map of station ID -> station name for display. */
 		stationMap: Map<string, string>;
 		/** Whether data is currently loading. */
@@ -20,6 +21,7 @@
 
 	let {
 		tasks,
+		spaceId,
 		stationMap,
 		isLoading = false,
 		onclick,
@@ -143,7 +145,7 @@
 						</span>
 					{/if}
 
-					<TaskActions {task} layout="compact" {onaction} />
+					<TaskActions {task} {spaceId} layout="compact" {onaction} />
 
 					<span class="flex items-center gap-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
 						<Clock class="size-3" />

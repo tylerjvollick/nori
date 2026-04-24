@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { TaskResponse, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
-	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -15,6 +14,7 @@
 
 	interface Props {
 		task: TaskResponse;
+		spaceId: string;
 		open: boolean;
 		/** Called after successful completion with the API response. */
 		oncomplete?: (response: CompleteTaskResponse) => void;
@@ -22,9 +22,7 @@
 		oncancel?: () => void;
 	}
 
-	let { task, open = $bindable(), oncomplete, oncancel }: Props = $props();
-
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
+	let { task, spaceId, open = $bindable(), oncomplete, oncancel }: Props = $props();
 
 	// --- Time editing state ---
 

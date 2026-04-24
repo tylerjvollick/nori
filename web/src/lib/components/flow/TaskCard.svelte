@@ -4,7 +4,6 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
-	import { spaceStore } from '$lib/stores/space';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import * as Avatar from '$lib/components/ui/avatar';
@@ -16,6 +15,7 @@
 
 	interface Props {
 		task: TaskResponse;
+		spaceId: string;
 		stationMap: Map<string, string>;
 		/** Called after a successful task action with the updated task */
 		onaction?: (updated: TaskResponse) => void;
@@ -23,10 +23,9 @@
 		isDragging?: boolean;
 	}
 
-	let { task, stationMap, onaction, isDragging = false }: Props = $props();
+	let { task, spaceId, stationMap, onaction, isDragging = false }: Props = $props();
 
 	let slug = $derived($page.params.slug);
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// --- Running timer for active tasks ---
 
@@ -297,7 +296,7 @@
 					{/if}
 				</div>
 				<div class="flex items-center gap-1.5">
-					<TaskActions {task} layout="compact" {onaction} />
+					<TaskActions {task} {spaceId} layout="compact" {onaction} />
 					<span class="flex items-center gap-0.5 {isActive ? 'text-blue-500 dark:text-blue-400' : ''}">
 						<Clock class="size-3" />
 						{timeDisplay}

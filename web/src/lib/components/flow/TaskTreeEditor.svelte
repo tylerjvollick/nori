@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
 	import { taskApi } from '$lib/api/task';
-	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse, TaskDep } from '$lib/types/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Badge } from '$lib/components/ui/badge';
@@ -36,6 +35,7 @@
 	interface Props {
 		/** The full task tree (root + children). */
 		tree: TaskTreeResponse;
+		spaceId: string;
 		/** Available stations for the dropdown. */
 		stations: StationResponse[];
 		/** Editor context: determines which fields are shown. */
@@ -56,6 +56,7 @@
 
 	let {
 		tree,
+		spaceId,
 		stations,
 		context,
 		stationMap,
@@ -65,8 +66,6 @@
 		onselect,
 		selectedTaskId = null,
 	}: Props = $props();
-
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// ---- State ----
 

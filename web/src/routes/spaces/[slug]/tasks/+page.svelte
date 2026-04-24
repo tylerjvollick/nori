@@ -264,9 +264,9 @@
 	<!-- Board or list view -->
 	<div class="flex-1 overflow-hidden">
 		{#if currentView === 'board'}
-			<BoardView />
+			<BoardView spaceId={space.id} />
 		{:else if currentView === 'list'}
-			<ListView />
+			<ListView spaceId={space.id} />
 		{/if}
 	</div>
 

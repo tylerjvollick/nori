@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { TaskResponse, TaskStatus, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
-	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -17,6 +16,7 @@
 
 	interface Props {
 		task: TaskResponse;
+		spaceId: string;
 		/** Layout: 'bar' for full button bar, 'compact' for small icon buttons */
 		layout?: 'bar' | 'compact';
 		/** Called after a successful action with the updated task */
@@ -25,9 +25,7 @@
 		oncomplete?: (response: CompleteTaskResponse) => void;
 	}
 
-	let { task, layout = 'bar', onaction, oncomplete }: Props = $props();
-
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
+	let { task, spaceId, layout = 'bar', onaction, oncomplete }: Props = $props();
 
 	let loadingAction = $state<ActionType | null>(null);
 	let showSkipDialog = $state(false);
@@ -223,6 +221,7 @@
 <!-- Completion flow modal (time confirmation + next task navigation) -->
 <CompletionModal
 	{task}
+	{spaceId}
 	bind:open={showCompletionModal}
 	oncomplete={handleCompletionDone}
 />

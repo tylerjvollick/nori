@@ -4,7 +4,6 @@
   import { page } from "$app/stores";
   import { taskApi } from "$lib/api/task";
   import { stationApi } from "$lib/api/station";
-  import { spaceStore } from "$lib/stores/space";
   import type { TaskResponse } from "$lib/types/task";
   import type { StationResponse } from "$lib/types/station";
   import { Button } from "$lib/components/ui/button";
@@ -16,11 +15,12 @@
 
   /** Optional pre-loaded tasks. When provided, the board uses these instead of fetching from the API. */
   interface Props {
+    spaceId: string;
     tasks?: TaskResponse[];
     stationMap?: Map<string, string>;
   }
 
-  let { tasks: externalTasks, stationMap: externalStationMap }: Props =
+  let { spaceId, tasks: externalTasks, stationMap: externalStationMap }: Props =
     $props();
 
   /** Whether we're in scoped mode (tasks provided externally). */
@@ -103,7 +103,6 @@
   // ---- Derived filters from URL ----
 
   let slug = $derived($page.params.slug);
-  let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
   let stationFilter = $derived($page.url.searchParams.get("station") || "");
   let priorityFilter = $derived($page.url.searchParams.get("priority") || "");
 
@@ -812,6 +811,7 @@
             >
               <TaskCard
                 {task}
+                {spaceId}
                 {stationMap}
                 onaction={handleTaskAction}
                 {isDragging}
@@ -841,6 +841,7 @@
           >
             <TaskCard
               {task}
+              {spaceId}
               {stationMap}
               onaction={handleTaskAction}
               {isDragging}
@@ -869,6 +870,7 @@
           >
             <TaskCard
               {task}
+              {spaceId}
               {stationMap}
               onaction={handleTaskAction}
               {isDragging}
@@ -897,6 +899,7 @@
           >
             <TaskCard
               {task}
+              {spaceId}
               {stationMap}
               onaction={handleTaskAction}
               {isDragging}

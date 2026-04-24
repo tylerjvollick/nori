@@ -459,6 +459,7 @@
 					<!-- Graph canvas -->
 					<div class="flex-1 min-w-0 overflow-hidden relative">
 						<GraphView
+							{spaceId}
 							tasks={flatTasks}
 							deps={depsMap}
 							{stationMap}
@@ -482,6 +483,7 @@
 						<div class="hidden lg:flex w-80 xl:w-96 flex-col border-l border-border overflow-y-auto shrink-0">
 							<TaskDetailPanel
 								task={graphPanelTask ?? tree ?? undefined}
+								{spaceId}
 								{stationMap}
 								deps={graphPanelDeps}
 								isLoading={graphPanelLoading}
@@ -505,6 +507,7 @@
 							<div class="flex-1 overflow-y-auto">
 								<TaskDetailPanel
 									task={graphPanelTask}
+									{spaceId}
 									{stationMap}
 									deps={graphPanelDeps}
 									isLoading={graphPanelLoading}
