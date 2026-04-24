@@ -787,7 +787,7 @@
   {/if}
 
   <!-- Kanban columns -->
-  <div class="flex flex-1 gap-4 overflow-x-auto px-4 pb-4">
+  <div class="flex min-h-0 flex-1 gap-4 overflow-x-auto px-4 pb-4">
       <!-- Blocked / Ready / In Progress / Done -->
 
       <!-- Blocked (hidden in scoped mode since we can't determine blocked status) -->

@@ -285,7 +285,7 @@
 	{/if}
 
 	<!-- Kanban columns -->
-	<div class="flex flex-1 gap-4 overflow-x-auto px-4 pb-4">
+	<div class="flex min-h-0 flex-1 gap-4 overflow-x-auto px-4 pb-4">
 		<KanbanColumn
 			title="Ready"
 			count={readyJobs.length}

@@ -264,7 +264,7 @@
 	</div>
 
 	<!-- Board or list view -->
-	<div class="flex-1 overflow-auto">
+	<div class="flex-1 overflow-hidden">
 		{#if currentView === 'board'}
 			<BoardView />
 		{:else if currentView === 'list'}
