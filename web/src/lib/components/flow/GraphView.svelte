@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
-	import type { Node, Edge, NodeTypes } from '@xyflow/svelte';
+	import type { Node, Edge, NodeTypes, Connection } from '@xyflow/svelte';
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
@@ -53,6 +53,8 @@
 	let error = $state<string | null>(null);
 	let isRefreshing = $state(false);
 	let lastRefreshed = $state<Date | null>(null);
+	let isConnecting = $state(false);
+	let connectionError = $state<string | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let _internalStationMap = $state<Map<string, string>>(new Map());
 	let stationMap = $derived(externalStationMap ?? _internalStationMap);
@@ -276,6 +278,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 
@@ -303,6 +306,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 			}
@@ -478,6 +482,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 			}
@@ -545,6 +550,89 @@
 	function formatLastRefreshed(date: Date | null): string {
 		if (!date) return '';
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	// ---- Cycle detection ----
+
+	function hasCycle(sourceId: string, targetId: string): boolean {
+		// Check if adding source → target would create a cycle.
+		// A cycle exists iff there is already a path from targetId to sourceId.
+		const visited = new Set<string>();
+		const queue: string[] = [targetId];
+		while (queue.length > 0) {
+			const current = queue.shift()!;
+			if (current === sourceId) return true;
+			if (visited.has(current)) continue;
+			visited.add(current);
+			for (const edge of edges) {
+				if (edge.source === current) {
+					queue.push(edge.target);
+				}
+			}
+		}
+		return false;
+	}
+
+	// ---- Edge creation/deletion ----
+
+	async function handleConnect(connection: Connection): Promise<void> {
+		const source = connection.source;
+		const target = connection.target;
+		if (!source || !target || source === target) return;
+
+		// Duplicate check
+		if (edges.some((e) => e.source === source && e.target === target)) return;
+
+		// Cycle guard
+		if (hasCycle(source, target)) {
+			connectionError = 'Cannot create dependency: this would create a cycle';
+			setTimeout(() => { connectionError = null; }, 4000);
+			return;
+		}
+
+		isConnecting = true;
+		connectionError = null;
+		try {
+			await taskApi.addDep(spaceId, source, target, 'finish_to_start');
+			if (isScoped && externalTasks) {
+				buildFromExternalData(externalTasks, externalDeps);
+			} else {
+				await fetchGraph({ silent: true });
+			}
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create dependency';
+			setTimeout(() => { connectionError = null; }, 4000);
+		} finally {
+			isConnecting = false;
+		}
+	}
+
+	async function handleBeforeDelete({ nodes: _deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
+		if (deletedEdges.length === 0) return true;
+
+		const failures: string[] = [];
+		await Promise.all(
+			deletedEdges.map(async (edge) => {
+				const depId = (edge.data as { depId?: string } | undefined)?.depId;
+				if (!depId) return;
+				try {
+					await taskApi.removeDep(spaceId, edge.source, depId);
+				} catch (e) {
+					failures.push(e instanceof Error ? e.message : 'Failed to remove dependency');
+				}
+			}),
+		);
+
+		if (failures.length > 0) {
+			connectionError = failures[0];
+			setTimeout(() => { connectionError = null; }, 4000);
+			return false; // Cancel xyflow deletion so edges stay visible
+		}
+
+		// Update our controlled edges state to match xyflow's pending deletion
+		const deletedIds = new Set(deletedEdges.map((e) => e.id));
+		edges = edges.filter((e) => !deletedIds.has(e.id));
+		return true;
 	}
 
 	// ---- Keyboard navigation ----
@@ -648,6 +736,14 @@
 		</div>
 	{/if}
 
+	<!-- Connection error toast -->
+	{#if connectionError}
+		<div class="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+			<CircleAlert class="size-4 text-destructive shrink-0" />
+			<span class="text-destructive">{connectionError}</span>
+		</div>
+	{/if}
+
 	<!-- Graph area -->
 	{#if isLoading}
 		<div class="flex flex-1 items-center justify-center">
@@ -679,12 +775,14 @@
 				fitView
 				fitViewOptions={{ padding: 0.2 }}
 				nodesDraggable={true}
-				nodesConnectable={false}
+				nodesConnectable={true}
 				elementsSelectable={true}
 				minZoom={0.1}
 				maxZoom={2}
 				colorMode="system"
 				onnodeclick={handleNodeClick}
+				onconnect={handleConnect}
+				onbeforedelete={handleBeforeDelete}
 			>
 				<Background />
 				<Controls />
