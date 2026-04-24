@@ -187,6 +187,14 @@ async function globalSetup(_config: FullConfig) {
     );
   }
 
+  // Record a space visit so the test user has at least one recent space.
+  // This is required for the /flow redirect test (which redirects to the
+  // user's most recently visited space).
+  await fetch(`${env.apiURL}/api/spaces/${activeSpaceId}/visit`, {
+    method: 'POST',
+    headers: { Cookie: `nori_token=${token}` },
+  });
+
   const browser = await chromium.launch();
   const context = await browser.newContext();
 

@@ -1,16 +1,21 @@
 import { test, expect } from '@playwright/test';
 import { resetSpace } from '../helpers/reset';
 
+// Shared space slug set by beforeEach so each test navigates to the
+// space-scoped recipes page (which initialises currentSpace via the layout).
+let spaceSlug = '';
+
 test.describe('Recipe Authoring (User Story 1)', () => {
   test.beforeEach(async ({ page }) => {
-    await resetSpace(page);
+    const result = await resetSpace(page);
+    spaceSlug = result.slug;
   });
 
   test('create a new recipe and verify it opens with an empty task tree', async ({
     page,
   }) => {
-    // Navigate to the recipes list page
-    await page.goto('/recipes');
+    // Navigate to the space-scoped recipes page (sets currentSpace via layout)
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
     await expect(page.getByRole('heading', { name: 'Recipes' })).toBeVisible();
 
     // Click "New Recipe" to open the create dialog
@@ -39,7 +44,7 @@ test.describe('Recipe Authoring (User Story 1)', () => {
 
   test('add top-level steps to the recipe task tree', async ({ page }) => {
     // Create a recipe via the UI first
-    await page.goto('/recipes');
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.getByRole('button', { name: 'New Recipe' }).click();
     await page.locator('#recipe-name').fill('Test Recipe');
     await page.getByRole('button', { name: 'Create Recipe' }).click();
@@ -83,7 +88,7 @@ test.describe('Recipe Authoring (User Story 1)', () => {
 
   test('add nested sub-steps under a parent step', async ({ page }) => {
     // Create recipe and add a top-level step
-    await page.goto('/recipes');
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.getByRole('button', { name: 'New Recipe' }).click();
     await page.locator('#recipe-name').fill('Nested Steps Test');
     await page.getByRole('button', { name: 'Create Recipe' }).click();
@@ -121,7 +126,7 @@ test.describe('Recipe Authoring (User Story 1)', () => {
 
   test('add dependencies between sibling steps', async ({ page }) => {
     // Create recipe with two top-level steps
-    await page.goto('/recipes');
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.getByRole('button', { name: 'New Recipe' }).click();
     await page.locator('#recipe-name').fill('Dependency Test');
     await page.getByRole('button', { name: 'Create Recipe' }).click();
@@ -171,13 +176,13 @@ test.describe('Recipe Authoring (User Story 1)', () => {
 
   test('recipe appears in the recipes list after creation', async ({ page }) => {
     // Create a recipe
-    await page.goto('/recipes');
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.getByRole('button', { name: 'New Recipe' }).click();
     await page.locator('#recipe-name').fill('Walnut Bookshelf');
     await page.getByRole('button', { name: 'Create Recipe' }).click();
     await page.waitForURL(/\/recipes\/.+/);
 
-    // Navigate back to recipes list
+    // Navigate back to recipes list (client-side navigation preserves currentSpace)
     await page.getByRole('button', { name: 'Back to Recipes' }).click();
     await page.waitForURL('/recipes');
 
