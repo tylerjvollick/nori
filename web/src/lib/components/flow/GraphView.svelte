@@ -12,7 +12,8 @@
 	import type { TaskDepsResponse } from '$lib/api/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
-	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2 } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import { graphDirection, type GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
@@ -57,6 +58,13 @@
 	let lastRefreshed = $state<Date | null>(null);
 	let isConnecting = $state(false);
 	let connectionError = $state<string | null>(null);
+	let editingNodeId = $state<string | null>(null);
+	let deleteConfirmState = $state<{
+		nodeId: string;
+		nodeTitle: string;
+		hasConnections: boolean;
+		resolve: (ok: boolean) => void;
+	} | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let _internalStationMap = $state<Map<string, string>>(new Map());
 	let stationMap = $derived(externalStationMap ?? _internalStationMap);
@@ -245,6 +253,7 @@
 				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				onAddSerial: () => handleAddSerial(task.id),
 			},
 		}));
 
@@ -452,6 +461,7 @@
 				isFocus: focusTaskId === task.id,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				onAddSerial: () => handleAddSerial(task.id),
 			},
 		}));
 
@@ -610,7 +620,52 @@
 		}
 	}
 
-	async function handleBeforeDelete({ nodes: _deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
+	async function handleBeforeDelete({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
+		// Handle node deletion
+		if (deletedNodes.length > 0) {
+			for (const node of deletedNodes) {
+				const upstreamEdges = edges.filter((e) => e.target === node.id);
+				const downstreamEdges = edges.filter((e) => e.source === node.id);
+				const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
+				const nodeTitle = (node.data as { title?: string }).title ?? node.id;
+
+				const confirmed = await new Promise<boolean>((resolve) => {
+					deleteConfirmState = { nodeId: node.id, nodeTitle, hasConnections, resolve };
+				});
+
+				if (!confirmed) return false;
+
+				// Reconnect: add a dep from each upstream to each downstream
+				for (const upEdge of upstreamEdges) {
+					for (const downEdge of downstreamEdges) {
+						try {
+							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'finish_to_start');
+						} catch {
+							// Ignore duplicate dep errors
+						}
+					}
+				}
+
+				// Delete the task
+				try {
+					await taskApi.deleteTask(spaceId, node.id);
+				} catch (e) {
+					connectionError = e instanceof Error ? e.message : 'Failed to delete task';
+					setTimeout(() => { connectionError = null; }, 4000);
+					return false;
+				}
+			}
+
+			// Refresh graph after node deletion
+			if (isScoped && externalTasks) {
+				buildFromExternalData(externalTasks, externalDeps);
+			} else {
+				await fetchGraph({ silent: true });
+			}
+			return false; // We've already updated state via fetch
+		}
+
+		// Handle edge deletion
 		if (deletedEdges.length === 0) return true;
 
 		const failures: string[] = [];
@@ -638,6 +693,115 @@
 		return true;
 	}
 
+	// ---- Node creation ----
+
+	/** After graph refresh, patch a specific node to show inline title editing. */
+	function activateNodeEditing(taskId: string): void {
+		editingNodeId = taskId;
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? {
+						...n,
+						data: {
+							...n.data,
+							editing: true,
+							onTitleCommit: (title: string) => handleTitleCommit(taskId, title),
+						},
+					}
+				: n,
+		);
+	}
+
+	async function refreshGraph(): Promise<void> {
+		if (isScoped && externalTasks) {
+			buildFromExternalData(externalTasks, externalDeps);
+		} else {
+			await fetchGraph({ silent: true });
+		}
+	}
+
+	async function handleAddUnconnected(): Promise<void> {
+		if (!spaceId) return;
+		try {
+			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+			await refreshGraph();
+			activateNodeEditing(newTask.id);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleAddSerial(sourceNodeId: string): Promise<void> {
+		if (!spaceId) return;
+		// Capture downstream edges before we modify state
+		const downstreamEdges = edges.filter((e) => e.source === sourceNodeId);
+		try {
+			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+
+			// sourceNode → newTask
+			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'finish_to_start');
+
+			// Reconnect downstream: replace sourceNode → X with newTask → X
+			for (const downEdge of downstreamEdges) {
+				const depId = (downEdge.data as { depId?: string })?.depId;
+				if (depId) {
+					try {
+						await taskApi.removeDep(spaceId, sourceNodeId, depId);
+					} catch { /* ignore */ }
+					await taskApi.addDep(spaceId, newTask.id, downEdge.target, 'finish_to_start');
+				}
+			}
+
+			await refreshGraph();
+			activateNodeEditing(newTask.id);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create serial task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleAddParallel(sourceNodeId: string): Promise<void> {
+		if (!spaceId || !sourceNodeId) return;
+		// Find upstream blockers of source node (edges where sourceNode is target)
+		const upstreamEdges = edges.filter((e) => e.target === sourceNodeId);
+		try {
+			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+
+			// Give newTask the same upstream deps as sourceNode
+			for (const upEdge of upstreamEdges) {
+				await taskApi.addDep(spaceId, upEdge.source, newTask.id, 'finish_to_start');
+			}
+
+			await refreshGraph();
+			activateNodeEditing(newTask.id);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create parallel task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleTitleCommit(taskId: string, title: string): Promise<void> {
+		editingNodeId = null;
+		// Clear editing state on the node immediately
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? { ...n, data: { ...n.data, editing: false, onTitleCommit: undefined } }
+				: n,
+		);
+		if (!title || title === 'New Task') return;
+		try {
+			await taskApi.updateTask(spaceId, taskId, { title });
+			// Update the node title locally
+			nodes = nodes.map((n) =>
+				n.id === taskId ? { ...n, data: { ...n.data, title } } : n,
+			);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to update task title';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
 	// ---- Keyboard navigation ----
 	// useSvelteFlow provides zoomIn/zoomOut/fitView on the flow instance.
 	// It must be called inside a component that is a child of <SvelteFlow>,
@@ -651,6 +815,24 @@
 
 	function handleKeydown(e: KeyboardEvent): void {
 		if (isEditableTarget(e)) return;
+
+		// Alt+S: Add serial node on selected node
+		if ((e.altKey || e.metaKey) && e.key === 's') {
+			if (selectedNodeId) {
+				e.preventDefault();
+				handleAddSerial(selectedNodeId);
+			}
+			return;
+		}
+
+		// Alt+P: Add parallel node on selected node
+		if ((e.altKey || e.metaKey) && e.key === 'p') {
+			if (selectedNodeId) {
+				e.preventDefault();
+				handleAddParallel(selectedNodeId);
+			}
+			return;
+		}
 
 		switch (e.key) {
 			case 'Enter': {
@@ -721,6 +903,10 @@
 				<DirIcon class="size-4" />
 				<span class="ml-1.5">{DIRECTION_LABELS[currentDirection]}</span>
 			</Button>
+			<Button variant="outline" size="sm" onclick={handleAddUnconnected} title="Add unconnected node">
+				<Plus class="size-4" />
+				<span class="ml-1.5">Add Node</span>
+			</Button>
 			<Button variant="outline" size="sm" onclick={handleManualRefresh} disabled={isRefreshing}>
 				<RefreshCw class="size-4 {isRefreshing ? 'animate-spin' : ''}" />
 				<span class="ml-1.5">Refresh</span>
@@ -737,6 +923,48 @@
 				Retry
 			</Button>
 		</div>
+	{/if}
+
+	<!-- Delete confirmation dialog -->
+	{#if deleteConfirmState}
+		{@const dcs = deleteConfirmState}
+		<Dialog.Root
+			open={true}
+			onOpenChange={(open) => {
+				if (!open) {
+					dcs.resolve(false);
+					deleteConfirmState = null;
+				}
+			}}
+		>
+			<Dialog.Content>
+				<Dialog.Header>
+					<Dialog.Title>Delete task?</Dialog.Title>
+					<Dialog.Description>
+						Delete "<strong>{dcs.nodeTitle}</strong>"?
+						{#if dcs.hasConnections}
+							Upstream and downstream dependencies will be reconnected automatically.
+						{/if}
+						This action cannot be undone.
+					</Dialog.Description>
+				</Dialog.Header>
+				<Dialog.Footer>
+					<Button
+						variant="outline"
+						onclick={() => { dcs.resolve(false); deleteConfirmState = null; }}
+					>
+						Cancel
+					</Button>
+					<Button
+						variant="destructive"
+						onclick={() => { dcs.resolve(true); deleteConfirmState = null; }}
+					>
+						<Trash2 class="size-4 mr-1.5" />
+						Delete
+					</Button>
+				</Dialog.Footer>
+			</Dialog.Content>
+		</Dialog.Root>
 	{/if}
 
 	<!-- Connection error toast -->

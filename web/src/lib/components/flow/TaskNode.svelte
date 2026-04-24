@@ -10,6 +10,7 @@
 		CircleMinus,
 		CircleX,
 		Ban,
+		Plus,
 	} from '@lucide/svelte';
 
 	// Props from xyflow NodeProps — we receive these automatically
@@ -27,10 +28,52 @@
 			isFocus?: boolean;
 			isBlocked?: boolean;
 			direction?: GraphDirection;
+			/** When true, shows an inline title input focused for editing. */
+			editing?: boolean;
+			/** Called when the inline title input is committed (Enter or blur). */
+			onTitleCommit?: (title: string) => void;
+			/** When set, shows a [+] button below the node for serial node insertion. */
+			onAddSerial?: () => void;
 		};
 		selected: boolean;
 		[key: string]: unknown;
 	} = $props();
+
+	let editTitle = $state(data.title || '');
+	let inputEl: HTMLInputElement | undefined = $state(undefined);
+
+	$effect(() => {
+		if (data.editing && inputEl) {
+			inputEl.focus();
+			inputEl.select();
+		}
+	});
+
+	// Keep editTitle in sync if title changes externally (e.g. on task refresh)
+	$effect(() => {
+		if (!data.editing) {
+			editTitle = data.title;
+		}
+	});
+
+	function commitTitle(): void {
+		const trimmed = editTitle.trim() || 'New Task';
+		data.onTitleCommit?.(trimmed);
+	}
+
+	function handleInputKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			commitTitle();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			// Revert to original title
+			editTitle = data.title || '';
+			data.onTitleCommit?.(data.title || 'New Task');
+		}
+		// Prevent xyflow from processing keydown (delete, etc.) while editing
+		e.stopPropagation();
+	}
 
 	// Handle positions based on graph layout direction
 	// Target = incoming (predecessors/blockers), Source = outgoing (dependents/successors)
@@ -119,38 +162,66 @@
 	let isJob = $derived(data.type === 'job');
 </script>
 
-<!-- Target handle (incoming deps — this task depends on something) -->
-<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
+<!-- Wrapper for relative positioning of the [+] button -->
+<div class="relative group/tasknode">
+	<!-- Target handle (incoming deps — this task depends on something) -->
+	<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
-<div
-	class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[180px]' : 'min-w-[160px]'}"
->
-	<!-- Header: status icon + title -->
-	<div class="flex items-center gap-1.5">
-		<StatusIcon class="size-3.5 shrink-0 {config.text}" />
-		<span
-			class="truncate text-xs font-medium text-foreground {data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
-			title={data.title}
+	<div
+		class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[180px]' : 'min-w-[160px]'}"
+	>
+		<!-- Header: status icon + title -->
+		<div class="flex items-center gap-1.5">
+			<StatusIcon class="size-3.5 shrink-0 {config.text}" />
+			{#if data.editing}
+				<input
+					bind:this={inputEl}
+					bind:value={editTitle}
+					onkeydown={handleInputKeydown}
+					onblur={commitTitle}
+					class="w-full min-w-0 bg-transparent text-xs font-medium text-foreground outline-none border-b border-primary placeholder:text-muted-foreground"
+					placeholder="Task title..."
+				/>
+			{:else}
+				<span
+					class="truncate text-xs font-medium text-foreground {data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
+					title={data.title}
+				>
+					{data.title}
+				</span>
+			{/if}
+		</div>
+
+		<!-- Footer: ID + badges -->
+		{#if !data.editing}
+			<div class="mt-1 flex items-center gap-1.5">
+				<span class="font-mono text-[10px] text-muted-foreground">{data.taskId}</span>
+				{#if data.priority <= 1}
+					<span class="rounded px-1 py-0.5 text-[9px] font-medium leading-none {PRIORITY_COLORS[data.priority] ?? ''}">
+						P{data.priority}
+					</span>
+				{/if}
+				{#if data.stationName}
+					<span class="rounded bg-secondary px-1 py-0.5 text-[9px] text-secondary-foreground leading-none">
+						{data.stationName}
+					</span>
+				{/if}
+			</div>
+		{/if}
+	</div>
+
+	<!-- Source handle (outgoing deps — something depends on this task) -->
+	<Handle type="source" position={sourcePosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
+
+	<!-- [+] Serial node button — visible on hover or when selected -->
+	{#if data.onAddSerial}
+		<button
+			class="absolute -bottom-5 left-1/2 -translate-x-1/2 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover/tasknode:opacity-100 {selected ? 'opacity-100' : ''}"
+			title="Add serial node (Alt+S)"
+			onmousedown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+			onclick={(e) => { e.stopPropagation(); e.preventDefault(); data.onAddSerial?.(); }}
 		>
-			{data.title}
-		</span>
-	</div>
-
-	<!-- Footer: ID + badges -->
-	<div class="mt-1 flex items-center gap-1.5">
-		<span class="font-mono text-[10px] text-muted-foreground">{data.taskId}</span>
-		{#if data.priority <= 1}
-			<span class="rounded px-1 py-0.5 text-[9px] font-medium leading-none {PRIORITY_COLORS[data.priority] ?? ''}">
-				P{data.priority}
-			</span>
-		{/if}
-		{#if data.stationName}
-			<span class="rounded bg-secondary px-1 py-0.5 text-[9px] text-secondary-foreground leading-none">
-				{data.stationName}
-			</span>
-		{/if}
-	</div>
+			<Plus class="size-2.5" />
+		</button>
+	{/if}
 </div>
-
-<!-- Source handle (outgoing deps — something depends on this task) -->
-<Handle type="source" position={sourcePosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
