@@ -20,7 +20,7 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign, BookOpen } from '@lucide/svelte';
+	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -155,6 +155,12 @@
 	let depsMap = $state<Map<string, TaskDepsResponse>>(new Map());
 	let depsLoaded = $state(false);
 
+	// ---- Graph detail panel ----
+	let graphPanelOpen = $state(true);
+	let graphPanelTask = $state<TaskTreeResponse | null>(null);
+	let graphPanelDeps = $state<TaskDepsResponse | null>(null);
+	let graphPanelLoading = $state(false);
+
 	async function loadDepsForDescendants(): Promise<void> {
 		if (depsLoaded || !tree) return;
 		const tasks = flatTasks;
@@ -181,6 +187,14 @@
 		depsMap = map;
 		depsLoaded = true;
 	}
+
+	// Initialize graph panel with root task when switching to graph view
+	$effect(() => {
+		if (currentView === 'graph' && tree && !graphPanelTask) {
+			graphPanelTask = tree;
+			graphPanelDeps = selectedDeps;
+		}
+	});
 
 	// Load deps when switching to graph view (or automatically for leaf tasks)
 	$effect(() => {
@@ -295,6 +309,31 @@
 	function handleCompletion(response: CompleteTaskResponse): void {
 		if (response.nextTaskId) {
 			goto(`/spaces/${slug}/${response.nextTaskId}`);
+		}
+	}
+
+	/** Called when a node is clicked in the graph view — loads its details into the side panel. */
+	async function handleGraphNodeSelect(taskId: string): Promise<void> {
+		if (!tree) return;
+		graphPanelLoading = true;
+		graphPanelOpen = true;
+		try {
+			const found = findNode(tree, taskId);
+			if (found) {
+				graphPanelTask = found;
+			} else {
+				const flat = flatTasks.find((t) => t.id === taskId);
+				if (flat) {
+					graphPanelTask = { ...flat, children: [] } as TaskTreeResponse;
+				}
+			}
+			try {
+				graphPanelDeps = await taskApi.getTaskDeps(spaceId, taskId);
+			} catch {
+				graphPanelDeps = null;
+			}
+		} finally {
+			graphPanelLoading = false;
 		}
 	}
 
@@ -566,7 +605,70 @@
 			<BoardView tasks={flatTasks} {stationMap} />
 
 		{:else if currentView === 'graph'}
-			<GraphView tasks={flatTasks} deps={depsMap} {stationMap} />
+			<div class="flex-1 flex overflow-hidden">
+				<!-- Graph canvas -->
+				<div class="flex-1 min-w-0 overflow-hidden relative">
+					<GraphView
+						tasks={flatTasks}
+						deps={depsMap}
+						{stationMap}
+						onselect={handleGraphNodeSelect}
+					/>
+					<!-- Panel toggle button (desktop) -->
+					<button
+						onclick={() => (graphPanelOpen = !graphPanelOpen)}
+						class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+						title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
+					>
+						<PanelRight class="size-4" />
+					</button>
+				</div>
+
+				<!-- Detail panel (desktop sidebar) -->
+				{#if graphPanelOpen}
+					<div class="hidden lg:flex w-80 xl:w-96 flex-col border-l border-border overflow-y-auto shrink-0">
+						<TaskDetailPanel
+							task={graphPanelTask ?? tree ?? undefined}
+							{stationMap}
+							deps={graphPanelDeps}
+							isLoading={graphPanelLoading}
+							onaction={handleTaskAction}
+							oncomplete={handleCompletion}
+						/>
+					</div>
+				{/if}
+
+				<!-- Detail panel (mobile drawer overlay) -->
+				{#if graphPanelTask}
+					<div class="lg:hidden fixed inset-y-0 right-0 w-4/5 max-w-sm z-50 flex flex-col bg-background border-l border-border shadow-xl overflow-y-auto">
+						<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+							<span class="text-sm font-medium text-foreground truncate">{graphPanelTask.title}</span>
+							<button
+								onclick={() => { graphPanelTask = null; }}
+								class="ml-2 text-muted-foreground hover:text-foreground"
+							>
+								<X class="size-4" />
+							</button>
+						</div>
+						<div class="flex-1 overflow-y-auto">
+							<TaskDetailPanel
+								task={graphPanelTask}
+								{stationMap}
+								deps={graphPanelDeps}
+								isLoading={graphPanelLoading}
+								onaction={handleTaskAction}
+								oncomplete={handleCompletion}
+							/>
+						</div>
+					</div>
+					<!-- Backdrop -->
+					<button
+						class="lg:hidden fixed inset-0 z-40 bg-black/20"
+						onclick={() => { graphPanelTask = tree ?? null; }}
+						aria-label="Close panel"
+					></button>
+				{/if}
+			</div>
 
 		{:else if currentView === 'list'}
 			<ListView tasks={flatTasks} deps={depsMap} {stationMap} />

@@ -26,9 +26,11 @@
 		stationMap?: Map<string, string>;
 		/** When set, this task gets a highlighted ring in the graph (used for neighborhood view). */
 		focusTaskId?: string;
+		/** Called when a node is single-clicked. Receives the task ID. */
+		onselect?: (taskId: string) => void;
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId }: Props = $props();
+	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -361,6 +363,7 @@
 
 		lastClickTime = now;
 		lastClickedNodeId = nodeId;
+		onselect?.(nodeId);
 	}
 
 	// ---- Re-fetch when filters change ----
