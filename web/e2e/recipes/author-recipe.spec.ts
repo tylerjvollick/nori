@@ -89,6 +89,34 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(page.locator('.svelte-flow__node', { hasText: 'New Task' })).toBeVisible();
   });
 
+  test('recipe graph nodes do not show status icons', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Recipe' }).click();
+    await page.locator('#recipe-name').fill('Status Icon Test');
+    await page.getByRole('button', { name: 'Create Recipe' }).click();
+    await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
+
+    // Wait for graph to load, add a node so we have a visible node to check
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+
+    const nodesBefore = await page.locator('.svelte-flow__node').count();
+    await addNodeBtn.click();
+    await expect(page.locator('.svelte-flow__node')).toHaveCount(nodesBefore + 1, { timeout: 10000 });
+
+    // Press Escape to close inline edit, then click away to deselect
+    await page.keyboard.press('Escape');
+    await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
+
+    // In recipe mode, status icons should not render.
+    // In task/job mode, every node has a [data-testid="status-icon"] SVG.
+    const nodes = page.locator('.svelte-flow__node');
+    const count = await nodes.count();
+    expect(count).toBeGreaterThan(0);
+    await expect(page.locator('[data-testid="status-icon"]')).toHaveCount(0);
+  });
+
   test('recipe appears in the recipes list after creation', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');

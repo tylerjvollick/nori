@@ -313,14 +313,16 @@
 
 		<!-- Core metadata -->
 		<div class="space-y-3">
-			<!-- Status -->
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Status</span>
-				<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
-					{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
-					{statusCfg.label}
-				</Badge>
-			</div>
+			<!-- Status (hidden in recipe mode) -->
+			{#if mode !== 'recipe'}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Status</span>
+					<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
+						{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
+						{statusCfg.label}
+					</Badge>
+				</div>
+			{/if}
 
 			<!-- Priority -->
 			<div class="flex items-center justify-between">
