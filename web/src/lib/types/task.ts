@@ -85,6 +85,47 @@ export interface AddNoteRequest {
 /** Tasks returned by GET /tasks/ready have the same shape as TaskResponse. */
 export type ReadyTask = TaskResponse;
 
+// --- Sub-task types ---
+
+export interface SubTaskImage {
+	id: string;
+	subTaskId: string;
+	imageUrl: string;
+	displayOrder: number;
+	createdAt: string;
+}
+
+export interface SubTaskResponse {
+	id: string;
+	taskId: string;
+	title: string;
+	description?: string | null;
+	displayOrder: number;
+	images: SubTaskImage[];
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface SubTaskListResponse {
+	items: SubTaskResponse[];
+	total: number;
+}
+
+export interface CreateSubTaskRequest {
+	title: string;
+	description?: string;
+	displayOrder?: number;
+}
+
+export interface UpdateSubTaskRequest {
+	title?: string;
+	description?: string;
+}
+
+export interface ReorderSubTasksRequest {
+	ids: string[];
+}
+
 // --- Completion flow types ---
 
 /** Request body for POST /tasks/:id/complete. All fields optional. */

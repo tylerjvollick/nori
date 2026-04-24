@@ -8,6 +8,11 @@ import type {
 	AddNoteRequest,
 	CompleteTaskRequest,
 	CompleteTaskResponse,
+	SubTaskResponse,
+	SubTaskListResponse,
+	CreateSubTaskRequest,
+	UpdateSubTaskRequest,
+	ReorderSubTasksRequest,
 } from '$lib/types/task';
 import { apiClient } from './client';
 
@@ -126,6 +131,28 @@ class TaskApi {
 	/** Remove a dependency edge by its UUID. */
 	async removeDep(spaceId: string, taskId: string, depId: string): Promise<void> {
 		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/deps/${depId}`);
+	}
+
+	// --- Sub-task methods ---
+
+	async listSubTasks(spaceId: string, taskId: string): Promise<SubTaskListResponse> {
+		return apiClient.get<SubTaskListResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks`);
+	}
+
+	async createSubTask(spaceId: string, taskId: string, data: CreateSubTaskRequest): Promise<SubTaskResponse> {
+		return apiClient.post<SubTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks`, data);
+	}
+
+	async updateSubTask(spaceId: string, taskId: string, subtaskId: string, data: UpdateSubTaskRequest): Promise<SubTaskResponse> {
+		return apiClient.put<SubTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}`, data);
+	}
+
+	async deleteSubTask(spaceId: string, taskId: string, subtaskId: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}`);
+	}
+
+	async reorderSubTasks(spaceId: string, taskId: string, data: ReorderSubTasksRequest): Promise<void> {
+		return apiClient.put<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/reorder`, data);
 	}
 
 }

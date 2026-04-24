@@ -28,6 +28,7 @@
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
+	import SubTaskList from './SubTaskList.svelte';
 
 	interface Props {
 		task?: TaskTreeResponse;
@@ -412,11 +413,15 @@
 			{/if}
 		</div>
 
-		<!-- Children progress -->
+		<!-- Sub-tasks (checklist items) -->
+		<Separator />
+		<SubTaskList spaceId={slug ?? ''} taskId={task.id} />
+
+		<!-- Children progress (child tasks in the graph) -->
 		{#if progress.total > 0}
 			<Separator />
 			<div class="space-y-2">
-				<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
+				<h4 class="text-sm font-medium text-foreground">Child Tasks</h4>
 				<div class="flex items-center justify-between text-sm text-muted-foreground">
 					<span>{progress.done} of {progress.total} complete</span>
 					<span>{Math.round((progress.done / progress.total) * 100)}%</span>
