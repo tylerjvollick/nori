@@ -10,7 +10,6 @@
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
 	import { spaceStore } from '$lib/stores/space';
-	import TaskTree from '$lib/components/flow/TaskTree.svelte';
 	import TaskDetailPanel from '$lib/components/flow/TaskDetailPanel.svelte';
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 	import GraphView from '$lib/components/flow/GraphView.svelte';
@@ -18,9 +17,8 @@
 	import JobCostSummary from '$lib/components/flow/JobCostSummary.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X } from '@lucide/svelte';
+	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -45,11 +43,10 @@
 	let rootDepsAttempted = $state(false);
 
 	// ---- View mode ----
-	type ViewMode = 'tree' | 'board' | 'graph' | 'list' | 'cost';
+	type ViewMode = 'graph' | 'board' | 'list' | 'cost';
 	const ALL_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'tree', label: 'Tree', icon: TreePine },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
 		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
 		{ value: 'list', label: 'List', icon: List },
 		{ value: 'cost', label: 'Cost', icon: DollarSign },
 	];
@@ -63,12 +60,12 @@
 	let availableViewModes = $derived(isLeafTask ? [] : ALL_VIEW_MODES);
 
 	let currentView = $derived<ViewMode>(
-		(($page.url.searchParams.get('view') as ViewMode) || 'tree') as ViewMode,
+		(($page.url.searchParams.get('view') as ViewMode) || 'graph') as ViewMode,
 	);
 
 	function setView(mode: ViewMode): void {
 		const url = new URL($page.url);
-		if (mode === 'tree') {
+		if (mode === 'graph') {
 			url.searchParams.delete('view');
 		} else {
 			url.searchParams.set('view', mode);
@@ -188,9 +185,9 @@
 		depsLoaded = true;
 	}
 
-	// Initialize graph panel with root task when switching to graph view
+	// Initialize graph panel with root task on load
 	$effect(() => {
-		if (currentView === 'graph' && tree && !graphPanelTask) {
+		if (tree && !graphPanelTask) {
 			graphPanelTask = tree;
 			graphPanelDeps = selectedDeps;
 		}
@@ -218,8 +215,8 @@
 				neighborhoodDeps = new Map();
 				neighborhoodLoaded = true;
 			}
-		} else if ((view === 'graph' || view === 'list' || view === 'tree') && treeVal && !leaf && !dLoaded) {
-			// Job/parent task: load deps for all descendants when graph, list, or tree view selected
+		} else if ((view === 'graph' || view === 'list') && treeVal && !leaf && !dLoaded) {
+			// Job/parent task: load deps for all descendants when graph or list view selected
 			loadDepsForDescendants();
 		}
 	});
@@ -232,14 +229,11 @@
 		if (isLeafTask) return;
 
 		switch (e.key) {
-			case 't':
-				setView('tree');
+			case 'g':
+				setView('graph');
 				break;
 			case 'b':
 				setView('board');
-				break;
-			case 'g':
-				setView('graph');
 				break;
 			case 'l':
 				// Only switch if not in board view (board uses 'l' for column navigation)
@@ -250,29 +244,6 @@
 			case 'c':
 				setView('cost');
 				break;
-		}
-	}
-
-	async function handleSelect(task: TaskTreeResponse | TaskResponse): Promise<void> {
-		// If given a plain TaskResponse, find the full tree node if possible
-		if (tree && !('children' in task)) {
-			const found = findNode(tree, task.id);
-			if (found) {
-				selectedTask = found;
-			} else {
-				// Wrap as a tree response for the detail panel
-				selectedTask = { ...task, children: [] } as TaskTreeResponse;
-			}
-		} else {
-			selectedTask = task as TaskTreeResponse;
-		}
-		// Load deps for the selected task
-		selectedDeps = null;
-		try {
-			selectedDeps = await taskApi.getTaskDeps(spaceId, task.id);
-		} catch {
-			// Deps endpoint may fail — degrade gracefully
-			selectedDeps = null;
 		}
 	}
 
@@ -416,15 +387,6 @@
 		}
 	}
 
-	/** Compute root-level progress. */
-	function computeRootProgress(root: TaskTreeResponse): { done: number; total: number } {
-		if (!root.children || root.children.length === 0) return { done: 0, total: 0 };
-		let done = 0;
-		for (const child of root.children) {
-			if (child.status === 'done' || child.status === 'skipped') done++;
-		}
-		return { done, total: root.children.length };
-	}
 </script>
 
 <svelte:head>
@@ -541,61 +503,6 @@
 					{:else}
 						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
 							Loading neighborhood...
-						</div>
-					{/if}
-				</div>
-			</div>
-
-		{:else if currentView === 'tree'}
-			{@const rootProgress = computeRootProgress(tree)}
-
-			<div class="flex-1 flex overflow-hidden">
-				<!-- Left: Task tree -->
-				<div class="w-2/5 border-r border-border overflow-y-auto p-4">
-					{#if rootProgress.total > 0}
-						<div class="mb-4">
-							<div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
-								<span>{rootProgress.done}/{rootProgress.total} done</span>
-								<span>{Math.round((rootProgress.done / rootProgress.total) * 100)}%</span>
-							</div>
-							<div class="h-1.5 bg-muted rounded-full overflow-hidden">
-								<div
-									class="h-full bg-green-500 transition-all duration-300"
-									style="width: {(rootProgress.done / rootProgress.total) * 100}%"
-								></div>
-							</div>
-						</div>
-						<Separator class="mb-3" />
-					{/if}
-
-					{#if tree.children && tree.children.length > 0}
-						<TaskTree
-							tasks={flatTasks}
-							deps={depsMap}
-							{stationMap}
-							selectedTaskId={selectedTask?.id}
-							onselect={handleSelect}
-						/>
-					{:else}
-						<div class="border border-border rounded-lg p-6 text-center">
-							<p class="text-sm text-muted-foreground">No child tasks yet.</p>
-						</div>
-					{/if}
-				</div>
-
-				<!-- Right: Detail panel -->
-				<div class="w-3/5 overflow-y-auto">
-					{#if selectedTask}
-						<TaskDetailPanel
-							task={selectedTask}
-							{stationMap}
-							deps={selectedDeps}
-							onaction={handleTaskAction}
-							oncomplete={handleCompletion}
-						/>
-					{:else}
-						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
-							Select a task to view details
 						</div>
 					{/if}
 				</div>
