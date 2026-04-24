@@ -133,7 +133,8 @@ breaks at compile time when services change, not at demo time.
 
 ### VI. Beads Have Verifiable Acceptance Criteria
 
-Every bead MUST include acceptance criteria that can be mechanically verified.
+Every bead MUST include acceptance criteria **at creation time**. Acceptance
+criteria are part of the bead definition, not something added after the fact.
 
 - Acceptance criteria MUST be specific: "migration 000043 runs successfully
   on a clean database" not "migration works"
@@ -143,33 +144,74 @@ Every bead MUST include acceptance criteria that can be mechanically verified.
 - "It works" is NOT acceptance criteria
 - Beads that touch multiple layers (backend + frontend) MUST have acceptance
   criteria for each layer
+- **Layer-specific test requirements in acceptance criteria:**
+  - Migration beads: `make migrate-up` succeeds on clean database
+  - Backend beads: Go unit tests added/updated and passing
+  - Frontend beads: Playwright e2e tests added/updated and passing
 
 **Rationale**: Beads in the recipe epic were all marked closed with acceptance
 criteria like "service implemented and tested" — but the tests were mocked and
-the UI was never verified end-to-end. Specific, verifiable criteria prevent
-false completion.
+the UI was never verified end-to-end. Beads were also created without
+acceptance criteria and had them retrofitted later, which meant the criteria
+were written to match what was already built rather than defining what done
+looks like. Writing criteria at creation time forces clarity about what the
+bead actually needs to deliver.
 
-### VII. Session Close Protocol
+### VIII. Beads Are the Planning and Tracking System
 
-Before ending a work session, ALL of the following MUST be true:
+All work MUST be planned and tracked through beads. Beads are not just a
+record of what happened — they are the plan for what will happen.
 
-- All Go tests pass (`go test ./...`)
-- All Playwright tests pass (if frontend was modified)
-- `make migrate-up` succeeds on a clean database (if migrations were modified)
-- All code changes are committed and pushed (`git push` — work is NOT done
-  until it reaches the remote)
-- Beads are updated: completed work is closed, in-progress work has notes
-  for the next session
-- Beads database is synced (`bd dolt push`)
+- Use beads to plan work BEFORE writing code, not just to track it after
+- Create an **epic** for any multi-step effort
+- Create child beads under the epic using the **epic's prefix** as a
+  namespace (e.g., `nori-abc.1`, `nori-abc.2` for epic `nori-abc`). This
+  makes `bv` search, filtering, and graph traversal work correctly
+- Every bead MUST have acceptance criteria at creation time (see VI above)
+- **A bead MUST NOT be closed until all tests in its acceptance criteria are
+  passing.** Run the relevant test suite, confirm green output, THEN close.
+  This applies universally — not just frontend beads
+- Do NOT use TodoWrite, TaskCreate, markdown TODO lists, or any other
+  tracking mechanism. Beads are the single source of truth
+- **ALWAYS run `bd` from the repo root** — never from `server/` or `web/`.
+  Running from a subdirectory creates a stray `.beads/` database
+- Use `bv` for triage decisions (what to work on next). **CRITICAL: use ONLY
+  `--robot-*` flags.** Bare `bv` launches an interactive TUI that blocks
+  agent sessions. Always export first:
+  ```bash
+  bd export -o .beads/beads.jsonl && bv --robot-triage --db .beads/beads.jsonl
+  ```
 
-**Rationale**: Locally committed but unpushed work is effectively lost if the
-machine fails. Beads left in stale states mislead the next session about what
-is ready to work on.
+**Rationale**: Beads were closed without running tests, and beads were created
+without acceptance criteria. Both failures stem from treating beads as a
+logging system rather than a planning system. When the plan (acceptance
+criteria) is defined upfront and the gate (tests pass) is enforced at close,
+the quality of shipped work improves.
+
+### VII. Commit When Closing a Bead
+
+When a bead is closed, the code changes for that bead MUST be committed in
+the same action. The workflow is: tests pass → `bd close` → `git commit`.
+This keeps beads and commits in sync — a closed bead always corresponds to
+committed code.
+
+- Do NOT push to remote — the user decides when to push
+- Do NOT batch multiple beads into one commit unless they are trivially related
+- Beads that are in-progress at session end should have notes for the next
+  session
+
+**Rationale**: Beads and code drifting out of sync makes it impossible to
+understand what state the project is in. Committing at bead close is the
+natural checkpoint.
 
 ## Bead Checklist
 
 Every bead MUST pass these quality gates before it can be closed. Use this as
 a checklist when reviewing bead completion.
+
+**Universal gate (ALL bead types):** All tests referenced in the bead's
+acceptance criteria MUST be passing before `bd close`. Run the test suite,
+confirm green, then close. No exceptions.
 
 ### Migration Beads
 
@@ -181,21 +223,22 @@ a checklist when reviewing bead completion.
 ### Backend Service Beads
 
 - [ ] Service logic implemented
-- [ ] `dbtest`-based tests pass against real PostgreSQL (not mocked)
+- [ ] Go unit tests added/updated and passing against real PostgreSQL (not mocked)
 - [ ] API endpoint wired and returns expected responses
 - [ ] `specs/{topic}/spec.md` acceptance scenarios marked complete
 
 ### Frontend UI Beads
 
 - [ ] Component implemented and renders correctly
-- [ ] Playwright test in `e2e/` exercises the user flow
+- [ ] Playwright test in `e2e/` added/updated to exercise the user flow
+- [ ] Playwright tests PASS (`npx playwright test <relevant-files>`)
 - [ ] `specs/{topic}/spec.md` acceptance scenarios marked complete
 - [ ] `seed_demo.go` updated to showcase the new feature
 
 ### CLI Beads
 
 - [ ] Command implemented with cobra
-- [ ] Unit tests pass
+- [ ] Unit tests added/updated and passing
 - [ ] `specs/cli.md` updated if new commands added
 - [ ] `seed_demo.go` updated if feature is demo-relevant
 
@@ -224,13 +267,16 @@ Nori maintains two non-interactive seeded accounts for development:
 ### Bead Workflow
 
 1. Read the spec (`specs/{topic}/spec.md`) before starting
-2. Create bead with verifiable acceptance criteria
-3. Implement the feature
-4. Write tests (Go unit tests for backend, Playwright for frontend)
-5. Update `seed_demo.go` if user-facing
-6. Update spec files (mark scenarios complete, note deviations)
-7. Verify all quality gates pass
-8. Close the bead
+2. Create epic for multi-step work; create child beads with epic prefix
+   (e.g., `nori-abc.1` under epic `nori-abc`)
+3. Write acceptance criteria on every bead at creation time (see VI)
+4. Claim the bead (`bd update <id> --claim`)
+5. Implement the feature
+6. Write/update tests (Go unit tests for backend, Playwright for frontend)
+7. Update `seed_demo.go` if user-facing
+8. Update spec files (mark scenarios complete, note deviations)
+9. Run tests, confirm all pass
+10. Close the bead
 
 ## Governance
 
@@ -255,8 +301,9 @@ project. All beads, commits, and sessions MUST comply with these principles.
 
 ### Reference
 
-- Runtime development guidance: `CLAUDE.md`
+- Entry point: `CLAUDE.md` (pointers to specs)
 - Spec index: `specs/readme.md`
+- Build/test/style: `specs/dev-guide.md`
 - Bead commands: `bd prime`
 
-**Version**: 1.1.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-24
+**Version**: 2.0.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-24
