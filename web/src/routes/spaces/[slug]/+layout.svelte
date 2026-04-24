@@ -7,6 +7,7 @@
 	import { Keyboard, Share2, Settings } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import KeyboardHelp from '$lib/components/flow/KeyboardHelp.svelte';
+	import { browser } from '$app/environment';
 
 	let { children } = $props();
 
@@ -45,6 +46,13 @@
 	] as const;
 
 	let activeTab = $derived($page.url.pathname.split('/')[3] ?? '');
+
+	// Persist the active tab to localStorage (per-space)
+	$effect(() => {
+		if (browser && slug && activeTab && TABS.some((t) => t.value === activeTab)) {
+			localStorage.setItem(`lastVisitedTab:${slug}`, activeTab);
+		}
+	});
 
 	// ---- Keyboard shortcuts ----
 
