@@ -34,7 +34,7 @@
 		 * 'task' (default): standard behavior.
 		 */
 		mode?: 'task' | 'recipe';
-		/** When mode='recipe', new nodes are created as children of this task ID. */
+		/** When set, new nodes are created as children of this task ID via addChildTask. */
 		rootTaskId?: string;
 		/** Called after a graph mutation (node/edge add/delete) so the parent can re-fetch data. */
 		onmutate?: () => Promise<void> | void;
@@ -260,6 +260,8 @@
 				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				mode,
+				estimatedTimeSeconds: task.estimatedTimeSeconds,
 				onAddSerial: () => handleAddSerial(task.id),
 			},
 		}));
@@ -470,6 +472,8 @@
 				isFocus: focusTaskId === task.id,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				mode,
+				estimatedTimeSeconds: task.estimatedTimeSeconds,
 				onAddSerial: () => handleAddSerial(task.id),
 			},
 		}));
@@ -738,7 +742,7 @@
 	async function handleAddUnconnected(): Promise<void> {
 		if (!spaceId) return;
 		try {
-			const newTask = mode === 'recipe' && rootTaskId
+			const newTask = rootTaskId
 				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
 				: await taskApi.createTask(spaceId, {
 					title: 'New Task',
@@ -758,7 +762,7 @@
 		// Capture downstream edges before we modify state
 		const downstreamEdges = edges.filter((e) => e.source === sourceNodeId);
 		try {
-			const newTask = mode === 'recipe' && rootTaskId
+			const newTask = rootTaskId
 				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
 				: await taskApi.createTask(spaceId, {
 					title: 'New Task',
@@ -793,7 +797,7 @@
 		// Find upstream blockers of source node (edges where sourceNode is target)
 		const upstreamEdges = edges.filter((e) => e.target === sourceNodeId);
 		try {
-			const newTask = mode === 'recipe' && rootTaskId
+			const newTask = rootTaskId
 				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
 				: await taskApi.createTask(spaceId, {
 					title: 'New Task',

@@ -28,6 +28,8 @@
 			isFocus?: boolean;
 			isBlocked?: boolean;
 			direction?: GraphDirection;
+			mode?: 'task' | 'recipe';
+			estimatedTimeSeconds?: number | null;
 			/** When true, shows an inline title input focused for editing. */
 			editing?: boolean;
 			/** Called when the inline title input is committed (Enter or blur). */
@@ -153,13 +155,32 @@
 		icon: Ban,
 	};
 
+	// Priority → node styling for recipe mode (no status, color by priority)
+	const PRIORITY_NODE_CONFIG: Record<number, { bg: string; border: string }> = {
+		0: { bg: 'bg-red-50 dark:bg-red-950/50', border: 'border-red-400 dark:border-red-600' },
+		1: { bg: 'bg-orange-50 dark:bg-orange-950/50', border: 'border-orange-400 dark:border-orange-600' },
+		2: { bg: 'bg-blue-50 dark:bg-blue-950/50', border: 'border-blue-400 dark:border-blue-600' },
+		3: { bg: 'bg-gray-50 dark:bg-gray-900/50', border: 'border-gray-300 dark:border-gray-700' },
+		4: { bg: 'bg-gray-50 dark:bg-gray-900/50', border: 'border-gray-300 dark:border-gray-700' },
+	};
+
+	let isRecipe = $derived(data.mode === 'recipe');
+
 	let config = $derived(
-		data.isBlocked && data.status === 'open'
-			? BLOCKED_CONFIG
-			: (STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open),
+		isRecipe
+			? { ...(PRIORITY_NODE_CONFIG[data.priority] ?? PRIORITY_NODE_CONFIG[2]), text: 'text-muted-foreground', icon: Circle }
+			: data.isBlocked && data.status === 'open'
+				? BLOCKED_CONFIG
+				: (STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open),
 	);
 	let StatusIcon = $derived(config.icon);
 	let isJob = $derived(data.type === 'job');
+
+	function formatEstimate(seconds: number): string {
+		if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+		const hours = seconds / 3600;
+		return hours % 1 === 0 ? `${hours}h` : `${hours.toFixed(1)}h`;
+	}
 </script>
 
 <!-- Wrapper for relative positioning of the [+] button -->
@@ -168,11 +189,13 @@
 	<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
 	<div
-		class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[180px]' : 'min-w-[160px]'}"
+		class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[140px]' : 'min-w-[120px]'}"
 	>
 		<!-- Header: status icon + title -->
 		<div class="flex items-center gap-1.5">
-			<StatusIcon class="size-3.5 shrink-0 {config.text}" />
+			{#if !isRecipe}
+				<StatusIcon class="size-3.5 shrink-0 {config.text}" data-testid="status-icon" />
+			{/if}
 			{#if data.editing}
 				<input
 					bind:this={inputEl}
@@ -184,7 +207,7 @@
 				/>
 			{:else}
 				<span
-					class="truncate text-xs font-medium text-foreground {data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
+					class="truncate text-xs font-medium text-foreground {!isRecipe && data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
 					title={data.title}
 				>
 					{data.title}
@@ -192,21 +215,26 @@
 			{/if}
 		</div>
 
-		<!-- Footer: ID + badges -->
+		<!-- Footer: estimated time (recipe) or badges (task/job) -->
 		{#if !data.editing}
-			<div class="mt-1 flex items-center gap-1.5">
-				<span class="font-mono text-[10px] text-muted-foreground">{data.taskId}</span>
-				{#if data.priority <= 1}
-					<span class="rounded px-1 py-0.5 text-[9px] font-medium leading-none {PRIORITY_COLORS[data.priority] ?? ''}">
-						P{data.priority}
-					</span>
-				{/if}
-				{#if data.stationName}
-					<span class="rounded bg-secondary px-1 py-0.5 text-[9px] text-secondary-foreground leading-none">
-						{data.stationName}
-					</span>
-				{/if}
-			</div>
+			{#if isRecipe && data.estimatedTimeSeconds}
+				<div class="mt-1">
+					<span class="text-[10px] text-muted-foreground">{formatEstimate(data.estimatedTimeSeconds)}</span>
+				</div>
+			{:else if !isRecipe && (data.priority <= 1 || data.stationName)}
+				<div class="mt-1 flex items-center gap-1.5">
+					{#if data.priority <= 1}
+						<span class="rounded px-1 py-0.5 text-[9px] font-medium leading-none {PRIORITY_COLORS[data.priority] ?? ''}">
+							P{data.priority}
+						</span>
+					{/if}
+					{#if data.stationName}
+						<span class="rounded bg-secondary px-1 py-0.5 text-[9px] text-secondary-foreground leading-none">
+							{data.stationName}
+						</span>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 

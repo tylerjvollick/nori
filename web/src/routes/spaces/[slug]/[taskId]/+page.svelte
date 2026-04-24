@@ -533,6 +533,7 @@
 						tasks={flatTasks}
 						deps={depsMap}
 						{stationMap}
+						rootTaskId={tree?.id}
 						onselect={handleGraphNodeSelect}
 						onmutate={handleTreeMutate}
 					/>
