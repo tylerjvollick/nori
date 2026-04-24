@@ -67,10 +67,14 @@ the UUID/VARCHAR mismatch because they mocked the database.
 
 ### III. Frontend Code Requires Playwright Tests
 
-Any bead that adds or modifies UI MUST include Playwright e2e tests that
-exercise the user-facing behavior.
+Any meaningful frontend change MUST include new or updated Playwright e2e
+tests that exercise the affected behavior. This applies to all commits —
+not just bead-tracked work. Bug fixes, refactors, and feature additions all
+require test coverage if they change user-visible behavior.
 
-- Tests run against the "Test Shop" account created by `nori init --dev`
+- Tests run against the E2E test account (seeded by the server when
+  `E2E_ACCOUNT_ENABLED=true`), which is completely isolated from the admin
+  account
 - Each test file resets the test account state via `POST /api/test/reset`
   before running (reset-before, not cleanup-after)
 - Test files map to user stories: `e2e/recipes/author-recipe.spec.ts`,
@@ -78,8 +82,12 @@ exercise the user-facing behavior.
 - Acceptance scenarios from spec files become Playwright test cases
 - Tests MUST assert on user-visible outcomes (text content, navigation,
   element presence), not implementation details (CSS classes, internal state)
-- The `e2e/helpers/` directory provides `auth.ts` (login as test user) and
-  `reset.ts` (call test reset endpoint)
+- The `e2e/helpers/` directory provides `reset.ts` (call test reset endpoint)
+  and `env.ts` (test user credentials)
+- When working on a single task, run only the relevant test files for speed
+  (e.g., `npx playwright test e2e/recipes/`)
+- Before merging a branch, run the full e2e suite (`npx playwright test`) for
+  complete coverage
 
 **Rationale**: The recipe epic shipped 5 UI beads (7.14–7.18) that were all
 marked complete, but creating a recipe and adding tasks does not work in the
@@ -251,4 +259,4 @@ project. All beads, commits, and sessions MUST comply with these principles.
 - Spec index: `specs/readme.md`
 - Bead commands: `bd prime`
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-23
+**Version**: 1.1.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-24
