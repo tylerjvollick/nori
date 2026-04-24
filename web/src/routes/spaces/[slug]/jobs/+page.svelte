@@ -3,11 +3,17 @@
 	import { page } from '$app/stores';
 	import { jobApi } from '$lib/api/job';
 	import type { TaskTreeResponse } from '$lib/api/task';
+	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
 	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse } from '$lib/types/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Select from '$lib/components/ui/select';
+	import * as Alert from '$lib/components/ui/alert';
 	import { RefreshCw, CircleAlert } from '@lucide/svelte';
 	import KanbanColumn from '$lib/components/flow/KanbanColumn.svelte';
 	import JobCard from '$lib/components/flow/JobCard.svelte';
@@ -41,6 +47,54 @@
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	let stationMap = $state<Map<string, string>>(new Map());
+	let stations = $state<StationResponse[]>([]);
+
+	// ---- Create Job Dialog ----
+	let showCreateDialog = $state(false);
+	let newJobTitle = $state('');
+	let newJobDescription = $state('');
+	let newJobPriority = $state('2');
+	let newJobStationId = $state('');
+	let isCreating = $state(false);
+	let createError = $state('');
+
+	const PRIORITY_OPTIONS = [
+		{ value: '0', label: 'P0 – Critical' },
+		{ value: '1', label: 'P1 – High' },
+		{ value: '2', label: 'P2 – Medium' },
+		{ value: '3', label: 'P3 – Low' },
+		{ value: '4', label: 'P4 – Backlog' },
+	];
+
+	async function handleCreate(): Promise<void> {
+		if (!newJobTitle.trim() || isCreating) return;
+		isCreating = true;
+		createError = '';
+		try {
+			const job = await taskApi.createTask(spaceId, {
+				title: newJobTitle.trim(),
+				description: newJobDescription.trim() || undefined,
+				type: 'job',
+				priority: parseInt(newJobPriority, 10),
+				stationId: newJobStationId || undefined,
+			});
+			showCreateDialog = false;
+			const slug = $page.params.slug;
+			goto(`/spaces/${slug}/${job.id}`);
+		} catch (error) {
+			createError = error instanceof Error ? error.message : 'Failed to create job';
+		} finally {
+			isCreating = false;
+		}
+	}
+
+	function resetCreateDialog(): void {
+		newJobTitle = '';
+		newJobDescription = '';
+		newJobPriority = '2';
+		newJobStationId = '';
+		createError = '';
+	}
 
 	// ---- Helpers ----
 
@@ -80,9 +134,10 @@
 	async function fetchStations(): Promise<void> {
 		if (!spaceId) return;
 		try {
-			const stations: StationResponse[] = await stationApi.listStations(spaceId);
+			const fetched: StationResponse[] = await stationApi.listStations(spaceId);
+			stations = fetched;
 			const map = new Map<string, string>();
-			for (const s of stations) {
+			for (const s of fetched) {
 				map.set(s.id, s.name);
 			}
 			stationMap = map;
@@ -196,7 +251,8 @@
 
 <div class="flex h-full flex-col overflow-hidden">
 	<!-- Header -->
-	<div class="flex-shrink-0 flex items-center justify-end px-4 py-2">
+	<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
+		<Button size="sm" onclick={() => (showCreateDialog = true)}>New Job</Button>
 		<div class="flex items-center gap-3">
 			{#if lastRefreshed}
 				<span class="text-xs text-muted-foreground">
@@ -267,3 +323,95 @@
 		</KanbanColumn>
 	</div>
 </div>
+
+<!-- Create Job Dialog -->
+<Dialog.Root
+	bind:open={showCreateDialog}
+	onOpenChange={(open) => {
+		if (!open) resetCreateDialog();
+	}}
+>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Create New Job</Dialog.Title>
+			<Dialog.Description>Add a new job to track work through stations.</Dialog.Description>
+		</Dialog.Header>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleCreate();
+			}}
+		>
+			<div class="grid gap-4 py-2">
+				<div class="grid gap-2">
+					<Label for="job-title">Title</Label>
+					<Input
+						id="job-title"
+						type="text"
+						bind:value={newJobTitle}
+						placeholder="e.g., Oak Dining Table, Custom Bookshelf"
+						disabled={isCreating}
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label for="job-description">Description (optional)</Label>
+					<Input
+						id="job-description"
+						type="text"
+						bind:value={newJobDescription}
+						placeholder="Brief description of this job"
+						disabled={isCreating}
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label>Priority</Label>
+					<Select.Root type="single" bind:value={newJobPriority}>
+						<Select.Trigger disabled={isCreating}>
+							{PRIORITY_OPTIONS.find((p) => p.value === newJobPriority)?.label ?? 'P2 – Medium'}
+						</Select.Trigger>
+						<Select.Content>
+							{#each PRIORITY_OPTIONS as opt (opt.value)}
+								<Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+				</div>
+				<div class="grid gap-2">
+					<Label>Station (optional)</Label>
+					<Select.Root type="single" bind:value={newJobStationId}>
+						<Select.Trigger disabled={isCreating}>
+							{newJobStationId
+								? (stations.find((s) => s.id === newJobStationId)?.name ?? 'Station')
+								: 'None'}
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="" label="None">None</Select.Item>
+							{#each stations as station (station.id)}
+								<Select.Item value={station.id} label={station.name}>{station.name}</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+				</div>
+				{#if createError}
+					<Alert.Root variant="destructive">
+						<CircleAlert class="size-4" />
+						<Alert.Description>{createError}</Alert.Description>
+					</Alert.Root>
+				{/if}
+			</div>
+			<Dialog.Footer class="pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => (showCreateDialog = false)}
+					disabled={isCreating}
+				>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={!newJobTitle.trim() || isCreating}>
+					{isCreating ? 'Creating...' : 'Create Job'}
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
