@@ -7,7 +7,7 @@ dev:
 
 dev-down:
 	$(DC_DEV) down --remove-orphans
-dev-fresh:
+dev-destroy:
 	$(DC_DEV) down -v --remove-orphans 
 	
 dev-update:
