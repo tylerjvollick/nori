@@ -5,6 +5,7 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import type { CompleteTaskResponse } from '$lib/types/task';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
+	import { spaceStore } from '$lib/stores/space';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
@@ -50,6 +51,7 @@
 	let { task, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false, mode = 'task' }: Props = $props();
 
 	let slug = $derived($page.params.slug);
+	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
 
 	// --- Helpers ---
 
@@ -434,7 +436,7 @@
 
 		<!-- Sub-tasks (checklist items) -->
 		<Separator />
-		<SubTaskList spaceId={slug ?? ''} taskId={task.id} />
+		<SubTaskList spaceId={spaceId} taskId={task.id} />
 
 		<!-- Children progress (child tasks in the graph) -->
 		{#if progress.total > 0}

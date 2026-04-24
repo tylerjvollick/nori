@@ -60,7 +60,8 @@ define LOAD_ENV
 	       DB_PASSWORD="$${POSTGRES_PASSWORD}" \
 	       DB_NAME="$${POSTGRES_DB:-nori}" \
 	       DB_PORT="$${DB_HOST_PORT:-5433}" \
-	       NORI_PORT="$${NORI_HOST_PORT:-8081}"
+	       NORI_PORT="$${NORI_HOST_PORT:-8081}" \
+	       NORI_ENV="$${NORI_ENV:-development}"
 endef
 
 # Run migrations natively (against local Postgres)

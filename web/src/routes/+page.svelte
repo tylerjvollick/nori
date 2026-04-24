@@ -27,20 +27,18 @@
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <!-- Recipes Card (active) -->
-          <a href="/recipes" class="group">
-            <Card.Root class="h-full p-8 border-2 border-transparent transition-all group-hover:border-primary group-hover:shadow-lg">
-              <Card.Header class="px-0 py-0">
-                <BookOpen class="size-10 text-primary mb-2" />
-                <Card.Title class="text-xl group-hover:text-primary transition-colors">Recipes</Card.Title>
-              </Card.Header>
-              <Card.Content class="px-0 py-0">
-                <Card.Description>
-                  Document and manage your process recipes — built incrementally during real work.
-                </Card.Description>
-              </Card.Content>
-            </Card.Root>
-          </a>
+          <!-- Recipes Card -->
+          <Card.Root class="h-full p-8 border-2 border-transparent">
+            <Card.Header class="px-0 py-0">
+              <BookOpen class="size-10 text-primary mb-2" />
+              <Card.Title class="text-xl">Recipes</Card.Title>
+            </Card.Header>
+            <Card.Content class="px-0 py-0">
+              <Card.Description>
+                Document and manage your process recipes — built incrementally during real work. Access via a Space.
+              </Card.Description>
+            </Card.Content>
+          </Card.Root>
 
           <!-- Tasks Card (coming soon) -->
           <Card.Root class="h-full p-8 opacity-50 cursor-not-allowed">

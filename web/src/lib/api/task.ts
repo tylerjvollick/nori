@@ -124,7 +124,7 @@ class TaskApi {
 	}
 
 	/** Add a dependency: blockerId blocks targetTaskId. */
-	async addDep(spaceId: string, blockerId: string, targetTaskId: string, type: string = 'finish_to_start'): Promise<TaskDep> {
+	async addDep(spaceId: string, blockerId: string, targetTaskId: string, type: string = 'blocks'): Promise<TaskDep> {
 		return apiClient.post<TaskDep>(`/api/v1/spaces/${spaceId}/tasks/${blockerId}/deps`, { targetTaskId, type });
 	}
 

@@ -115,15 +115,8 @@
 	// Admin role check
 	let isAdmin = $derived(pageUser?.role === 'admin');
 
-	// Navigation structure
-	const navMain = [
-		{
-			title: 'Recipes',
-			url: '/recipes',
-			icon: BookOpen,
-			isActive: isActive('/recipes')
-		}
-	];
+	// Navigation structure (recipes moved under space tabs)
+	const navMain: { title: string; url: string; icon: typeof BookOpen; isActive: boolean }[] = [];
 
 	const navResources = [
 		{

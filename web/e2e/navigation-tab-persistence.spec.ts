@@ -38,6 +38,7 @@ test.describe('Space tab: last visited tab persistence', () => {
 
   test('localStorage key is per-space slug', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/tasks`);
+    await page.waitForLoadState('networkidle');
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/tasks`));
 
     const stored = await page.evaluate(

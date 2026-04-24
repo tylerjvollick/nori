@@ -358,6 +358,19 @@
 		}
 	});
 
+	/** Reload the task tree and deps — called by GraphView after mutations. */
+	async function handleTreeMutate(): Promise<void> {
+		if (!taskId || !spaceId) return;
+		try {
+			const treeData = await taskApi.getTaskTree(spaceId, taskId);
+			tree = treeData;
+			// Reload deps for descendants
+			await loadDepsForDescendants();
+		} catch {
+			// ignore — tree will be stale but not crash
+		}
+	}
+
 	// ---- Save as Recipe dialog ----
 	let showSaveAsRecipeDialog = $state(false);
 	let recipeName = $state('');
@@ -520,6 +533,7 @@
 						deps={depsMap}
 						{stationMap}
 						onselect={handleGraphNodeSelect}
+						onmutate={handleTreeMutate}
 					/>
 					<!-- Panel toggle button (desktop) -->
 					<button

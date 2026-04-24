@@ -1,6 +1,6 @@
 CREATE TABLE sub_tasks (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    task_id       VARCHAR(255) NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    task_id       VARCHAR(255) NOT NULL REFERENCES task(id) ON DELETE CASCADE,
     title         TEXT NOT NULL,
     description   TEXT,
     display_order INT NOT NULL DEFAULT 0,

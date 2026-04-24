@@ -11,6 +11,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('jobs tab shows board|list toggle', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('button', { name: 'Board' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'List' })).toBeVisible();
@@ -18,6 +19,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('default view is board (kanban)', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
 
     // Kanban columns should be visible
     await expect(page.getByText('Ready')).toBeVisible();
@@ -30,6 +32,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('clicking List switches to list view and updates URL', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
 
     await page.getByRole('button', { name: 'List' }).click();
 
@@ -40,6 +43,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
   test('list view renders table with correct columns', async ({ page }) => {
     // Create a job first so the table has data
     await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New Job' }).click();
     await page.locator('#job-title').fill('Cherry Dresser');
     await page.getByRole('button', { name: 'Create Job' }).click();
@@ -47,6 +51,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
     // Navigate back and switch to list view
     await page.goto(`/spaces/${spaceSlug}/jobs?view=list`);
+    await page.waitForLoadState('networkidle');
 
     // Table should be visible
     const table = page.locator('[data-testid="jobs-list-table"]');
@@ -68,6 +73,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('?view=list in URL directly loads list view', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs?view=list`);
+    await page.waitForLoadState('networkidle');
 
     // List table container should be visible (even if empty)
     // The loading skeleton or empty state or table should appear
@@ -78,6 +84,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('clicking Board from list view switches back to kanban', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs?view=list`);
+    await page.waitForLoadState('networkidle');
 
     await page.getByRole('button', { name: 'Board' }).click();
 
@@ -90,6 +97,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('keyboard shortcut l switches to list view', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
 
     // Press l to switch to list
     await page.keyboard.press('l');
@@ -99,6 +107,7 @@ test.describe('Jobs tab: board/list view toggle', () => {
 
   test('keyboard shortcut b switches back to board view', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs?view=list`);
+    await page.waitForLoadState('networkidle');
 
     // Press b to switch to board
     await page.keyboard.press('b');

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { recipeStore } from '$lib/stores/recipe';
 	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
@@ -97,7 +98,7 @@
 			showCreateDialog = false;
 			newRecipeName = '';
 			newRecipeDescription = '';
-			goto(`/recipes/${recipe.id}`);
+			goto(`/spaces/${$page.params.slug}/recipes/${recipe.id}`);
 		} catch (error) {
 			createError = error instanceof Error ? error.message : 'Failed to create recipe';
 		} finally {
@@ -235,7 +236,7 @@
 					{@const status = getStatus(recipe)}
 					<Table.Row
 						class="cursor-pointer hover:bg-muted/50"
-						onclick={() => goto(`/recipes/${recipe.id}`)}
+						onclick={() => goto(`/spaces/${$page.params.slug}/recipes/${recipe.id}`)}
 					>
 						<Table.Cell class="font-medium">
 							{recipe.name}

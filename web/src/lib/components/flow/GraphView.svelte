@@ -36,9 +36,11 @@
 		mode?: 'task' | 'recipe';
 		/** When mode='recipe', new nodes are created as children of this task ID. */
 		rootTaskId?: string;
+		/** Called after a graph mutation (node/edge add/delete) so the parent can re-fetch data. */
+		onmutate?: () => Promise<void> | void;
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId }: Props = $props();
+	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -619,7 +621,7 @@
 		isConnecting = true;
 		connectionError = null;
 		try {
-			await taskApi.addDep(spaceId, source, target, 'finish_to_start');
+			await taskApi.addDep(spaceId, source, target, 'blocks');
 			if (isScoped && externalTasks) {
 				buildFromExternalData(externalTasks, externalDeps);
 			} else {
@@ -652,7 +654,7 @@
 				for (const upEdge of upstreamEdges) {
 					for (const downEdge of downstreamEdges) {
 						try {
-							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'finish_to_start');
+							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
 						} catch {
 							// Ignore duplicate dep errors
 						}
@@ -726,7 +728,9 @@
 	}
 
 	async function refreshGraph(): Promise<void> {
-		if (isScoped && externalTasks) {
+		if (isScoped && onmutate) {
+			await onmutate();
+		} else if (isScoped && externalTasks) {
 			buildFromExternalData(externalTasks, externalDeps);
 		} else {
 			await fetchGraph({ silent: true });
@@ -763,7 +767,7 @@
 			});
 
 			// sourceNode → newTask
-			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'finish_to_start');
+			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'blocks');
 
 			// Reconnect downstream: replace sourceNode → X with newTask → X
 			for (const downEdge of downstreamEdges) {
@@ -772,7 +776,7 @@
 					try {
 						await taskApi.removeDep(spaceId, sourceNodeId, depId);
 					} catch { /* ignore */ }
-					await taskApi.addDep(spaceId, newTask.id, downEdge.target, 'finish_to_start');
+					await taskApi.addDep(spaceId, newTask.id, downEdge.target, 'blocks');
 				}
 			}
 
@@ -798,7 +802,7 @@
 
 			// Give newTask the same upstream deps as sourceNode
 			for (const upEdge of upstreamEdges) {
-				await taskApi.addDep(spaceId, upEdge.source, newTask.id, 'finish_to_start');
+				await taskApi.addDep(spaceId, upEdge.source, newTask.id, 'blocks');
 			}
 
 			await refreshGraph();

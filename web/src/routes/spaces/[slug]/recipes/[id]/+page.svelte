@@ -261,7 +261,7 @@
 			rollCustomerId = '';
 			rollDueDate = '';
 			toast.success('Job created from recipe');
-			goto(`/spaces/${$page.params.slug || 'default'}/${job.id}`);
+			goto(`/spaces/${$page.params.slug}/${job.id}`);
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Failed to roll recipe');
 		} finally {
@@ -362,7 +362,7 @@
 		<!-- Header -->
 		<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
 			<div class="mb-1">
-				<Button variant="ghost" size="sm" href="/recipes" class="h-7 px-2 text-xs text-muted-foreground">
+				<Button variant="ghost" size="sm" href="/spaces/{$page.params.slug}/recipes" class="h-7 px-2 text-xs text-muted-foreground">
 					<ArrowLeft class="size-3 mr-1" />
 					Back to Recipes
 				</Button>
@@ -466,6 +466,7 @@
 							mode="recipe"
 							{rootTaskId}
 							onselect={handleGraphNodeSelect}
+							onmutate={handleTreeMutate}
 						/>
 						<!-- Panel toggle button (desktop) -->
 						<button
