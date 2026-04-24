@@ -3,18 +3,15 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { taskApi } from "$lib/api/task";
-  import type { TaskTreeResponse } from "$lib/api/task";
-  import { jobApi } from "$lib/api/job";
   import { stationApi } from "$lib/api/station";
   import { spaceStore } from "$lib/stores/space";
   import type { TaskResponse } from "$lib/types/task";
   import type { StationResponse } from "$lib/types/station";
   import { Button } from "$lib/components/ui/button";
-  import { RefreshCw, CircleAlert, ListTodo, Briefcase } from "@lucide/svelte";
+  import { RefreshCw, CircleAlert } from "@lucide/svelte";
   import { isEditableTarget, showToast } from "$lib/utils/keyboard.svelte";
   import KanbanColumn from "./KanbanColumn.svelte";
   import TaskCard from "./TaskCard.svelte";
-  import JobCard from "./JobCard.svelte";
   import { TRIGGERS, type DndEvent } from "svelte-dnd-action";
 
   /** Optional pre-loaded tasks. When provided, the board uses these instead of fetching from the API. */
@@ -32,26 +29,6 @@
   const POLL_INTERVAL_MS = 30_000;
   const DONE_LIMIT = 20;
 
-  // ---- Board mode: Tasks vs Jobs ----
-  type BoardMode = "tasks" | "jobs";
-  let boardMode = $derived<BoardMode>(
-    (($page.url.searchParams.get("mode") as BoardMode) || "tasks") as BoardMode,
-  );
-
-  function setBoardMode(mode: BoardMode): void {
-    const url = new URL($page.url);
-    if (mode === "tasks") {
-      url.searchParams.delete("mode");
-    } else {
-      url.searchParams.set("mode", mode);
-    }
-    goto(url.toString(), {
-      replaceState: true,
-      keepFocus: true,
-      noScroll: true,
-    });
-  }
-
   // ---- State ----
 
   let readyTasks = $state<TaskResponse[]>([]);
@@ -68,84 +45,14 @@
   let _internalStationMap = $state<Map<string, string>>(new Map());
   let stationMap = $derived(externalStationMap ?? _internalStationMap);
 
-  // ---- Jobs mode state ----
-
-  /** A job with aggregate status/time computed from its children. */
-  interface JobWithAggregate extends TaskResponse {
-    /** Status derived from children: 'done' | 'active' | 'open' */
-    aggregateStatus: "done" | "active" | "open";
-    /** Total time across all descendant tasks (seconds). */
-    totalTimeSeconds: number;
-    /** Number of direct children. */
-    childCount: number;
-    /** Number of completed children. */
-    doneChildCount: number;
-  }
-
-  let readyJobs = $state<JobWithAggregate[]>([]);
-  let inProgressJobs = $state<JobWithAggregate[]>([]);
-  let doneJobs = $state<JobWithAggregate[]>([]);
-
-  /**
-   * Compute aggregate status from a job's children.
-   * - Done: all children are done/skipped/cancelled
-   * - In Progress: any child is active/paused
-   * - Ready: no children started (all open)
-   */
-  function computeAggregateStatus(
-    children: TaskResponse[],
-  ): "done" | "active" | "open" {
-    if (children.length === 0) return "open";
-    const allDone = children.every(
-      (c) =>
-        c.status === "done" ||
-        c.status === "skipped" ||
-        c.status === "cancelled",
-    );
-    if (allDone) return "done";
-    const anyActive = children.some(
-      (c) => c.status === "active" || c.status === "paused",
-    );
-    if (anyActive) return "active";
-    return "open";
-  }
-
-  /** Sum actualTimeSeconds from all descendants in a tree. */
-  function sumTreeTime(node: TaskTreeResponse): number {
-    let total = node.actualTimeSeconds;
-    for (const child of node.children) {
-      total += sumTreeTime(child);
-    }
-    return total;
-  }
-
-  /** Flatten a tree's direct children into a flat array. */
-  function getDirectChildren(tree: TaskTreeResponse): TaskResponse[] {
-    return tree.children.map(
-      ({ children: _, ...rest }) => rest as TaskResponse,
-    );
-  }
-
   // ---- Keyboard selection state ----
   // [columnIndex, cardIndex] — -1 means nothing selected
   let selCol = $state(-1);
   let selCard = $state(-1);
 
   /** Get the tasks array for a given column index.
-   *  In scoped mode or Jobs mode, there's no Blocked column, so indices shift. */
+   *  In scoped mode, there's no Blocked column, so indices shift. */
   function columnTasks(col: number): TaskResponse[] {
-    if (boardMode === "jobs") {
-      switch (col) {
-        case 0:
-          return readyJobs;
-        case 1:
-          return inProgressJobs;
-        case 2:
-          return doneJobs;
-        default:
-          return [];
-      }
-    }
     if (isScoped) {
       switch (col) {
         case 0:
@@ -172,7 +79,7 @@
     }
   }
 
-  let columnCount = $derived(isScoped || boardMode === "jobs" ? 3 : 4);
+  let columnCount = $derived(isScoped ? 3 : 4);
 
   /** Get the currently selected task, or null. */
   let selectedTask = $derived.by(() => {
@@ -206,9 +113,6 @@
   /** Empty label shown when filters are active and no items match. */
   let filteredTaskEmptyLabel = $derived(
     hasActiveFilters ? "No tasks match filters" : undefined,
-  );
-  let filteredJobEmptyLabel = $derived(
-    hasActiveFilters ? "No jobs match filters" : undefined,
   );
 
   // ---- Data fetching ----
@@ -391,7 +295,7 @@
   function startPolling(): void {
     stopPolling();
     pollTimer = setInterval(
-      () => fetchCurrentMode({ silent: true }),
+      () => fetchAllColumns({ silent: true }),
       POLL_INTERVAL_MS,
     );
   }
@@ -404,161 +308,25 @@
   }
 
   function handleManualRefresh(): void {
-    fetchCurrentMode({ silent: true });
+    fetchAllColumns({ silent: true });
   }
 
-  /** Fetch data for the current board mode (tasks or jobs). */
-  async function fetchCurrentMode(opts?: { silent?: boolean }): Promise<void> {
-    if (boardMode === "jobs") {
-      await fetchJobsColumns(opts);
-    } else {
-      await fetchAllColumns(opts);
-    }
-  }
-
-  /** Fetch root-level jobs, compute aggregate status from their children, and categorize into columns. */
-  async function fetchJobsColumns(opts?: { silent?: boolean }): Promise<void> {
-    if (!opts?.silent) {
-      isLoading = true;
-    }
-    isRefreshing = true;
-    error = null;
-
-    try {
-      const filters = filterParams();
-
-      // Fetch root-level jobs from the dedicated jobs endpoint
-      const jobsResult = await jobApi.listJobs(spaceId, {
-        limit: 200,
-      });
-
-      const rootJobs = jobsResult.items;
-
-      // Apply client-side priority filter
-      const pFilter = priorityFilter ? Number(priorityFilter) : null;
-      const filteredJobs =
-        pFilter !== null
-          ? rootJobs.filter((j) => j.priority === pFilter)
-          : rootJobs;
-
-      // Fetch trees for each job to compute aggregate status and time
-      const jobTrees = await Promise.all(
-        filteredJobs.map(async (job) => {
-          try {
-            const tree = await jobApi.getJobTasks(spaceId, job.id);
-            return { job, tree };
-          } catch {
-            // If tree fetch fails, use job's own data
-            return { job, tree: null };
-          }
-        }),
-      );
-
-      // Build JobWithAggregate for each job
-      const jobsWithAggregates: JobWithAggregate[] = jobTrees.map(
-        ({ job, tree }) => {
-          if (!tree || tree.children.length === 0) {
-            return {
-              ...job,
-              aggregateStatus: statusToAggregate(job.status),
-              totalTimeSeconds: job.actualTimeSeconds,
-              childCount: 0,
-              doneChildCount: 0,
-            };
-          }
-
-          const directChildren = getDirectChildren(tree);
-          const aggregateStatus = computeAggregateStatus(directChildren);
-          const totalTimeSeconds = sumTreeTime(tree);
-          const doneChildCount = directChildren.filter(
-            (c) =>
-              c.status === "done" ||
-              c.status === "skipped" ||
-              c.status === "cancelled",
-          ).length;
-
-          return {
-            ...job,
-            aggregateStatus,
-            totalTimeSeconds,
-            childCount: directChildren.length,
-            doneChildCount,
-          };
-        },
-      );
-
-      // Categorize jobs into columns by aggregate status
-      readyJobs = jobsWithAggregates.filter(
-        (j) => j.aggregateStatus === "open",
-      );
-      inProgressJobs = jobsWithAggregates.filter(
-        (j) => j.aggregateStatus === "active",
-      );
-      const allDoneJobs = jobsWithAggregates.filter(
-        (j) => j.aggregateStatus === "done",
-      );
-      allDoneJobs.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      );
-      doneJobs = allDoneJobs.slice(0, DONE_LIMIT);
-
-      lastRefreshed = new Date();
-
-      // Clamp selection after refresh
-      if (selCol >= 0) {
-        selCard = clampCard(selCol, selCard);
-        if (selCard < 0) {
-          let found = false;
-          for (let i = 0; i < columnCount; i++) {
-            if (columnTasks(i).length > 0) {
-              selCol = i;
-              selCard = 0;
-              found = true;
-              break;
-            }
-          }
-          if (!found) clearSelection();
-        }
-      }
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load jobs data";
-    } finally {
-      isLoading = false;
-      isRefreshing = false;
-    }
-  }
-
-  /** Map a task status to the simplified aggregate status used for column assignment. */
-  function statusToAggregate(status: string): "done" | "active" | "open" {
-    if (status === "done" || status === "skipped" || status === "cancelled")
-      return "done";
-    if (status === "active" || status === "paused") return "active";
-    return "open";
-  }
-
-  // Re-fetch when filters or board mode changes
+  // Re-fetch when filters change
   let prevStation = $state("");
   let prevPriority = $state("");
-  let prevBoardMode = $state<BoardMode>("tasks");
 
   $effect(() => {
     const s = stationFilter;
     const p = priorityFilter;
-    const m = boardMode;
-    if (s !== prevStation || p !== prevPriority || m !== prevBoardMode) {
-      const modeChanged = m !== prevBoardMode;
+    if (s !== prevStation || p !== prevPriority) {
       prevStation = s;
       prevPriority = p;
-      prevBoardMode = m;
-      // Clear selection when switching modes
-      if (modeChanged) clearSelection();
       // Don't refetch on initial mount — onMount handles that
       if (lastRefreshed) {
         if (isScoped && externalTasks) {
           categorizeExternalTasks(externalTasks);
         } else {
-          fetchCurrentMode({ silent: true });
+          fetchAllColumns({ silent: true });
         }
       }
     }
@@ -570,7 +338,7 @@
       // Station map is also provided externally.
       return;
     }
-    await Promise.all([fetchCurrentMode(), fetchStations()]);
+    await Promise.all([fetchAllColumns(), fetchStations()]);
     startPolling();
   });
 
@@ -586,11 +354,9 @@
   /** After any task action, refresh the board to reflect the new state. */
   function handleTaskAction(): void {
     if (isScoped && externalTasks) {
-      // In scoped mode, parent should provide updated tasks via prop
-      // But also re-categorize with current data as a fallback
       categorizeExternalTasks(externalTasks);
     } else {
-      fetchCurrentMode({ silent: true });
+      fetchAllColumns({ silent: true });
     }
   }
 
@@ -767,10 +533,9 @@
 
   /** Column indices that shift based on whether Blocked column is shown.
    *  In Jobs mode or scoped mode, there's no Blocked column (indices start at 0). */
-  let noBlockedCol = $derived(isScoped || boardMode === "jobs");
-  let readyColIdx = $derived(noBlockedCol ? 0 : 1);
-  let ipColIdx = $derived(noBlockedCol ? 1 : 2);
-  let doneColIdx = $derived(noBlockedCol ? 2 : 3);
+  let readyColIdx = $derived(isScoped ? 0 : 1);
+  let ipColIdx = $derived(isScoped ? 1 : 2);
+  let doneColIdx = $derived(isScoped ? 2 : 3);
 
   // ---- Drag-and-drop ----
 
@@ -893,7 +658,7 @@
         revertCall = async () => {
           // Revert: set status back to open
           await taskApi.updateTask(spaceId, task.id, { status: "open" });
-          fetchCurrentMode({ silent: true });
+          fetchAllColumns({ silent: true });
         };
       } else if (
         targetColumn === "done" &&
@@ -905,7 +670,7 @@
         revertCall = async () => {
           // Revert: resume the task (done -> active isn't a direct API, use update)
           await taskApi.updateTask(spaceId, task.id, { status: "active" });
-          fetchCurrentMode({ silent: true });
+          fetchAllColumns({ silent: true });
         };
       } else if (
         targetColumn === "ready" &&
@@ -917,14 +682,14 @@
         revertCall = async () => {
           // Revert: start the task again
           await taskApi.startTask(spaceId, task.id);
-          fetchCurrentMode({ silent: true });
+          fetchAllColumns({ silent: true });
         };
       } else {
         // Invalid transition — refresh to restore correct state
         showToast(
           `Cannot move ${prevStatus} task to ${columnName(targetColumn)}`,
         );
-        fetchCurrentMode({ silent: true });
+        fetchAllColumns({ silent: true });
         return;
       }
 
@@ -946,12 +711,12 @@
       }, 5000);
 
       // Refresh to get accurate server state
-      fetchCurrentMode({ silent: true });
+      fetchAllColumns({ silent: true });
     } catch (err) {
       console.error("Drag-and-drop transition failed:", err);
       showToast("Failed to move task — reverting");
       // Refresh to restore correct state
-      fetchCurrentMode({ silent: true });
+      fetchAllColumns({ silent: true });
     }
   }
 
@@ -971,7 +736,7 @@
     } catch (err) {
       console.error("Undo failed:", err);
       showToast("Undo failed");
-      fetchCurrentMode({ silent: true });
+      fetchAllColumns({ silent: true });
     }
   }
 </script>
@@ -984,37 +749,7 @@
 
 <div class="flex h-full flex-col overflow-hidden">
   <!-- Board header -->
-  <div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
-    <div class="flex items-center gap-3">
-      <h1 class="text-lg font-semibold text-foreground">Board</h1>
-      <!-- Tasks / Jobs toggle (hidden in scoped mode) -->
-      {#if !isScoped}
-        <div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
-          <Button
-            variant={boardMode === "tasks" ? "secondary" : "ghost"}
-            size="sm"
-            class="gap-1.5 rounded-md px-3 h-7 text-xs {boardMode === 'tasks'
-              ? 'bg-background shadow-sm'
-              : 'hover:bg-transparent hover:text-foreground'}"
-            onclick={() => setBoardMode("tasks")}
-          >
-            <ListTodo class="size-3.5" />
-            Tasks
-          </Button>
-          <Button
-            variant={boardMode === "jobs" ? "secondary" : "ghost"}
-            size="sm"
-            class="gap-1.5 rounded-md px-3 h-7 text-xs {boardMode === 'jobs'
-              ? 'bg-background shadow-sm'
-              : 'hover:bg-transparent hover:text-foreground'}"
-            onclick={() => setBoardMode("jobs")}
-          >
-            <Briefcase class="size-3.5" />
-            Jobs
-          </Button>
-        </div>
-      {/if}
-    </div>
+  <div class="flex-shrink-0 flex items-center justify-end px-4 py-2">
     <div class="flex items-center gap-3">
       {#if lastRefreshed}
         <span class="text-xs text-muted-foreground">
@@ -1044,7 +779,7 @@
         variant="outline"
         size="sm"
         class="ml-auto"
-        onclick={() => fetchCurrentMode()}
+        onclick={() => fetchAllColumns()}
       >
         Retry
       </Button>
@@ -1053,69 +788,7 @@
 
   <!-- Kanban columns -->
   <div class="flex flex-1 gap-4 overflow-x-auto px-4 pb-4">
-    {#if boardMode === "jobs"}
-      <!-- Jobs mode: Ready / In Progress / Done (aggregate status) -->
-      <KanbanColumn
-        title="Ready"
-        count={readyJobs.length}
-        colorClass="bg-blue-500"
-        {isLoading}
-        emptyLabel="No jobs"
-        filteredEmptyLabel={filteredJobEmptyLabel}
-      >
-        {#each readyJobs as job, i (job.id)}
-          <div
-            class="rounded-lg {isSelected(0, i)
-              ? 'ring-2 ring-primary ring-offset-1'
-              : ''}"
-            data-kb-selected={isSelected(0, i)}
-          >
-            <JobCard {job} {stationMap} />
-          </div>
-        {/each}
-      </KanbanColumn>
-
-      <KanbanColumn
-        title="In Progress"
-        count={inProgressJobs.length}
-        colorClass="bg-yellow-500"
-        {isLoading}
-        emptyLabel="No jobs"
-        filteredEmptyLabel={filteredJobEmptyLabel}
-      >
-        {#each inProgressJobs as job, i (job.id)}
-          <div
-            class="rounded-lg {isSelected(1, i)
-              ? 'ring-2 ring-primary ring-offset-1'
-              : ''}"
-            data-kb-selected={isSelected(1, i)}
-          >
-            <JobCard {job} {stationMap} />
-          </div>
-        {/each}
-      </KanbanColumn>
-
-      <KanbanColumn
-        title="Done"
-        count={doneJobs.length}
-        colorClass="bg-green-500"
-        {isLoading}
-        emptyLabel="No jobs"
-        filteredEmptyLabel={filteredJobEmptyLabel}
-      >
-        {#each doneJobs as job, i (job.id)}
-          <div
-            class="rounded-lg {isSelected(2, i)
-              ? 'ring-2 ring-primary ring-offset-1'
-              : ''}"
-            data-kb-selected={isSelected(2, i)}
-          >
-            <JobCard {job} {stationMap} />
-          </div>
-        {/each}
-      </KanbanColumn>
-    {:else}
-      <!-- Tasks mode: Blocked / Ready / In Progress / Done -->
+      <!-- Blocked / Ready / In Progress / Done -->
 
       <!-- Blocked (hidden in scoped mode since we can't determine blocked status) -->
       {#if !isScoped}
@@ -1231,7 +904,6 @@
           </div>
         {/each}
       </KanbanColumn>
-    {/if}
   </div>
 
   <!-- Undo toast for drag-and-drop actions -->

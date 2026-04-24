@@ -2,121 +2,268 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { jobApi } from '$lib/api/job';
+	import type { TaskTreeResponse } from '$lib/api/task';
+	import { stationApi } from '$lib/api/station';
 	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse } from '$lib/types/task';
-	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Skeleton } from '$lib/components/ui/skeleton';
-	import * as Alert from '$lib/components/ui/alert';
-	import { CircleAlert } from '@lucide/svelte';
+	import type { StationResponse } from '$lib/types/station';
+	import { Button } from '$lib/components/ui/button';
+	import { RefreshCw, CircleAlert } from '@lucide/svelte';
+	import KanbanColumn from '$lib/components/flow/KanbanColumn.svelte';
+	import JobCard from '$lib/components/flow/JobCard.svelte';
+	import { onDestroy } from 'svelte';
 
 	let currentSpace = $derived($spaceStore.currentSpace);
-	let slug = $derived($page.params.slug);
+	let spaceId = $derived(currentSpace?.id ?? '');
 
-	let jobs = $state<TaskResponse[]>([]);
-	let loading = $state(false);
+	const POLL_INTERVAL_MS = 30_000;
+	const DONE_LIMIT = 20;
+
+	// ---- Job aggregate type ----
+
+	interface JobWithAggregate extends TaskResponse {
+		aggregateStatus: 'done' | 'active' | 'open';
+		totalTimeSeconds: number;
+		childCount: number;
+		doneChildCount: number;
+	}
+
+	// ---- State ----
+
+	let readyJobs = $state<JobWithAggregate[]>([]);
+	let inProgressJobs = $state<JobWithAggregate[]>([]);
+	let doneJobs = $state<JobWithAggregate[]>([]);
+
+	let isLoading = $state(true);
 	let error = $state<string | null>(null);
+	let isRefreshing = $state(false);
+	let lastRefreshed = $state<Date | null>(null);
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+	let stationMap = $state<Map<string, string>>(new Map());
+
+	// ---- Helpers ----
+
+	function computeAggregateStatus(children: TaskResponse[]): 'done' | 'active' | 'open' {
+		if (children.length === 0) return 'open';
+		const allDone = children.every(
+			(c) => c.status === 'done' || c.status === 'skipped' || c.status === 'cancelled',
+		);
+		if (allDone) return 'done';
+		const anyActive = children.some(
+			(c) => c.status === 'active' || c.status === 'paused',
+		);
+		if (anyActive) return 'active';
+		return 'open';
+	}
+
+	function sumTreeTime(node: TaskTreeResponse): number {
+		let total = node.actualTimeSeconds;
+		for (const child of node.children) {
+			total += sumTreeTime(child);
+		}
+		return total;
+	}
+
+	function getDirectChildren(tree: TaskTreeResponse): TaskResponse[] {
+		return tree.children.map(({ children: _, ...rest }) => rest as TaskResponse);
+	}
+
+	function statusToAggregate(status: string): 'done' | 'active' | 'open' {
+		if (status === 'done' || status === 'skipped' || status === 'cancelled') return 'done';
+		if (status === 'active' || status === 'paused') return 'active';
+		return 'open';
+	}
+
+	// ---- Data fetching ----
+
+	async function fetchStations(): Promise<void> {
+		if (!spaceId) return;
+		try {
+			const stations: StationResponse[] = await stationApi.listStations(spaceId);
+			const map = new Map<string, string>();
+			for (const s of stations) {
+				map.set(s.id, s.name);
+			}
+			stationMap = map;
+		} catch {
+			// gracefully degrade
+		}
+	}
+
+	async function fetchJobs(opts?: { silent?: boolean }): Promise<void> {
+		if (!spaceId) return;
+		if (!opts?.silent) {
+			isLoading = true;
+		}
+		isRefreshing = true;
+		error = null;
+
+		try {
+			const jobsResult = await jobApi.listJobs(spaceId, { limit: 200 });
+			const rootJobs = jobsResult.items;
+
+			const jobTrees = await Promise.all(
+				rootJobs.map(async (job) => {
+					try {
+						const tree = await jobApi.getJobTasks(spaceId, job.id);
+						return { job, tree };
+					} catch {
+						return { job, tree: null };
+					}
+				}),
+			);
+
+			const jobsWithAggregates: JobWithAggregate[] = jobTrees.map(({ job, tree }) => {
+				if (!tree || tree.children.length === 0) {
+					return {
+						...job,
+						aggregateStatus: statusToAggregate(job.status),
+						totalTimeSeconds: job.actualTimeSeconds,
+						childCount: 0,
+						doneChildCount: 0,
+					};
+				}
+
+				const directChildren = getDirectChildren(tree);
+				const aggregateStatus = computeAggregateStatus(directChildren);
+				const totalTimeSeconds = sumTreeTime(tree);
+				const doneChildCount = directChildren.filter(
+					(c) => c.status === 'done' || c.status === 'skipped' || c.status === 'cancelled',
+				).length;
+
+				return {
+					...job,
+					aggregateStatus,
+					totalTimeSeconds,
+					childCount: directChildren.length,
+					doneChildCount,
+				};
+			});
+
+			readyJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'open');
+			inProgressJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'active');
+			const allDoneJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'done');
+			allDoneJobs.sort(
+				(a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+			);
+			doneJobs = allDoneJobs.slice(0, DONE_LIMIT);
+
+			lastRefreshed = new Date();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load jobs';
+		} finally {
+			isLoading = false;
+			isRefreshing = false;
+		}
+	}
+
+	function formatLastRefreshed(date: Date | null): string {
+		if (!date) return '';
+		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	function startPolling(): void {
+		stopPolling();
+		pollTimer = setInterval(() => fetchJobs({ silent: true }), POLL_INTERVAL_MS);
+	}
+
+	function stopPolling(): void {
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	let initialized = $state(false);
 
 	$effect(() => {
-		const space = currentSpace;
-		if (!space) return;
-		loading = true;
-		error = null;
-		jobApi.listJobs(space.id)
-			.then((res) => { jobs = res.items; })
-			.catch((err) => { error = err instanceof Error ? err.message : 'Failed to load jobs'; })
-			.finally(() => { loading = false; });
+		if (!spaceId) return;
+		if (!initialized) {
+			initialized = true;
+			Promise.all([fetchJobs(), fetchStations()]).then(() => startPolling());
+		}
 	});
 
-	const STATUS_COLORS: Record<string, string> = {
-		open: 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
-		active: 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
-		paused: 'bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800',
-		done: 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
-		skipped: 'bg-muted text-muted-foreground',
-	};
-
-	function formatDate(dateString: string): string {
-		return new Date(dateString).toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-		});
-	}
-
-	function priorityLabel(p: number): string {
-		return ['P0', 'P1', 'P2', 'P3', 'P4'][p] ?? `P${p}`;
-	}
+	onDestroy(() => {
+		stopPolling();
+	});
 </script>
 
 <svelte:head>
 	<title>{currentSpace?.name ?? 'Space'} – Jobs - Nori</title>
 </svelte:head>
 
-<div class="container mx-auto px-4 py-8">
-	<div class="flex justify-between items-center mb-8">
-		<div>
-			<h1 class="text-2xl font-bold text-foreground">Jobs</h1>
-			<p class="text-muted-foreground mt-1 text-sm">Active production orders in this space</p>
+<div class="flex h-full flex-col overflow-hidden">
+	<!-- Header -->
+	<div class="flex-shrink-0 flex items-center justify-end px-4 py-2">
+		<div class="flex items-center gap-3">
+			{#if lastRefreshed}
+				<span class="text-xs text-muted-foreground">
+					Updated {formatLastRefreshed(lastRefreshed)}
+				</span>
+			{/if}
+			<Button
+				variant="outline"
+				size="sm"
+				onclick={() => fetchJobs({ silent: true })}
+				disabled={isRefreshing}
+			>
+				<RefreshCw class="size-4 {isRefreshing ? 'animate-spin' : ''}" />
+				<span class="ml-1.5">Refresh</span>
+			</Button>
 		</div>
 	</div>
 
-	{#if loading}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-			{#each Array(6) as _}
-				<Card.Root>
-					<Card.Header>
-						<div class="flex items-start justify-between gap-2">
-							<Skeleton class="h-5 w-3/4" />
-							<Skeleton class="h-5 w-12" />
-						</div>
-					</Card.Header>
-					<Card.Footer>
-						<Skeleton class="h-3 w-24" />
-					</Card.Footer>
-				</Card.Root>
-			{/each}
-		</div>
-	{:else if error}
-		<Alert.Root variant="destructive">
-			<CircleAlert class="size-4" />
-			<Alert.Title>Error loading jobs</Alert.Title>
-			<Alert.Description>{error}</Alert.Description>
-		</Alert.Root>
-	{:else if jobs.length === 0}
-		<div class="text-center py-16">
-			<p class="text-muted-foreground">No jobs yet in this space.</p>
-		</div>
-	{:else}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-			{#each jobs as job (job.id)}
-				<a href="/spaces/{slug}/{job.id}" class="block group">
-					<Card.Root class="h-full transition-all hover:shadow-md hover:ring-1 hover:ring-primary/30">
-						<Card.Header class="pb-2">
-							<div class="flex items-start justify-between gap-2">
-								<Card.Title class="text-base group-hover:text-primary transition-colors line-clamp-2">
-									{job.title}
-								</Card.Title>
-								<Badge
-									variant="outline"
-									class="shrink-0 text-xs capitalize {STATUS_COLORS[job.status] ?? ''}"
-								>
-									{job.status}
-								</Badge>
-							</div>
-							{#if job.description}
-								<p class="text-xs text-muted-foreground line-clamp-2 mt-1">{job.description}</p>
-							{/if}
-						</Card.Header>
-						<Card.Footer class="pt-0">
-							<div class="flex items-center justify-between w-full text-xs text-muted-foreground">
-								<span>{priorityLabel(job.priority)}</span>
-								<span>{formatDate(job.createdAt)}</span>
-							</div>
-						</Card.Footer>
-					</Card.Root>
-				</a>
-			{/each}
+	<!-- Error banner -->
+	{#if error}
+		<div
+			class="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
+		>
+			<CircleAlert class="size-4 text-destructive shrink-0" />
+			<span class="text-destructive">{error}</span>
+			<Button variant="outline" size="sm" class="ml-auto" onclick={() => fetchJobs()}>
+				Retry
+			</Button>
 		</div>
 	{/if}
+
+	<!-- Kanban columns -->
+	<div class="flex flex-1 gap-4 overflow-x-auto px-4 pb-4">
+		<KanbanColumn
+			title="Ready"
+			count={readyJobs.length}
+			colorClass="bg-blue-500"
+			{isLoading}
+			emptyLabel="No jobs"
+		>
+			{#each readyJobs as job (job.id)}
+				<JobCard {job} {stationMap} />
+			{/each}
+		</KanbanColumn>
+
+		<KanbanColumn
+			title="In Progress"
+			count={inProgressJobs.length}
+			colorClass="bg-yellow-500"
+			{isLoading}
+			emptyLabel="No jobs"
+		>
+			{#each inProgressJobs as job (job.id)}
+				<JobCard {job} {stationMap} />
+			{/each}
+		</KanbanColumn>
+
+		<KanbanColumn
+			title="Done"
+			count={doneJobs.length}
+			colorClass="bg-green-500"
+			{isLoading}
+			emptyLabel="No jobs"
+		>
+			{#each doneJobs as job (job.id)}
+				<JobCard {job} {stationMap} />
+			{/each}
+		</KanbanColumn>
+	</div>
 </div>
