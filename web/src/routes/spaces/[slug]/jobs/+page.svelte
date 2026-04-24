@@ -5,7 +5,6 @@
 	import type { TaskTreeResponse } from '$lib/api/task';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
-	import { spaceStore } from '$lib/stores/space';
 	import type { TaskResponse } from '$lib/types/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
@@ -31,8 +30,8 @@
 	import { formatDuration } from '$lib/utils/time';
 	import { onDestroy } from 'svelte';
 
-	let currentSpace = $derived($spaceStore.currentSpace);
-	let spaceId = $derived(currentSpace?.id ?? '');
+	let space = $derived($page.data.space!);
+	let spaceId = $derived(space.id);
 
 	const POLL_INTERVAL_MS = 30_000;
 	const DONE_LIMIT = 20;
@@ -425,7 +424,7 @@
 </script>
 
 <svelte:head>
-	<title>{currentSpace?.name ?? 'Space'} – Jobs - Nori</title>
+	<title>{space.name} – Jobs - Nori</title>
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />

@@ -2,7 +2,6 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { recipeStore } from '$lib/stores/recipe';
-	import { spaceStore } from '$lib/stores/space';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -14,8 +13,8 @@
 	import { CircleAlert, ChevronUp, ChevronDown, ChevronsUpDown } from '@lucide/svelte';
 	import type { RecipeResponse } from '$lib/types/recipe';
 
-	let currentSpace = $derived($spaceStore.currentSpace);
-	let spaceId = $derived(currentSpace?.id ?? '');
+	let space = $derived($page.data.space!);
+	let spaceId = $derived(space.id);
 
 	let searchQuery = $state('');
 	let showCreateDialog = $state(false);
@@ -108,7 +107,7 @@
 </script>
 
 <svelte:head>
-	<title>{currentSpace?.name ?? 'Space'} – Recipes - Nori</title>
+	<title>{space.name} – Recipes - Nori</title>
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8">

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { spaceStore } from '$lib/stores/space';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
 	import { Button } from '$lib/components/ui/button';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
@@ -11,20 +10,12 @@
 
 	let { children } = $props();
 
-	// ---- Space context ----
+	// ---- Space context (resolved server-side in +layout.server.ts) ----
 	let slug = $derived($page.params.slug);
-	let currentSpace = $derived($spaceStore.currentSpace);
+	let space = $derived($page.data.space!);
 
-	// Load space when slug changes
+	// Load space members when the space is available
 	$effect(() => {
-		if (slug) {
-			spaceStore.loadSpaceBySlug(slug);
-		}
-	});
-
-	// Load space members when the current space is loaded
-	$effect(() => {
-		const space = currentSpace;
 		if (space) {
 			spaceMembersStore.loadMembers(space.id);
 		}
@@ -86,13 +77,7 @@
 						</Breadcrumb.Item>
 						<Breadcrumb.Separator />
 						<Breadcrumb.Item>
-							<Breadcrumb.Page>
-								{#if currentSpace}
-									{currentSpace.name}
-								{:else}
-									<span class="text-muted-foreground">Loading...</span>
-								{/if}
-							</Breadcrumb.Page>
+							<Breadcrumb.Page>{space.name}</Breadcrumb.Page>
 						</Breadcrumb.Item>
 					</Breadcrumb.List>
 				</Breadcrumb.Root>

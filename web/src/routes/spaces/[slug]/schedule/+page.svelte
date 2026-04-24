@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { spaceStore } from '$lib/stores/space';
+	import { page } from '$app/stores';
 	import { Calendar } from '@lucide/svelte';
 
-	let currentSpace = $derived($spaceStore.currentSpace);
+	let space = $derived($page.data.space!);
 </script>
 
 <svelte:head>
-	<title>{currentSpace?.name ?? 'Space'} – Schedule - Nori</title>
+	<title>{space.name} – Schedule - Nori</title>
 </svelte:head>
 
 <div class="flex flex-col items-center justify-center h-full min-h-[400px] text-center px-4">

@@ -9,7 +9,6 @@
 	import type { CompleteTaskResponse } from '$lib/types/task';
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
-	import { spaceStore } from '$lib/stores/space';
 	import TaskDetailPanel from '$lib/components/flow/TaskDetailPanel.svelte';
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 	import GraphView from '$lib/components/flow/GraphView.svelte';
@@ -28,8 +27,8 @@
 
 	let slug = $derived($page.params.slug);
 	let taskId = $derived($page.params.taskId);
-	let currentSpace = $derived($spaceStore.currentSpace);
-	let spaceId = $derived(currentSpace?.id ?? '');
+	let space = $derived($page.data.space!);
+	let spaceId = $derived(space.id);
 
 	let tree = $state<TaskTreeResponse | null>(null);
 	let isLoading = $state(true);
@@ -419,7 +418,7 @@
 				</Breadcrumb.Item>
 				<Breadcrumb.Separator />
 				<Breadcrumb.Item>
-					<Breadcrumb.Link href="/spaces/{slug}">{currentSpace?.name ?? slug}</Breadcrumb.Link>
+					<Breadcrumb.Link href="/spaces/{slug}">{space.name}</Breadcrumb.Link>
 				</Breadcrumb.Item>
 				<Breadcrumb.Separator />
 				<Breadcrumb.Item>

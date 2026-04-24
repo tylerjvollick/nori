@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { spaceStore } from '$lib/stores/space';
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
@@ -12,7 +11,7 @@
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 	import ListView from '$lib/components/flow/ListView.svelte';
 
-	let currentSpace = $derived($spaceStore.currentSpace);
+	let space = $derived($page.data.space!);
 
 	// ---- View mode ----
 	type ViewMode = 'board' | 'list';
@@ -117,8 +116,7 @@
 	// ---- Data loading ----
 
 	$effect(() => {
-		const space = currentSpace;
-		if (space && !stationsLoaded) {
+		if (!stationsLoaded) {
 			stationApi.listStations(space.id)
 				.then((s) => { stations = s; })
 				.catch(() => {})
@@ -128,7 +126,7 @@
 </script>
 
 <svelte:head>
-	<title>{currentSpace?.name ?? 'Space'} – Tasks - Nori</title>
+	<title>{space.name} – Tasks - Nori</title>
 </svelte:head>
 
 <svelte:window onkeydown={handleKeydown} />

@@ -4,7 +4,6 @@
 	import { goto } from '$app/navigation';
 	import { recipeStore } from '$lib/stores/recipe';
 	import { recipeApi } from '$lib/api/recipe';
-	import { spaceStore } from '$lib/stores/space';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
 	import type { TaskResponse } from '$lib/types/task';
@@ -38,7 +37,7 @@
 	import { toast } from 'svelte-sonner';
 
 	let recipeId = $derived($page.params.id);
-	let spaceId = $derived($spaceStore.currentSpace?.id ?? '');
+	let spaceId = $derived($page.data.space!.id);
 	let recipe = $derived($recipeStore.currentRecipe);
 	let loading = $derived($recipeStore.loading);
 	let storeError = $derived($recipeStore.error);
