@@ -40,9 +40,14 @@
 		oncomplete?: (response: CompleteTaskResponse) => void;
 		/** When true, show skeleton placeholders instead of task data */
 		isLoading?: boolean;
+		/**
+		 * 'recipe': hides status action buttons and actual time fields.
+		 * 'task' (default): full detail view.
+		 */
+		mode?: 'task' | 'recipe';
 	}
 
-	let { task, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false }: Props = $props();
+	let { task, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false, mode = 'task' }: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
@@ -285,20 +290,22 @@
 			{/if}
 		</div>
 
-		<!-- Action buttons -->
-		<TaskActions {task} layout="bar" {onaction} {oncomplete} />
+		<!-- Action buttons (hidden in recipe mode — no status transitions) -->
+		{#if mode !== 'recipe'}
+			<TaskActions {task} layout="bar" {onaction} {oncomplete} />
 
-		<!-- Forward navigation: go to next task in dependency chain -->
-		{#if nextTaskId}
-			<Button
-				variant="outline"
-				size="sm"
-				class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
-				onclick={navigateToNextTask}
-			>
-				<span class="text-sm">Next: <span class="font-mono">{nextTaskId}</span></span>
-				<ChevronRight class="size-4" />
-			</Button>
+			<!-- Forward navigation: go to next task in dependency chain -->
+			{#if nextTaskId}
+				<Button
+					variant="outline"
+					size="sm"
+					class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
+					onclick={navigateToNextTask}
+				>
+					<span class="text-sm">Next: <span class="font-mono">{nextTaskId}</span></span>
+					<ChevronRight class="size-4" />
+				</Button>
+			{/if}
 		{/if}
 
 		<Separator />
@@ -380,36 +387,48 @@
 		<div class="space-y-3">
 			<h4 class="text-sm font-medium text-foreground">Time</h4>
 
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Actual Time</span>
-				<span class="text-sm text-foreground flex items-center gap-1">
-					<Clock class="w-3 h-3 text-muted-foreground" />
-					{formatDuration(task.actualTimeSeconds)}
-				</span>
-			</div>
-
-			{#if task.startedAt}
+			{#if task.estimatedTimeSeconds}
 				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Started</span>
-					<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
-				</div>
-			{/if}
-
-			{#if task.completedAt}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Completed</span>
-					<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
-				</div>
-			{/if}
-
-			{#if task.dueDate}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Due Date</span>
+					<span class="text-sm text-muted-foreground">Estimated</span>
 					<span class="text-sm text-foreground flex items-center gap-1">
-						<Calendar class="w-3 h-3 text-muted-foreground" />
-						{formatDate(task.dueDate)}
+						<Clock class="w-3 h-3 text-muted-foreground" />
+						{formatDuration(task.estimatedTimeSeconds)}
 					</span>
 				</div>
+			{/if}
+
+			{#if mode !== 'recipe'}
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Actual Time</span>
+					<span class="text-sm text-foreground flex items-center gap-1">
+						<Clock class="w-3 h-3 text-muted-foreground" />
+						{formatDuration(task.actualTimeSeconds)}
+					</span>
+				</div>
+
+				{#if task.startedAt}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Started</span>
+						<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
+					</div>
+				{/if}
+
+				{#if task.completedAt}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Completed</span>
+						<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
+					</div>
+				{/if}
+
+				{#if task.dueDate}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Due Date</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Calendar class="w-3 h-3 text-muted-foreground" />
+							{formatDate(task.dueDate)}
+						</span>
+					</div>
+				{/if}
 			{/if}
 		</div>
 

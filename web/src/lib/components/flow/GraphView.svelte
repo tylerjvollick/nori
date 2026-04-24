@@ -29,9 +29,16 @@
 		focusTaskId?: string;
 		/** Called when a node is single-clicked. Receives the task ID. */
 		onselect?: (taskId: string) => void;
+		/**
+		 * 'recipe': disables double-click navigation; new tasks are created as children of rootTaskId.
+		 * 'task' (default): standard behavior.
+		 */
+		mode?: 'task' | 'recipe';
+		/** When mode='recipe', new nodes are created as children of this task ID. */
+		rootTaskId?: string;
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect }: Props = $props();
+	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -363,8 +370,10 @@
 
 		// Double-click detection (within 400ms on the same node)
 		if (lastClickedNodeId === nodeId && now - lastClickTime < 400) {
-			// Navigate to task detail
-			goto(`/spaces/${slug}/${nodeId}`);
+			if (mode !== 'recipe') {
+				// Navigate to task detail (task mode only)
+				goto(`/spaces/${slug}/${nodeId}`);
+			}
 			lastClickTime = 0;
 			lastClickedNodeId = '';
 			return;
@@ -727,7 +736,12 @@
 	async function handleAddUnconnected(): Promise<void> {
 		if (!spaceId) return;
 		try {
-			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+			const newTask = await taskApi.createTask(spaceId, {
+				title: 'New Task',
+				type: 'task',
+				priority: 2,
+				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
+			});
 			await refreshGraph();
 			activateNodeEditing(newTask.id);
 		} catch (e) {
@@ -741,7 +755,12 @@
 		// Capture downstream edges before we modify state
 		const downstreamEdges = edges.filter((e) => e.source === sourceNodeId);
 		try {
-			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+			const newTask = await taskApi.createTask(spaceId, {
+				title: 'New Task',
+				type: 'task',
+				priority: 2,
+				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
+			});
 
 			// sourceNode → newTask
 			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'finish_to_start');
@@ -770,7 +789,12 @@
 		// Find upstream blockers of source node (edges where sourceNode is target)
 		const upstreamEdges = edges.filter((e) => e.target === sourceNodeId);
 		try {
-			const newTask = await taskApi.createTask(spaceId, { title: 'New Task', type: 'task', priority: 2 });
+			const newTask = await taskApi.createTask(spaceId, {
+				title: 'New Task',
+				type: 'task',
+				priority: 2,
+				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
+			});
 
 			// Give newTask the same upstream deps as sourceNode
 			for (const upEdge of upstreamEdges) {
@@ -891,7 +915,7 @@
 	<!-- Graph header -->
 	<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg font-semibold text-foreground">{focusTaskId ? 'Neighborhood' : 'Graph'}</h1>
+			<h1 class="text-lg font-semibold text-foreground">{mode === 'recipe' ? 'Recipe Steps' : (focusTaskId ? 'Neighborhood' : 'Graph')}</h1>
 			{#if !isLoading && taskCount > 0}
 				<span class="text-xs text-muted-foreground">
 					{taskCount} tasks, {edgeCount} dependencies

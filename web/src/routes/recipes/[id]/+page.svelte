@@ -13,7 +13,8 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { customerApi } from '$lib/api/customer';
 	import type { CustomerResponse } from '$lib/api/customer';
-	import TaskTreeEditor from '$lib/components/flow/TaskTreeEditor.svelte';
+	import GraphView from '$lib/components/flow/GraphView.svelte';
+	import TaskDetailPanel from '$lib/components/flow/TaskDetailPanel.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -21,18 +22,18 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Separator } from '$lib/components/ui/separator';
 	import * as Alert from '$lib/components/ui/alert';
-	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Select from '$lib/components/ui/select';
+	import * as Card from '$lib/components/ui/card';
 	import {
 		CircleAlert,
 		ArrowLeft,
 		Send,
 		Play,
 		Plus,
-		ChevronDown,
 		History,
+		PanelRight,
+		X,
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 
@@ -44,10 +45,16 @@
 
 	// Task tree state
 	let tree = $state<TaskTreeResponse | null>(null);
-	let stations = $state<StationResponse[]>([]);
-	let stationMap = $state<Map<string, string>>(new Map());
+	let flatTasks = $state<TaskResponse[]>([]);
 	let depsMap = $state<Map<string, TaskDepsResponse>>(new Map());
+	let stationMap = $state<Map<string, string>>(new Map());
 	let treeLoading = $state(false);
+
+	// Graph detail panel state
+	let graphPanelOpen = $state(true);
+	let graphPanelTask = $state<TaskTreeResponse | null>(null);
+	let graphPanelDeps = $state<TaskDepsResponse | null>(null);
+	let graphPanelLoading = $state(false);
 
 	// Roll dialog state
 	let showRollDialog = $state(false);
@@ -77,6 +84,7 @@
 	let isDraft = $derived(currentVersion?.status === 'draft');
 	let isPublished = $derived(currentVersion?.status === 'published');
 	let hasTaskTree = $derived(currentVersion?.rootTaskId != null);
+	let rootTaskId = $derived(currentVersion?.rootTaskId ?? '');
 
 	let lastLoadedId = $state<string | null>(null);
 
@@ -96,6 +104,13 @@
 		}
 	});
 
+	// Initialize graph panel with root task when tree loads
+	$effect(() => {
+		if (tree && !graphPanelTask) {
+			graphPanelTask = tree;
+		}
+	});
+
 	onMount(() => {
 		loadStations();
 		loadCustomers();
@@ -104,7 +119,7 @@
 
 	async function loadStations() {
 		try {
-			stations = await stationApi.listStations(spaceId);
+			const stations: StationResponse[] = await stationApi.listStations(spaceId);
 			const map = new Map<string, string>();
 			for (const s of stations) {
 				map.set(s.id, s.name);
@@ -123,11 +138,12 @@
 		}
 	}
 
-	async function loadTaskTree(rootTaskId: string) {
+	async function loadTaskTree(rootId: string) {
 		treeLoading = true;
 		try {
-			tree = await taskApi.getTaskTree(spaceId, rootTaskId);
-			await loadDepsForTree();
+			tree = await taskApi.getTaskTree(spaceId, rootId);
+			flatTasks = flattenTree(tree).slice(1); // exclude root
+			await loadDepsForTasks(flatTasks);
 		} catch (err) {
 			console.error('Failed to load task tree:', err);
 		} finally {
@@ -135,11 +151,8 @@
 		}
 	}
 
-	async function loadDepsForTree() {
-		if (!tree) return;
-		const tasks = flattenTree(tree);
+	async function loadDepsForTasks(tasks: TaskResponse[]) {
 		const map = new Map<string, TaskDepsResponse>();
-
 		const BATCH_SIZE = 20;
 		for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
 			const batch = tasks.slice(i, i + BATCH_SIZE);
@@ -173,8 +186,44 @@
 		return result;
 	}
 
-	async function handleTreeMutate() {
-		// Reload the tree after edits
+	function findNode(node: TaskTreeResponse, id: string): TaskTreeResponse | null {
+		if (node.id === id) return node;
+		if (node.children) {
+			for (const child of node.children) {
+				const found = findNode(child, id);
+				if (found) return found;
+			}
+		}
+		return null;
+	}
+
+	/** Called when a node is clicked in the graph — loads its details into the side panel. */
+	async function handleGraphNodeSelect(taskId: string): Promise<void> {
+		if (!tree) return;
+		graphPanelLoading = true;
+		graphPanelOpen = true;
+		try {
+			const found = findNode(tree, taskId);
+			if (found) {
+				graphPanelTask = found;
+			} else {
+				const flat = flatTasks.find((t) => t.id === taskId);
+				if (flat) {
+					graphPanelTask = { ...flat, children: [] } as TaskTreeResponse;
+				}
+			}
+			try {
+				graphPanelDeps = await taskApi.getTaskDeps(spaceId, taskId);
+			} catch {
+				graphPanelDeps = null;
+			}
+		} finally {
+			graphPanelLoading = false;
+		}
+	}
+
+	/** Reload tree after graph mutations (node add/delete/rename). */
+	async function handleTreeMutate(): Promise<void> {
 		if (currentVersion?.rootTaskId) {
 			await loadTaskTree(currentVersion.rootTaskId);
 		}
@@ -186,7 +235,6 @@
 		try {
 			await recipeStore.publishVersion(spaceId, recipe.id);
 			toast.success('Recipe published successfully');
-			// Reload tree for the new published version
 			if ($recipeStore.currentRecipe?.currentVersion?.rootTaskId) {
 				await loadTaskTree($recipeStore.currentRecipe.currentVersion.rootTaskId);
 			}
@@ -213,7 +261,6 @@
 			rollCustomerId = '';
 			rollDueDate = '';
 			toast.success('Job created from recipe');
-			// Navigate to the new job
 			goto(`/spaces/${$page.params.slug || 'default'}/${job.id}`);
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : 'Failed to roll recipe');
@@ -229,8 +276,13 @@
 			await recipeStore.createNewVersion(spaceId, recipe.id, newVersionSummary.trim() || undefined);
 			showNewVersionDialog = false;
 			newVersionSummary = '';
+			// Reset panel and tree state
+			graphPanelTask = null;
+			graphPanelDeps = null;
+			tree = null;
+			flatTasks = [];
+			depsMap = new Map();
 			toast.success('New draft version created');
-			// Reload tree for the new draft
 			if ($recipeStore.currentRecipe?.currentVersion?.rootTaskId) {
 				await loadTaskTree($recipeStore.currentRecipe.currentVersion.rootTaskId);
 			}
@@ -278,18 +330,14 @@
 	}
 </script>
 
-<div class="container mx-auto px-4 py-8">
-	<!-- Back link -->
-	<div class="mb-4">
-		<Button variant="ghost" size="sm" href="/recipes">
-			<ArrowLeft class="size-4 mr-1" />
-			Back to Recipes
-		</Button>
-	</div>
+<svelte:head>
+	<title>{recipe?.name ?? 'Recipe'} - Nori</title>
+</svelte:head>
 
+<div class="flex-1 overflow-hidden flex flex-col">
 	{#if loading && !recipe}
 		<!-- Loading skeleton -->
-		<div class="space-y-6">
+		<div class="p-6 space-y-4">
 			<div class="flex justify-between items-start">
 				<div class="space-y-2">
 					<Skeleton class="h-8 w-64" />
@@ -303,160 +351,182 @@
 			<Skeleton class="h-96 w-full" />
 		</div>
 	{:else if storeError}
-		<Alert.Root variant="destructive">
-			<CircleAlert />
-			<Alert.Title>Error</Alert.Title>
-			<Alert.Description>{storeError}</Alert.Description>
-		</Alert.Root>
+		<div class="p-6">
+			<Alert.Root variant="destructive">
+				<CircleAlert />
+				<Alert.Title>Error</Alert.Title>
+				<Alert.Description>{storeError}</Alert.Description>
+			</Alert.Root>
+		</div>
 	{:else if recipe}
 		<!-- Header -->
-		<div class="flex flex-col md:flex-row justify-between items-start gap-4 mb-6">
-			<div class="space-y-1">
-				<div class="flex items-center gap-3">
-					<h1 class="text-3xl font-bold text-foreground">{recipe.name}</h1>
-					{#if currentVersion}
-						{@const badge = getStatusBadge(currentVersion.status)}
-						<Badge variant={badge.variant} class={badge.class}>
-							{badge.label}
-						</Badge>
-						<Badge variant="secondary">v{currentVersion.versionNumber}</Badge>
-					{/if}
-				</div>
-				{#if recipe.description}
-					<p class="text-muted-foreground">{recipe.description}</p>
-				{/if}
-			</div>
-
-			<!-- Actions -->
-			<div class="flex items-center gap-2 shrink-0">
-				{#if isDraft}
-					<Button onclick={handlePublish} disabled={isPublishing}>
-						<Send class="size-4 mr-1" />
-						{isPublishing ? 'Publishing...' : 'Publish'}
-					</Button>
-				{/if}
-
-				{#if isPublished}
-					<Button onclick={() => (showRollDialog = true)}>
-						<Play class="size-4 mr-1" />
-						Roll
-					</Button>
-					<Button variant="outline" onclick={() => (showNewVersionDialog = true)}>
-						<Plus class="size-4 mr-1" />
-						New Version
-					</Button>
-				{/if}
-
-				<Button variant="ghost" size="sm" onclick={loadVersionHistory}>
-					<History class="size-4 mr-1" />
-					History
+		<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
+			<div class="mb-1">
+				<Button variant="ghost" size="sm" href="/recipes" class="h-7 px-2 text-xs text-muted-foreground">
+					<ArrowLeft class="size-3 mr-1" />
+					Back to Recipes
 				</Button>
 			</div>
-		</div>
 
-		<Separator class="mb-6" />
-
-		<!-- Recipe metadata -->
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-			<Card.Root>
-				<Card.Content class="pt-4 pb-4 px-4">
-					<p class="text-xs text-muted-foreground uppercase tracking-wider">Version</p>
-					<p class="text-lg font-semibold">{currentVersion?.versionNumber ?? '-'}</p>
-				</Card.Content>
-			</Card.Root>
-			<Card.Root>
-				<Card.Content class="pt-4 pb-4 px-4">
-					<p class="text-xs text-muted-foreground uppercase tracking-wider">Status</p>
-					<p class="text-lg font-semibold capitalize">{currentVersion?.status ?? 'No version'}</p>
-				</Card.Content>
-			</Card.Root>
-			<Card.Root>
-				<Card.Content class="pt-4 pb-4 px-4">
-					<p class="text-xs text-muted-foreground uppercase tracking-wider">Created</p>
-					<p class="text-sm font-medium">{formatDate(recipe.createdAt)}</p>
-				</Card.Content>
-			</Card.Root>
-			<Card.Root>
-				<Card.Content class="pt-4 pb-4 px-4">
-					<p class="text-xs text-muted-foreground uppercase tracking-wider">Updated</p>
-					<p class="text-sm font-medium">{formatDate(recipe.updatedAt)}</p>
-				</Card.Content>
-			</Card.Root>
-		</div>
-
-		<!-- Version History (collapsible) -->
-		{#if showVersionHistory}
-			<Card.Root class="mb-6">
-				<Card.Header>
-					<Card.Title class="text-lg">Version History</Card.Title>
-				</Card.Header>
-				<Card.Content>
-					{#if versions.length === 0}
-						<p class="text-sm text-muted-foreground">No version history available.</p>
-					{:else}
-						<div class="space-y-3">
-							{#each versions as version}
-								{@const badge = getStatusBadge(version.status)}
-								<div class="flex items-center justify-between border-b border-border pb-3 last:border-0 last:pb-0">
-									<div class="flex items-center gap-3">
-										<Badge variant={badge.variant} class={badge.class}>
-											{badge.label}
-										</Badge>
-										<span class="font-medium">v{version.versionNumber}</span>
-										{#if version.changeSummary}
-											<span class="text-sm text-muted-foreground">{version.changeSummary}</span>
-										{/if}
-									</div>
-									<div class="text-xs text-muted-foreground">
-										{#if version.publishedAt}
-											Published {formatDate(version.publishedAt)}
-										{:else}
-											Created {formatDate(version.createdAt)}
-										{/if}
-									</div>
-								</div>
-							{/each}
-						</div>
+			<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+				<div class="flex items-center gap-2 min-w-0">
+					<h1 class="text-lg font-bold text-foreground truncate">{recipe.name}</h1>
+					{#if currentVersion}
+						{@const badge = getStatusBadge(currentVersion.status)}
+						<Badge variant={badge.variant} class="{badge.class} shrink-0">
+							{badge.label}
+						</Badge>
+						<Badge variant="secondary" class="shrink-0">v{currentVersion.versionNumber}</Badge>
 					{/if}
-				</Card.Content>
-			</Card.Root>
+				</div>
+
+				<!-- Actions -->
+				<div class="flex items-center gap-2 shrink-0">
+					{#if isDraft}
+						<Button size="sm" onclick={handlePublish} disabled={isPublishing}>
+							<Send class="size-4 mr-1" />
+							{isPublishing ? 'Publishing...' : 'Publish'}
+						</Button>
+					{/if}
+
+					{#if isPublished}
+						<Button size="sm" onclick={() => (showRollDialog = true)}>
+							<Play class="size-4 mr-1" />
+							Roll
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => (showNewVersionDialog = true)}>
+							<Plus class="size-4 mr-1" />
+							New Version
+						</Button>
+					{/if}
+
+					<Button variant="ghost" size="sm" onclick={loadVersionHistory}>
+						<History class="size-4 mr-1" />
+						History
+					</Button>
+				</div>
+			</div>
+
+			{#if recipe.description}
+				<p class="text-sm text-muted-foreground">{recipe.description}</p>
+			{/if}
+		</div>
+
+		<!-- Version History (collapsible, inline below header) -->
+		{#if showVersionHistory}
+			<div class="border-b border-border px-4 sm:px-6 py-3 shrink-0 bg-muted/30">
+				<h3 class="text-sm font-medium text-foreground mb-2">Version History</h3>
+				{#if versions.length === 0}
+					<p class="text-sm text-muted-foreground">No version history available.</p>
+				{:else}
+					<div class="space-y-2">
+						{#each versions as version}
+							{@const badge = getStatusBadge(version.status)}
+							<div class="flex items-center justify-between">
+								<div class="flex items-center gap-2">
+									<Badge variant={badge.variant} class={badge.class}>
+										{badge.label}
+									</Badge>
+									<span class="text-sm font-medium">v{version.versionNumber}</span>
+									{#if version.changeSummary}
+										<span class="text-xs text-muted-foreground">{version.changeSummary}</span>
+									{/if}
+								</div>
+								<div class="text-xs text-muted-foreground">
+									{#if version.publishedAt}
+										Published {formatDate(version.publishedAt)}
+									{:else}
+										Created {formatDate(version.createdAt)}
+									{/if}
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		{/if}
 
-		<!-- Task Tree Editor -->
+		<!-- Graph + detail panel area -->
 		{#if hasTaskTree}
 			{#if treeLoading}
-				<Card.Root>
-					<Card.Content class="py-12">
-						<div class="flex items-center justify-center">
-							<Skeleton class="h-64 w-full" />
-						</div>
-					</Card.Content>
-				</Card.Root>
-			{:else if tree}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title class="text-lg">Recipe Steps</Card.Title>
-					</Card.Header>
-					<Card.Content>
-						<TaskTreeEditor
-							{tree}
-							{stations}
-							context="recipe"
-							{stationMap}
+				<div class="flex-1 flex items-center justify-center">
+					<div class="flex flex-col items-center gap-3">
+						<Skeleton class="h-8 w-8 rounded-full" />
+						<p class="text-sm text-muted-foreground">Loading recipe steps...</p>
+					</div>
+				</div>
+			{:else}
+				<div class="flex-1 flex overflow-hidden">
+					<!-- Graph canvas -->
+					<div class="flex-1 min-w-0 overflow-hidden relative">
+						<GraphView
+							tasks={flatTasks}
 							deps={depsMap}
-							onmutate={handleTreeMutate}
+							{stationMap}
+							mode="recipe"
+							{rootTaskId}
+							onselect={handleGraphNodeSelect}
 						/>
-					</Card.Content>
-				</Card.Root>
+						<!-- Panel toggle button (desktop) -->
+						<button
+							onclick={() => (graphPanelOpen = !graphPanelOpen)}
+							class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+							title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
+						>
+							<PanelRight class="size-4" />
+						</button>
+					</div>
+
+					<!-- Detail panel (desktop sidebar) -->
+					{#if graphPanelOpen}
+						<div class="hidden lg:flex w-80 xl:w-96 flex-col border-l border-border overflow-y-auto shrink-0">
+							<TaskDetailPanel
+								task={graphPanelTask ?? tree ?? undefined}
+								{stationMap}
+								deps={graphPanelDeps}
+								isLoading={graphPanelLoading}
+								mode="recipe"
+							/>
+						</div>
+					{/if}
+
+					<!-- Detail panel (mobile drawer overlay) -->
+					{#if graphPanelTask}
+						<div class="lg:hidden fixed inset-y-0 right-0 w-4/5 max-w-sm z-50 flex flex-col bg-background border-l border-border shadow-xl overflow-y-auto">
+							<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+								<span class="text-sm font-medium text-foreground truncate">{graphPanelTask.title}</span>
+								<button
+									onclick={() => { graphPanelTask = null; }}
+									class="ml-2 text-muted-foreground hover:text-foreground"
+								>
+									<X class="size-4" />
+								</button>
+							</div>
+							<div class="flex-1 overflow-y-auto">
+								<TaskDetailPanel
+									task={graphPanelTask}
+									{stationMap}
+									deps={graphPanelDeps}
+									isLoading={graphPanelLoading}
+									mode="recipe"
+								/>
+							</div>
+						</div>
+						<!-- Backdrop -->
+						<button
+							class="lg:hidden fixed inset-0 z-40 bg-black/20"
+							onclick={() => { graphPanelTask = tree ?? null; }}
+							aria-label="Close panel"
+						></button>
+					{/if}
+				</div>
 			{/if}
 		{:else}
-			<Card.Root>
-				<Card.Content class="py-12">
-					<div class="text-center text-muted-foreground">
-						<p>No task tree associated with this version.</p>
-					</div>
-				</Card.Content>
-			</Card.Root>
+			<div class="flex-1 flex items-center justify-center">
+				<div class="text-center text-muted-foreground">
+					<p class="text-sm">No task tree associated with this version.</p>
+				</div>
+			</div>
 		{/if}
 	{/if}
 </div>
