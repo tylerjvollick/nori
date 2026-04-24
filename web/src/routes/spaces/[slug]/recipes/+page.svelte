@@ -5,12 +5,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Card from '$lib/components/ui/card';
+	import * as Table from '$lib/components/ui/table';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { CircleAlert } from '@lucide/svelte';
+	import { CircleAlert, ChevronUp, ChevronDown, ChevronsUpDown } from '@lucide/svelte';
+	import type { RecipeResponse } from '$lib/types/recipe';
 
 	let currentSpace = $derived($spaceStore.currentSpace);
 	let spaceId = $derived(currentSpace?.id ?? '');
@@ -22,19 +23,54 @@
 	let isCreating = $state(false);
 	let createError = $state('');
 
+	type SortColumn = 'name' | 'status' | 'version' | 'updatedAt';
+	type SortDir = 'asc' | 'desc';
+	let sortColumn = $state<SortColumn>('name');
+	let sortDir = $state<SortDir>('asc');
+
 	$effect(() => {
 		if (spaceId) recipeStore.loadRecipes(spaceId);
 	});
 
-	const filteredRecipes = $derived(
-		searchQuery.trim()
+	function getStatus(recipe: RecipeResponse): string {
+		if (!recipe.currentVersion) return 'draft';
+		return recipe.currentVersion.status;
+	}
+
+	const filteredAndSorted = $derived(() => {
+		let list = searchQuery.trim()
 			? $recipeStore.recipes.filter(
 					(r) =>
 						r.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
 						r.description?.toLowerCase().includes(searchQuery.toLowerCase())
 				)
-			: $recipeStore.recipes
-	);
+			: $recipeStore.recipes;
+
+		return [...list].sort((a, b) => {
+			let cmp = 0;
+			if (sortColumn === 'name') {
+				cmp = a.name.localeCompare(b.name);
+			} else if (sortColumn === 'status') {
+				cmp = getStatus(a).localeCompare(getStatus(b));
+			} else if (sortColumn === 'version') {
+				const av = a.currentVersion?.versionNumber ?? 0;
+				const bv = b.currentVersion?.versionNumber ?? 0;
+				cmp = av - bv;
+			} else if (sortColumn === 'updatedAt') {
+				cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+			}
+			return sortDir === 'asc' ? cmp : -cmp;
+		});
+	});
+
+	function toggleSort(col: SortColumn) {
+		if (sortColumn === col) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortColumn = col;
+			sortDir = 'asc';
+		}
+	}
 
 	function formatDate(dateString: string): string {
 		return new Date(dateString).toLocaleDateString('en-US', {
@@ -44,9 +80,9 @@
 		});
 	}
 
-	function getVersionStatusBadge(recipe: (typeof $recipeStore.recipes)[0]) {
-		if (!recipe.currentVersion) return 'draft';
-		return recipe.currentVersion.status;
+	function truncate(text: string | null | undefined, max = 80): string {
+		if (!text) return '';
+		return text.length > max ? text.slice(0, max) + '…' : text;
 	}
 
 	async function handleCreate() {
@@ -76,7 +112,7 @@
 
 <div class="container mx-auto px-4 py-8">
 	<!-- Header -->
-	<div class="flex justify-between items-center mb-8">
+	<div class="flex justify-between items-center mb-6">
 		<div>
 			<h1 class="text-2xl font-bold text-foreground">Recipes</h1>
 			<p class="text-muted-foreground mt-1 text-sm">Process templates for this space</p>
@@ -85,7 +121,7 @@
 	</div>
 
 	<!-- Search Bar -->
-	<div class="mb-6">
+	<div class="mb-4">
 		<Input
 			type="text"
 			bind:value={searchQuery}
@@ -94,32 +130,30 @@
 		/>
 	</div>
 
-	<!-- Recipe Grid -->
+	<!-- Table -->
 	{#if $recipeStore.loading}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			{#each Array(6) as _}
-				<Card.Root>
-					<Card.Header>
-						<div class="flex items-start justify-between">
-							<Skeleton class="h-6 w-3/4" />
-							<Skeleton class="h-5 w-12" />
-						</div>
-					</Card.Header>
-					<Card.Content class="px-0 py-0">
-						<div class="px-4">
-							<Skeleton class="h-4 w-full mb-2" />
-							<Skeleton class="h-4 w-2/3" />
-						</div>
-					</Card.Content>
-					<Card.Footer class="px-4 py-3">
-						<div class="flex items-center justify-between w-full">
-							<Skeleton class="h-3 w-16" />
-							<Skeleton class="h-3 w-24" />
-						</div>
-					</Card.Footer>
-				</Card.Root>
-			{/each}
-		</div>
+		<Table.Root>
+			<Table.Header>
+				<Table.Row>
+					<Table.Head>Name</Table.Head>
+					<Table.Head>Description</Table.Head>
+					<Table.Head>Status</Table.Head>
+					<Table.Head>Version</Table.Head>
+					<Table.Head>Updated</Table.Head>
+				</Table.Row>
+			</Table.Header>
+			<Table.Body>
+				{#each Array(5) as _}
+					<Table.Row>
+						<Table.Cell><Skeleton class="h-4 w-40" /></Table.Cell>
+						<Table.Cell><Skeleton class="h-4 w-64" /></Table.Cell>
+						<Table.Cell><Skeleton class="h-5 w-16" /></Table.Cell>
+						<Table.Cell><Skeleton class="h-4 w-8" /></Table.Cell>
+						<Table.Cell><Skeleton class="h-4 w-24" /></Table.Cell>
+					</Table.Row>
+				{/each}
+			</Table.Body>
+		</Table.Root>
 	{:else if $recipeStore.error}
 		<Alert.Root variant="destructive">
 			<CircleAlert />
@@ -133,70 +167,117 @@
 			</p>
 			<Button onclick={() => (showCreateDialog = true)}>Create Your First Recipe</Button>
 		</div>
-	{:else if filteredRecipes.length === 0}
+	{:else if filteredAndSorted().length === 0}
 		<div class="text-center py-12">
 			<p class="text-muted-foreground">No recipes match your search.</p>
 		</div>
 	{:else}
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			{#each filteredRecipes as recipe (recipe.id)}
-				<a href="/recipes/{recipe.id}" class="block group">
-					<Card.Root class="h-full transition-all hover:shadow-lg hover:ring-primary/50">
-						<Card.Header>
-							<div class="flex items-start justify-between">
-								<Card.Title class="text-xl group-hover:text-primary transition-colors">
-									{recipe.name}
-								</Card.Title>
-								<div class="flex gap-2 shrink-0 ml-2">
-									{#if getVersionStatusBadge(recipe) === 'published'}
-										<Badge variant="secondary" class="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800">
-											Published
-										</Badge>
-									{:else}
-										<Badge variant="outline" class="bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">
-											Draft
-										</Badge>
-									{/if}
-									{#if recipe.currentVersion}
-										<Badge variant="secondary">
-											v{recipe.currentVersion.versionNumber}
-										</Badge>
-									{/if}
-								</div>
-							</div>
-						</Card.Header>
-						<Card.Content class="px-0 py-0">
-							<div class="px-4">
-								{#if recipe.description}
-									<p class="text-sm text-muted-foreground line-clamp-3">
-										{recipe.description}
-									</p>
-								{:else}
-									<p class="text-sm text-muted-foreground/70 italic">No description</p>
-								{/if}
-							</div>
-						</Card.Content>
-						<Card.Footer class="px-4 py-3">
-							<div
-								class="flex items-center justify-between w-full text-xs text-muted-foreground border-t border-border pt-3"
-							>
-								<span>
-									{#if !recipe.isActive}
-										<Badge variant="outline" class="text-xs">Archived</Badge>
-									{/if}
-								</span>
-								<span>Updated {formatDate(recipe.updatedAt)}</span>
-							</div>
-						</Card.Footer>
-					</Card.Root>
-				</a>
-			{/each}
-		</div>
+		<Table.Root>
+			<Table.Header>
+				<Table.Row>
+					<Table.Head>
+						<button
+							class="flex items-center gap-1 hover:text-foreground transition-colors"
+							onclick={() => toggleSort('name')}
+						>
+							Name
+							{#if sortColumn === 'name'}
+								{#if sortDir === 'asc'}<ChevronUp class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
+							{:else}
+								<ChevronsUpDown class="size-3 opacity-40" />
+							{/if}
+						</button>
+					</Table.Head>
+					<Table.Head>Description</Table.Head>
+					<Table.Head>
+						<button
+							class="flex items-center gap-1 hover:text-foreground transition-colors"
+							onclick={() => toggleSort('status')}
+						>
+							Status
+							{#if sortColumn === 'status'}
+								{#if sortDir === 'asc'}<ChevronUp class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
+							{:else}
+								<ChevronsUpDown class="size-3 opacity-40" />
+							{/if}
+						</button>
+					</Table.Head>
+					<Table.Head>
+						<button
+							class="flex items-center gap-1 hover:text-foreground transition-colors"
+							onclick={() => toggleSort('version')}
+						>
+							Version
+							{#if sortColumn === 'version'}
+								{#if sortDir === 'asc'}<ChevronUp class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
+							{:else}
+								<ChevronsUpDown class="size-3 opacity-40" />
+							{/if}
+						</button>
+					</Table.Head>
+					<Table.Head>
+						<button
+							class="flex items-center gap-1 hover:text-foreground transition-colors"
+							onclick={() => toggleSort('updatedAt')}
+						>
+							Updated
+							{#if sortColumn === 'updatedAt'}
+								{#if sortDir === 'asc'}<ChevronUp class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
+							{:else}
+								<ChevronsUpDown class="size-3 opacity-40" />
+							{/if}
+						</button>
+					</Table.Head>
+				</Table.Row>
+			</Table.Header>
+			<Table.Body>
+				{#each filteredAndSorted() as recipe (recipe.id)}
+					{@const status = getStatus(recipe)}
+					<Table.Row
+						class="cursor-pointer hover:bg-muted/50"
+						onclick={() => goto(`/recipes/${recipe.id}`)}
+					>
+						<Table.Cell class="font-medium">
+							{recipe.name}
+							{#if !recipe.isActive}
+								<Badge variant="outline" class="ml-2 text-xs">Archived</Badge>
+							{/if}
+						</Table.Cell>
+						<Table.Cell class="text-muted-foreground max-w-xs">
+							{#if recipe.description}
+								{truncate(recipe.description)}
+							{:else}
+								<span class="italic opacity-50">No description</span>
+							{/if}
+						</Table.Cell>
+						<Table.Cell>
+							{#if status === 'published'}
+								<Badge variant="secondary" class="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800">
+									Published
+								</Badge>
+							{:else}
+								<Badge variant="outline" class="bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800">
+									Draft
+								</Badge>
+							{/if}
+						</Table.Cell>
+						<Table.Cell class="text-muted-foreground">
+							{#if recipe.currentVersion}
+								v{recipe.currentVersion.versionNumber}
+							{:else}
+								—
+							{/if}
+						</Table.Cell>
+						<Table.Cell class="text-muted-foreground whitespace-nowrap">
+							{formatDate(recipe.updatedAt)}
+						</Table.Cell>
+					</Table.Row>
+				{/each}
+			</Table.Body>
+		</Table.Root>
 
-		<div class="mt-8 text-center text-sm text-muted-foreground">
-			Showing {filteredRecipes.length} of {$recipeStore.total} recipe{$recipeStore.total === 1
-				? ''
-				: 's'}
+		<div class="mt-4 text-sm text-muted-foreground">
+			Showing {filteredAndSorted().length} of {$recipeStore.total} recipe{$recipeStore.total === 1 ? '' : 's'}
 		</div>
 	{/if}
 </div>
