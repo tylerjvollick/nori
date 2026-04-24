@@ -64,6 +64,31 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(page.getByText('Nav Test Recipe')).toBeVisible();
   });
 
+  test('add node creates a visible task in the graph', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Recipe' }).click();
+    await page.locator('#recipe-name').fill('Add Node Test');
+    await page.getByRole('button', { name: 'Create Recipe' }).click();
+    await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
+
+    // Wait for graph to load
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+
+    // Count graph nodes before adding
+    const nodesBefore = await page.locator('.svelte-flow__node').count();
+
+    // Click Add Node
+    await addNodeBtn.click();
+
+    // New node should appear in the graph
+    await expect(page.locator('.svelte-flow__node')).toHaveCount(nodesBefore + 1, { timeout: 10000 });
+
+    // The new node should have the default title "New Task"
+    await expect(page.locator('.svelte-flow__node', { hasText: 'New Task' })).toBeVisible();
+  });
+
   test('recipe appears in the recipes list after creation', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');

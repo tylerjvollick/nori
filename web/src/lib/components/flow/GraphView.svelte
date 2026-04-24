@@ -738,12 +738,13 @@
 	async function handleAddUnconnected(): Promise<void> {
 		if (!spaceId) return;
 		try {
-			const newTask = await taskApi.createTask(spaceId, {
-				title: 'New Task',
-				type: 'task',
-				priority: 2,
-				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
-			});
+			const newTask = mode === 'recipe' && rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
 			await refreshGraph();
 			activateNodeEditing(newTask.id);
 		} catch (e) {
@@ -757,12 +758,13 @@
 		// Capture downstream edges before we modify state
 		const downstreamEdges = edges.filter((e) => e.source === sourceNodeId);
 		try {
-			const newTask = await taskApi.createTask(spaceId, {
-				title: 'New Task',
-				type: 'task',
-				priority: 2,
-				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
-			});
+			const newTask = mode === 'recipe' && rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
 
 			// sourceNode → newTask
 			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'blocks');
@@ -791,12 +793,13 @@
 		// Find upstream blockers of source node (edges where sourceNode is target)
 		const upstreamEdges = edges.filter((e) => e.target === sourceNodeId);
 		try {
-			const newTask = await taskApi.createTask(spaceId, {
-				title: 'New Task',
-				type: 'task',
-				priority: 2,
-				...(mode === 'recipe' && rootTaskId ? { parentId: rootTaskId } : {}),
-			});
+			const newTask = mode === 'recipe' && rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
 
 			// Give newTask the same upstream deps as sourceNode
 			for (const upEdge of upstreamEdges) {
