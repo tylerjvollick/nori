@@ -228,6 +228,21 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(page.locator('.svelte-flow__node', { hasText: 'Sand Edges' })).toBeVisible({ timeout: 10000 });
   });
 
+  test('pressing ? opens keyboard shortcuts modal', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+
+    // Press ? to open keyboard shortcuts
+    await page.keyboard.press('?');
+
+    // Modal should be visible with the heading
+    await expect(page.getByText('Keyboard Shortcuts')).toBeVisible({ timeout: 3000 });
+
+    // Press ? again to close
+    await page.keyboard.press('?');
+    await expect(page.getByText('Keyboard Shortcuts')).not.toBeVisible({ timeout: 3000 });
+  });
+
   test('recipe appears in the recipes list after creation', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');
