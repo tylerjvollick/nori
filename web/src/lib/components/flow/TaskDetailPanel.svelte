@@ -61,6 +61,10 @@
 		onselecttask?: (taskId: string) => void;
 		/** Whether to hide the sub-tasks section (e.g. for recipe/job root tasks). */
 		hideSubTasks?: boolean;
+		/** Recipe version status (e.g. 'published', 'draft') — shown on root task only. */
+		recipeStatus?: string;
+		/** Recipe version number — shown on root task only. */
+		recipeVersion?: number;
 	}
 
 	let {
@@ -69,6 +73,7 @@
 		taskTitleMap = new Map(),
 		parentName, parentType, onnavparent, onselecttask,
 		hideSubTasks = false,
+		recipeStatus, recipeVersion,
 	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
@@ -321,12 +326,26 @@
 			</nav>
 		{/if}
 
-		<!-- Header: title, type badge -->
+		<!-- Header: title, type badge, recipe status/version -->
 		<div>
 			<div class="flex items-center gap-2 mb-2">
 				<Badge variant="outline" class="text-xs">
 					{typeLabel(task.type)}
 				</Badge>
+				{#if recipeStatus}
+					<Badge
+						variant={recipeStatus === 'published' ? 'secondary' : 'outline'}
+						class="text-xs {recipeStatus === 'published'
+							? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800'
+							: 'bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800'}"
+						data-testid="recipe-status-tag"
+					>
+						{recipeStatus === 'published' ? 'Published' : 'Draft'}
+					</Badge>
+				{/if}
+				{#if recipeVersion}
+					<Badge variant="secondary" class="text-xs" data-testid="recipe-version-tag">v{recipeVersion}</Badge>
+				{/if}
 			</div>
 			<h2 class="text-lg font-semibold text-foreground">{task.title}</h2>
 			{#if task.description}

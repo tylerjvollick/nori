@@ -33,7 +33,7 @@ test.describe('Breadcrumb navigation on detail views', () => {
     await expect(page.getByText('Back to Recipes')).not.toBeVisible();
   });
 
-  test('job detail shows breadcrumb segments and no tab bar', async ({ page }) => {
+  test('job detail shows breadcrumb segments and no space-level tab bar', async ({ page }) => {
     // Create a job
     await page.goto(`/spaces/${spaceSlug}/jobs`);
     await page.waitForLoadState('networkidle');
@@ -49,8 +49,11 @@ test.describe('Breadcrumb navigation on detail views', () => {
     await expect(breadcrumbNav.locator('[data-slot="breadcrumb-link"]', { hasText: 'Spaces' })).toBeVisible();
     await expect(breadcrumbNav.locator('[data-slot="breadcrumb-page"]', { hasText: 'Breadcrumb Test Job' })).toBeVisible();
 
-    // Tab bar should NOT be visible
-    await expect(page.locator('[role="tablist"]')).not.toBeVisible();
+    // Space-level tabs (Jobs/Recipes/etc) should NOT be visible
+    await expect(page.getByRole('tab', { name: 'Recipes' })).not.toBeVisible();
+    // Job detail should show Tasks/Cost tabs
+    await expect(page.getByRole('tab', { name: 'Tasks' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Cost' })).toBeVisible();
   });
 
   test('task under job shows 4-segment breadcrumb with job and task names', async ({ page }) => {

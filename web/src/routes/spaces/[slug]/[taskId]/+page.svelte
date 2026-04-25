@@ -61,6 +61,14 @@
 	/** For non-job leaf tasks, hide the view toggle entirely (detail + graph only). */
 	let availableViewModes = $derived(isLeafTask ? [] : ALL_VIEW_MODES);
 
+	/** Task view modes (Graph/List/Board) — used in left pane toolbar toggle. */
+	const TASK_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
+		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'list', label: 'List', icon: List },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
+	];
+	let taskViewModes = $derived(isLeafTask ? [] : TASK_VIEW_MODES);
+
 	let currentView = $derived<ViewMode>(
 		(($page.url.searchParams.get('view') as ViewMode) || 'graph') as ViewMode,
 	);
@@ -438,83 +446,89 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex-1 overflow-hidden flex flex-col">
-	<!-- Header: breadcrumbs, title, view toggle -->
-	<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
-		<!-- 1. Breadcrumbs -->
-		<Breadcrumb.Root>
-			<Breadcrumb.List>
-				<Breadcrumb.Item>
-					<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
-				</Breadcrumb.Item>
-				<Breadcrumb.Separator />
-				<Breadcrumb.Item>
-					<Breadcrumb.Link href="/spaces/{slug}">{space.name}</Breadcrumb.Link>
-				</Breadcrumb.Item>
-				{#if parentTask}
-					<Breadcrumb.Separator />
+	<!-- Header: breadcrumbs + actions -->
+	<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0">
+		<div class="flex items-center justify-between">
+			<!-- Breadcrumbs -->
+			<Breadcrumb.Root>
+				<Breadcrumb.List>
 					<Breadcrumb.Item>
-						<Breadcrumb.Link href="/spaces/{slug}/{parentTask.id}" class="flex items-center gap-1">
-							<Briefcase class="size-3.5" />
-							{parentTask.title}
-						</Breadcrumb.Link>
+						<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
 					</Breadcrumb.Item>
 					<Breadcrumb.Separator />
 					<Breadcrumb.Item>
-						<Breadcrumb.Page class="flex items-center gap-1">
-							<ListTodo class="size-3.5" />
-							{tree?.title ?? taskId}
-						</Breadcrumb.Page>
+						<Breadcrumb.Link href="/spaces/{slug}">{space.name}</Breadcrumb.Link>
 					</Breadcrumb.Item>
-				{:else}
-					<Breadcrumb.Separator />
-					<Breadcrumb.Item>
-						<Breadcrumb.Page class="flex items-center gap-1">
-							{#if tree?.type === 'job'}
+					{#if parentTask}
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href="/spaces/{slug}/{parentTask.id}" class="flex items-center gap-1">
 								<Briefcase class="size-3.5" />
-							{:else}
+								{parentTask.title}
+							</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Page class="flex items-center gap-1">
 								<ListTodo class="size-3.5" />
-							{/if}
-							{tree?.title ?? taskId}
-						</Breadcrumb.Page>
-					</Breadcrumb.Item>
-				{/if}
-			</Breadcrumb.List>
-		</Breadcrumb.Root>
+								{tree?.title ?? taskId}
+							</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					{:else}
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Page class="flex items-center gap-1">
+								{#if tree?.type === 'job'}
+									<Briefcase class="size-3.5" />
+								{:else}
+									<ListTodo class="size-3.5" />
+								{/if}
+								{tree?.title ?? taskId}
+							</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					{/if}
+				</Breadcrumb.List>
+			</Breadcrumb.Root>
 
-		<!-- 2. Title + actions -->
-		{#if tree}
-			<div class="flex items-center gap-3">
-				<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
-				{#if isJob}
-					<Button variant="outline" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
-						<BookOpen class="size-4 mr-1" />
-						Save as Recipe
-					</Button>
-				{/if}
-			</div>
-		{:else if isLoading}
-			<Skeleton class="h-6 w-48" />
-		{/if}
-
-		<!-- 3. View toggle buttons (hidden for non-job leaf tasks) -->
-		{#if availableViewModes.length > 0}
-			<div class="flex items-center rounded-lg border bg-muted/50 p-0.5 w-fit">
-				{#each availableViewModes as mode (mode.value)}
-					<Button
-						variant={currentView === mode.value ? 'secondary' : 'ghost'}
-						size="sm"
-						class="gap-1.5 rounded-md px-3 {currentView === mode.value
-							? 'bg-background shadow-sm'
-							: 'hover:bg-transparent hover:text-foreground'}"
-						onclick={() => setView(mode.value)}
-					>
-						<mode.icon class="size-4" />
-						{mode.label}
-					</Button>
-				{/each}
-			</div>
-		{/if}
+			<!-- Actions (right side of breadcrumb bar) -->
+			{#if isJob}
+				<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
+					<BookOpen class="size-4 mr-1" />
+					Save as Recipe
+				</Button>
+			{/if}
+		</div>
 	</div>
+
+	<!-- Top-level tabs: [Tasks] [Cost] (for jobs/tasks with children) -->
+	{#if availableViewModes.length > 0}
+		<div class="flex-shrink-0 border-b bg-background px-4 pt-0 pb-0">
+			<div class="flex gap-0" role="tablist">
+				<button
+					role="tab"
+					aria-selected={currentView !== 'cost'}
+					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+						{currentView !== 'cost'
+							? 'border-foreground text-foreground'
+							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+					onclick={() => { if (currentView === 'cost') setView('graph'); }}
+				>
+					Tasks
+				</button>
+				<button
+					role="tab"
+					aria-selected={currentView === 'cost'}
+					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+						{currentView === 'cost'
+							? 'border-foreground text-foreground'
+							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+					onclick={() => setView('cost')}
+				>
+					Cost
+				</button>
+			</div>
+		</div>
+	{/if}
 
 	<!-- 4. View content -->
 	{#if isLoading}
@@ -576,22 +590,80 @@
 				</div>
 			</div>
 
-		{:else if currentView === 'board'}
-			<BoardView {spaceId} tasks={flatTasks} {stationMap} />
+		{:else if currentView === 'cost'}
+			<!-- Cost tab: full width -->
+			<div class="flex-1 overflow-y-auto">
+				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
+			</div>
 
-		{:else if currentView === 'graph'}
+		{:else}
+			<!-- Tasks tab: split pane with [Graph|List|Board] toggle -->
 			<div class="flex-1 flex overflow-hidden">
-				<!-- Graph canvas -->
-				<div class="flex-1 min-w-0 overflow-hidden relative">
-					<GraphView
-						{spaceId}
-						tasks={flatTasks}
-						deps={depsMap}
-						{stationMap}
-						rootTaskId={tree?.id}
-						onselect={handleGraphNodeSelect}
-						onmutate={handleTreeMutate}
-					/>
+				<!-- Left pane -->
+				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
+					{#if currentView === 'graph'}
+						<GraphView
+							{spaceId}
+							tasks={flatTasks}
+							deps={depsMap}
+							{stationMap}
+							rootTaskId={tree?.id}
+							onselect={handleGraphNodeSelect}
+							onmutate={handleTreeMutate}
+							viewToggle={{ current: currentView, onchange: setView }}
+						/>
+					{:else if currentView === 'board'}
+						<!-- Board toolbar with view toggle -->
+						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
+							<h1 class="text-lg font-semibold text-foreground">Board</h1>
+							<div class="flex items-center gap-3">
+								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+									{#each taskViewModes as mode (mode.value)}
+										<Button
+											variant={currentView === mode.value ? 'secondary' : 'ghost'}
+											size="sm"
+											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
+												? 'bg-background shadow-sm'
+												: 'hover:bg-transparent hover:text-foreground'}"
+											onclick={() => setView(mode.value)}
+										>
+											<mode.icon class="size-3.5" />
+											{mode.label}
+										</Button>
+									{/each}
+								</div>
+							</div>
+						</div>
+						<div class="flex-1 overflow-hidden">
+							<BoardView {spaceId} tasks={flatTasks} {stationMap} onselect={handleGraphNodeSelect} />
+						</div>
+					{:else if currentView === 'list'}
+						<!-- List toolbar with view toggle -->
+						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
+							<h1 class="text-lg font-semibold text-foreground">List</h1>
+							<div class="flex items-center gap-3">
+								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+									{#each taskViewModes as mode (mode.value)}
+										<Button
+											variant={currentView === mode.value ? 'secondary' : 'ghost'}
+											size="sm"
+											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
+												? 'bg-background shadow-sm'
+												: 'hover:bg-transparent hover:text-foreground'}"
+											onclick={() => setView(mode.value)}
+										>
+											<mode.icon class="size-3.5" />
+											{mode.label}
+										</Button>
+									{/each}
+								</div>
+							</div>
+						</div>
+						<div class="flex-1 overflow-hidden">
+							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} onselect={handleGraphNodeSelect} />
+						</div>
+					{/if}
+
 					<!-- Panel toggle button (desktop) -->
 					<button
 						onclick={() => (graphPanelOpen = !graphPanelOpen)}
@@ -660,14 +732,6 @@
 						aria-label="Close panel"
 					></button>
 				{/if}
-			</div>
-
-		{:else if currentView === 'list'}
-			<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
-
-		{:else if currentView === 'cost'}
-			<div class="flex-1 overflow-y-auto">
-				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
 			</div>
 		{/if}
 	{/if}

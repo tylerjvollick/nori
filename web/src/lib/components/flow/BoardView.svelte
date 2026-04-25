@@ -18,9 +18,11 @@
     spaceId: string;
     tasks?: TaskResponse[];
     stationMap?: Map<string, string>;
+    /** When provided, clicking a task card calls this instead of navigating. */
+    onselect?: (taskId: string) => void;
   }
 
-  let { spaceId, tasks: externalTasks, stationMap: externalStationMap }: Props =
+  let { spaceId, tasks: externalTasks, stationMap: externalStationMap, onselect }: Props =
     $props();
 
   /** Whether we're in scoped mode (tasks provided externally). */
@@ -463,7 +465,11 @@
         const task = selectedTask;
         if (task) {
           e.preventDefault();
-          goto(`/spaces/${slug}/${task.id}`);
+          if (onselect) {
+            onselect(task.id);
+          } else {
+            goto(`/spaces/${slug}/${task.id}`);
+          }
         }
         break;
       }
@@ -815,6 +821,7 @@
                 {stationMap}
                 onaction={handleTaskAction}
                 {isDragging}
+                {onselect}
               />
             </div>
           {/each}

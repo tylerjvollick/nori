@@ -125,7 +125,7 @@ test.describe('hjkl keyboard navigation', () => {
     expect(backUp).toBe(firstRow);
   });
 
-  test('Enter opens selected task from board view', async ({ page }) => {
+  test('Enter selects task in detail panel from board view', async ({ page }) => {
     await createJobWithTasks(page, 'HjklTest4', 1);
 
     await page.getByRole('button', { name: 'Board', exact: true }).click();
@@ -134,12 +134,10 @@ test.describe('hjkl keyboard navigation', () => {
     await page.keyboard.press('j');
     await expect(page.locator('[data-kb-selected="true"]')).toHaveCount(1, { timeout: 5000 });
 
-    const currentUrl = page.url();
     await page.keyboard.press('Enter');
 
-    // Should navigate to task detail page (URL changes)
-    await page.waitForURL((url) => url.toString() !== currentUrl, { timeout: 10000 });
-    await expect(page.locator('h1').first()).toBeVisible();
+    // Should show selected task in the detail panel (right pane)
+    await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 10000 });
   });
 
   test('keyboard navigation suppressed when focus is in an input', async ({ page }) => {

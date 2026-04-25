@@ -25,7 +25,8 @@ test.describe('Create Job Dialog', () => {
     await page.getByRole('button', { name: 'Create Job' }).click();
 
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
-    await expect(page.locator('h1', { hasText: 'Oak Dining Table' })).toBeVisible();
+    // Title appears in breadcrumb
+    await expect(page.locator('[data-slot="breadcrumb-page"]', { hasText: 'Oak Dining Table' })).toBeVisible();
   });
 
   test('job appears in jobs list after creation', async ({ page }) => {

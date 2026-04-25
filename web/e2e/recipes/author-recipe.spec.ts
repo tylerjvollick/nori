@@ -24,8 +24,9 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
     // Verify recipe title and draft status
-    await expect(page.locator('h1', { hasText: 'Oak Dining Table' })).toBeVisible();
-    await expect(page.getByText('Draft')).toBeVisible();
+    // Title appears in breadcrumb
+    await expect(page.locator('[data-slot="breadcrumb-page"]', { hasText: 'Oak Dining Table' })).toBeVisible();
+    await expect(page.getByTestId('recipe-status-tag').first()).toHaveText('Draft');
 
     // Recipe creation automatically creates a root task, so the graph editor loads.
     // Wait for graph toolbar to appear (loading skeleton clears).

@@ -12,7 +12,7 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { RefreshCw, CircleAlert, Maximize2, Minimize2, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
+	import { RefreshCw, CircleAlert, Maximize2, Minimize2, Plus, Trash2, LayoutDashboard, GitBranch, List, LayoutGrid } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
@@ -43,9 +43,11 @@
 		onfullscreentoggle?: () => void;
 		/** Whether the graph is currently in fullscreen mode. */
 		isFullscreen?: boolean;
+		/** Optional view toggle config — renders [Graph|List|Board] toggle in the toolbar. */
+		viewToggle?: { current: string; onchange: (mode: string) => void };
 	}
 
-	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate, onfullscreentoggle, isFullscreen = false }: Props = $props();
+	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate, onfullscreentoggle, isFullscreen = false, viewToggle }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -55,6 +57,12 @@
 	const TASK_LIMIT = 500;
 	const NODE_WIDTH = 180;
 	const NODE_HEIGHT = 72;
+
+	const VIEW_TOGGLE_MODES = [
+		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'list', label: 'List', icon: List },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
+	] as const;
 
 	// ---- Custom node types ----
 	const nodeTypes: NodeTypes = {
@@ -1130,7 +1138,25 @@
 	<!-- Graph header -->
 	<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg font-semibold text-foreground">{mode === 'recipe' ? 'Recipe Steps' : (focusTaskId ? 'Neighborhood' : 'Graph')}</h1>
+			{#if viewToggle}
+				<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+					{#each VIEW_TOGGLE_MODES as m (m.value)}
+						<Button
+							variant={viewToggle.current === m.value ? 'secondary' : 'ghost'}
+							size="sm"
+							class="gap-1.5 rounded-md px-2.5 h-7 text-xs {viewToggle.current === m.value
+								? 'bg-background shadow-sm'
+								: 'hover:bg-transparent hover:text-foreground'}"
+							onclick={() => viewToggle.onchange(m.value)}
+						>
+							<m.icon class="size-3.5" />
+							{m.label}
+						</Button>
+					{/each}
+				</div>
+			{:else}
+				<h1 class="text-lg font-semibold text-foreground">{mode === 'recipe' ? 'Recipe Steps' : (focusTaskId ? 'Neighborhood' : 'Graph')}</h1>
+			{/if}
 			{#if !isLoading && taskCount > 0}
 				<span class="text-xs text-muted-foreground">
 					{taskCount} tasks, {edgeCount} dependencies

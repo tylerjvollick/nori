@@ -19,7 +19,6 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Separator } from '$lib/components/ui/separator';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
@@ -383,59 +382,48 @@
 			</Alert.Root>
 		</div>
 	{:else if recipe}
-		<!-- Header: breadcrumbs + title + actions -->
-		<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
-			<!-- Breadcrumbs -->
-			<Breadcrumb.Root>
-				<Breadcrumb.List>
-					<Breadcrumb.Item>
-						<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
-					</Breadcrumb.Item>
-					<Breadcrumb.Separator />
-					<Breadcrumb.Item>
-						<Breadcrumb.Link href="/spaces/{$page.params.slug}">{$page.data.space?.name ?? $page.params.slug}</Breadcrumb.Link>
-					</Breadcrumb.Item>
-					<Breadcrumb.Separator />
-					<Breadcrumb.Item>
-						<Breadcrumb.Link href="/spaces/{$page.params.slug}/recipes">Recipes</Breadcrumb.Link>
-					</Breadcrumb.Item>
-					<Breadcrumb.Separator />
-					<Breadcrumb.Item>
-						<Breadcrumb.Page class="flex items-center gap-1">
-							<BookOpen class="size-3.5" />
-							{recipe.name}
-						</Breadcrumb.Page>
-					</Breadcrumb.Item>
-				</Breadcrumb.List>
-			</Breadcrumb.Root>
+		<!-- Header: breadcrumbs + actions -->
+		<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0">
+			<div class="flex items-center justify-between">
+				<!-- Breadcrumbs -->
+				<Breadcrumb.Root>
+					<Breadcrumb.List>
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href="/spaces/{$page.params.slug}">{$page.data.space?.name ?? $page.params.slug}</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href="/spaces/{$page.params.slug}/recipes">Recipes</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Page class="flex items-center gap-1">
+								<BookOpen class="size-3.5" />
+								{recipe.name}
+							</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					</Breadcrumb.List>
+				</Breadcrumb.Root>
 
-			<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-				<div class="flex items-center gap-2 min-w-0">
-					<h1 class="text-lg font-bold text-foreground truncate">{recipe.name}</h1>
-					{#if currentVersion}
-						{@const badge = getStatusBadge(currentVersion.status)}
-						<Badge variant={badge.variant} class="{badge.class} shrink-0">
-							{badge.label}
-						</Badge>
-						<Badge variant="secondary" class="shrink-0">v{currentVersion.versionNumber}</Badge>
-					{/if}
-				</div>
-
-				<!-- Actions -->
-				<div class="flex items-center gap-2 shrink-0">
+				<!-- Actions (right side of breadcrumb bar) -->
+				<div class="flex items-center gap-1 shrink-0">
 					{#if isDraft}
-						<Button size="sm" onclick={handlePublish} disabled={isPublishing}>
+						<Button variant="ghost" size="sm" onclick={handlePublish} disabled={isPublishing}>
 							<Send class="size-4 mr-1" />
 							{isPublishing ? 'Publishing...' : 'Publish'}
 						</Button>
 					{/if}
 
 					{#if isPublished}
-						<Button size="sm" onclick={() => (showRollDialog = true)}>
+						<Button variant="ghost" size="sm" onclick={() => (showRollDialog = true)}>
 							<Play class="size-4 mr-1" />
 							Roll
 						</Button>
-						<Button variant="outline" size="sm" onclick={() => (showNewVersionDialog = true)}>
+						<Button variant="ghost" size="sm" onclick={() => (showNewVersionDialog = true)}>
 							<Plus class="size-4 mr-1" />
 							New Version
 						</Button>
@@ -447,10 +435,6 @@
 					</Button>
 				</div>
 			</div>
-
-			{#if recipe.description}
-				<p class="text-sm text-muted-foreground">{recipe.description}</p>
-			{/if}
 		</div>
 
 		<!-- Version History (collapsible, inline below header) -->
@@ -530,6 +514,8 @@
 								onnavparent={handleNavToRecipeRoot}
 								onselecttask={handleSelectTaskInGraph}
 								hideSubTasks={panelIsRoot}
+								recipeStatus={panelIsRoot ? currentVersion?.status : undefined}
+								recipeVersion={panelIsRoot ? currentVersion?.versionNumber : undefined}
 							/>
 						</div>
 					{/if}
@@ -560,6 +546,8 @@
 									onnavparent={handleNavToRecipeRoot}
 									onselecttask={handleSelectTaskInGraph}
 									hideSubTasks={panelIsRoot}
+									recipeStatus={panelIsRoot ? currentVersion?.status : undefined}
+									recipeVersion={panelIsRoot ? currentVersion?.versionNumber : undefined}
 								/>
 							</div>
 						</div>

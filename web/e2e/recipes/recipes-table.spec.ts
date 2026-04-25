@@ -56,7 +56,7 @@ test.describe('Recipes Table View', () => {
 
     // Should navigate to the recipe detail page
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
-    await expect(page.locator('h1', { hasText: 'Clickable Row Recipe' })).toBeVisible();
+    await expect(page.locator('[data-slot="breadcrumb-page"]', { hasText: 'Clickable Row Recipe' })).toBeVisible();
   });
 
   test('New Recipe button is visible in the toolbar', async ({ page }) => {

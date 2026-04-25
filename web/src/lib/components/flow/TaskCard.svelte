@@ -21,9 +21,11 @@
 		onaction?: (updated: TaskResponse) => void;
 		/** When true, a drag is in progress — suppress navigation on click. */
 		isDragging?: boolean;
+		/** When provided, clicking the card calls this instead of navigating. */
+		onselect?: (taskId: string) => void;
 	}
 
-	let { task, spaceId, stationMap, onaction, isDragging = false }: Props = $props();
+	let { task, spaceId, stationMap, onaction, isDragging = false, onselect }: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
@@ -172,7 +174,7 @@
 <a
 	href="/spaces/{slug}/{task.id}"
 	class="group block"
-	onclick={(e) => { if (isDragging) e.preventDefault(); }}
+	onclick={(e) => { if (isDragging) { e.preventDefault(); return; } if (onselect) { e.preventDefault(); onselect(task.id); } }}
 >
 	<Card.Root class="p-3 shadow-sm hover:ring-primary/40 hover:shadow-md transition-all rounded-lg" size="sm">
 		<Card.Content class="px-0 py-0">

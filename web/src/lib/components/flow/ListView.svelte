@@ -28,6 +28,8 @@
     tasks?: TaskResponse[];
     deps?: Map<string, TaskDepsResponse>;
     stationMap?: Map<string, string>;
+    /** When provided, clicking a row calls this instead of navigating. */
+    onselect?: (taskId: string) => void;
   }
 
   let {
@@ -35,6 +37,7 @@
     tasks: externalTasks,
     deps: externalDeps,
     stationMap: externalStationMap,
+    onselect,
   }: Props = $props();
 
   /** Whether we're in scoped mode (tasks provided externally). */
@@ -583,7 +586,11 @@
   let slug = $derived($page.params.slug);
 
   function navigateToTask(taskId: string): void {
-    goto(`/spaces/${slug}/${taskId}`);
+    if (onselect) {
+      onselect(taskId);
+    } else {
+      goto(`/spaces/${slug}/${taskId}`);
+    }
   }
 
   // ---- Keyboard selection ----
