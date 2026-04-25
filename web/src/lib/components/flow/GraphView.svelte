@@ -247,6 +247,7 @@
 				mode,
 				estimatedTimeSeconds: task.estimatedTimeSeconds,
 				onAddSerial: () => handleAddSerial(task.id),
+				onTabCommit: (title: string) => handleTabCommit(task.id, title),
 			},
 		}));
 
@@ -459,6 +460,7 @@
 				mode,
 				estimatedTimeSeconds: task.estimatedTimeSeconds,
 				onAddSerial: () => handleAddSerial(task.id),
+				onTabCommit: (title: string) => handleTabCommit(task.id, title),
 			},
 		}));
 
@@ -516,6 +518,19 @@
 		const deps = externalDeps;
 		if (tasks) {
 			buildFromExternalData(tasks, deps);
+		}
+	});
+
+	// When editingNodeId is set and the target node exists, activate inline editing.
+	// This handles the case where the node is created via API, then the graph rebuilds
+	// reactively — the editing state must be applied after the rebuild completes.
+	$effect(() => {
+		const eid = editingNodeId;
+		if (eid && nodes.some(n => n.id === eid)) {
+			const node = nodes.find(n => n.id === eid);
+			if (node && !(node.data as any).editing) {
+				untrack(() => activateNodeEditing(eid));
+			}
 		}
 	});
 
@@ -733,7 +748,7 @@
 					priority: 2,
 				});
 			await refreshGraph();
-			activateNodeEditing(newTask.id);
+			editingNodeId = newTask.id;
 		} catch (e) {
 			connectionError = e instanceof Error ? e.message : 'Failed to create task';
 			setTimeout(() => { connectionError = null; }, 4000);
@@ -768,7 +783,7 @@
 			}
 
 			await refreshGraph();
-			activateNodeEditing(newTask.id);
+			editingNodeId = newTask.id;
 		} catch (e) {
 			connectionError = e instanceof Error ? e.message : 'Failed to create serial task';
 			setTimeout(() => { connectionError = null; }, 4000);
@@ -794,7 +809,7 @@
 			}
 
 			await refreshGraph();
-			activateNodeEditing(newTask.id);
+			editingNodeId = newTask.id;
 		} catch (e) {
 			connectionError = e instanceof Error ? e.message : 'Failed to create parallel task';
 			setTimeout(() => { connectionError = null; }, 4000);
@@ -820,6 +835,30 @@
 			connectionError = e instanceof Error ? e.message : 'Failed to update task title';
 			setTimeout(() => { connectionError = null; }, 4000);
 		}
+	}
+
+	async function handleTabCommit(taskId: string, title: string): Promise<void> {
+		// Commit the title first (same as Enter)
+		editingNodeId = null;
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? { ...n, data: { ...n.data, editing: false, onTitleCommit: undefined } }
+				: n,
+		);
+		if (title && title !== 'New Task') {
+			try {
+				await taskApi.updateTask(spaceId, taskId, { title });
+				nodes = nodes.map((n) =>
+					n.id === taskId ? { ...n, data: { ...n.data, title } } : n,
+				);
+			} catch (e) {
+				connectionError = e instanceof Error ? e.message : 'Failed to update task title';
+				setTimeout(() => { connectionError = null; }, 4000);
+				return;
+			}
+		}
+		// Then create a serial downstream node with editing active
+		await handleAddSerial(taskId);
 	}
 
 	// ---- Keyboard navigation ----
@@ -945,6 +984,15 @@
 			if (selectedNodeId) {
 				e.preventDefault();
 				handleAddParallel(selectedNodeId);
+			}
+			return;
+		}
+
+		// Ctrl+R: Rename selected node inline
+		if (e.ctrlKey && e.key === 'r') {
+			if (selectedNodeId) {
+				e.preventDefault();
+				activateNodeEditing(selectedNodeId);
 			}
 			return;
 		}

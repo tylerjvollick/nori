@@ -85,8 +85,11 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     // New node should appear in the graph
     await expect(page.locator('.svelte-flow__node')).toHaveCount(nodesBefore + 1, { timeout: 10000 });
 
-    // The new node should have the default title "New Task"
-    await expect(page.locator('.svelte-flow__node', { hasText: 'New Task' })).toBeVisible();
+    // The new node should show inline editing input with default title
+    const newNode = page.locator('.svelte-flow__node').last();
+    const input = newNode.locator('input');
+    await expect(input).toBeVisible({ timeout: 5000 });
+    await expect(input).toHaveValue('New Task');
   });
 
   test('recipe graph nodes do not show status icons', async ({ page }) => {
@@ -135,18 +138,15 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await addNodeBtn.click();
     await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
 
-    // Dismiss inline editing if active
-    await page.keyboard.press('Escape');
-
-    // Hover the node to reveal the [+] serial button, then click it
-    const firstNode = page.locator('.svelte-flow__node').first();
-    await firstNode.hover();
-    const serialBtn = firstNode.locator('button[title*="serial"]');
-    await expect(serialBtn).toBeVisible({ timeout: 5000 });
-    await serialBtn.click();
+    // Wait for inline editing input, focus it, then press Tab to commit and create serial downstream
+    const editInput = page.locator('.svelte-flow__node input');
+    await expect(editInput).toBeVisible({ timeout: 10000 });
+    await editInput.focus();
+    await page.keyboard.press('Tab');
     await expect(nodes).toHaveCount(nodesBefore + 2, { timeout: 10000 });
 
-    // Dismiss editing on new node, click away, then click the last node (downstream)
+    // Dismiss editing on new serial node
+    await expect(page.locator('.svelte-flow__node input')).toBeVisible({ timeout: 10000 });
     await page.keyboard.press('Escape');
     await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
     const lastNode = page.locator('.svelte-flow__node').last();
@@ -158,6 +158,74 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     // The blocker badge should show "New Task" (the title), not a UUID
     const depSection = blockedByLabel.locator('..').locator('..');
     await expect(depSection.getByText('New Task')).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Tab commits title and creates serial downstream node', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Recipe' }).click();
+    await page.locator('#recipe-name').fill('Tab Test');
+    await page.getByRole('button', { name: 'Create Recipe' }).click();
+    await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
+
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+
+    const nodes = page.locator('.svelte-flow__node');
+    const nodesBefore = await nodes.count();
+
+    // Add node — inline input should appear
+    await addNodeBtn.click();
+    await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
+
+    // Type a name and press Tab — should commit and create serial node
+    const inlineInput = page.locator('.svelte-flow__node input');
+    await expect(inlineInput).toBeVisible({ timeout: 10000 });
+    await inlineInput.fill('Cut Wood');
+    await page.keyboard.press('Tab');
+
+    // Should now have 2 new nodes (the named one + serial downstream)
+    await expect(nodes).toHaveCount(nodesBefore + 2, { timeout: 10000 });
+
+    // The first node should have the committed title
+    await expect(page.locator('.svelte-flow__node', { hasText: 'Cut Wood' })).toBeVisible({ timeout: 5000 });
+  });
+
+  test('Ctrl+R renames an existing node', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Recipe' }).click();
+    await page.locator('#recipe-name').fill('Rename Test');
+    await page.getByRole('button', { name: 'Create Recipe' }).click();
+    await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
+
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+
+    const nodes = page.locator('.svelte-flow__node');
+    const nodesBefore = await nodes.count();
+
+    // Add a node and dismiss editing
+    await addNodeBtn.click();
+    await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
+    await page.keyboard.press('Escape');
+    await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
+
+    // Click the node to select it
+    const node = page.locator('.svelte-flow__node').first();
+    await node.click();
+
+    // Ctrl+R should open inline rename input
+    await page.keyboard.press('Control+r');
+    const renameInput = page.locator('.svelte-flow__node input');
+    await expect(renameInput).toBeVisible({ timeout: 5000 });
+
+    // Type new name and commit
+    await renameInput.fill('Sand Edges');
+    await page.keyboard.press('Enter');
+
+    // Node should show the new title
+    await expect(page.locator('.svelte-flow__node', { hasText: 'Sand Edges' })).toBeVisible({ timeout: 10000 });
   });
 
   test('recipe appears in the recipes list after creation', async ({ page }) => {

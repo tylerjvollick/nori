@@ -139,8 +139,8 @@
 		}
 	}
 
-	async function loadTaskTree(rootId: string) {
-		treeLoading = true;
+	async function loadTaskTree(rootId: string, silent = false) {
+		if (!silent) treeLoading = true;
 		try {
 			tree = await taskApi.getTaskTree(spaceId, rootId);
 			flatTasks = flattenTree(tree).slice(1); // exclude root
@@ -226,7 +226,7 @@
 	/** Reload tree after graph mutations (node add/delete/rename). */
 	async function handleTreeMutate(): Promise<void> {
 		if (currentVersion?.rootTaskId) {
-			await loadTaskTree(currentVersion.rootTaskId);
+			await loadTaskTree(currentVersion.rootTaskId, true);
 		}
 	}
 

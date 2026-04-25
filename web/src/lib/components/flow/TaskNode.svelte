@@ -34,6 +34,8 @@
 			editing?: boolean;
 			/** Called when the inline title input is committed (Enter or blur). */
 			onTitleCommit?: (title: string) => void;
+			/** Called when Tab is pressed during inline editing — commits title and creates serial node. */
+			onTabCommit?: (title: string) => void;
 			/** When set, shows a [+] button below the node for serial node insertion. */
 			onAddSerial?: () => void;
 		};
@@ -67,6 +69,10 @@
 		if (e.key === 'Enter') {
 			e.preventDefault();
 			commitTitle();
+		} else if (e.key === 'Tab') {
+			e.preventDefault();
+			const trimmed = editTitle.trim() || 'New Task';
+			data.onTabCommit?.(trimmed);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			// Revert to original title
