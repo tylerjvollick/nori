@@ -653,8 +653,8 @@ func runRecipeCreateFromTOML(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse version response: %w", err)
 	}
 
-	// POST /api/v1/recipes/:id/versions/:vid/publish — auto-publish.
-	publishPath := client.SpacePath(fmt.Sprintf("/recipes/%s/versions/%d/publish", recipe.ID, version.ID))
+	// POST /api/v1/recipes/:id/publish — auto-publish.
+	publishPath := client.SpacePath(fmt.Sprintf("/recipes/%s/publish", recipe.ID))
 	resp, err = client.Post(publishPath, nil)
 	if err != nil {
 		return fmt.Errorf("recipe and version created but publish failed: %w", err)
@@ -746,8 +746,8 @@ func runRecipePublish(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("recipe %q has no draft version to publish", slug)
 	}
 
-	// 3. Publish via the flat recipe-versions endpoint.
-	publishPath := client.SpacePath(fmt.Sprintf("/recipe-versions/%d/publish", draft.ID))
+	// 3. Publish via the recipe-scoped endpoint.
+	publishPath := client.SpacePath(fmt.Sprintf("/recipes/%s/publish", recipeID))
 	resp, err = client.Post(publishPath, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)

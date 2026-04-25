@@ -87,7 +87,7 @@
 		addingActive = false;
 	}
 
-	let addInputEl: HTMLInputElement | undefined = $state(undefined);
+	let addInputEl: HTMLInputElement | null = $state(null);
 
 	async function submitAndContinue() {
 		await submitAdd();

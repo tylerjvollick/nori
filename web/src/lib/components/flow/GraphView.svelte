@@ -924,7 +924,7 @@
 		if (node && flowHandle) {
 			const centerX = node.position.x + NODE_WIDTH / 2;
 			const centerY = node.position.y + NODE_HEIGHT / 2;
-			flowHandle.setCenter(centerX, centerY, { zoom: 1, duration: 200 });
+			flowHandle.setCenter(centerX, centerY, { zoom: 1.15, duration: 200 });
 		}
 	}
 
