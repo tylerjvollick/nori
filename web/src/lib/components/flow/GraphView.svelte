@@ -1003,7 +1003,7 @@
 		if (e.ctrlKey && e.key === 'r') {
 			e.preventDefault();
 			if (selectedNodeId) {
-				activateNodeEditing(selectedNodeId);
+				activateNodeEditing(selectedNodeId, true);
 			}
 			return;
 		}
