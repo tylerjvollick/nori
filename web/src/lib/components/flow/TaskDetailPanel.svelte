@@ -25,6 +25,9 @@
 		ArrowRight,
 		ArrowLeft,
 		ChevronRight,
+		BookOpen,
+		Briefcase,
+		ListTodo,
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
@@ -48,9 +51,25 @@
 		mode?: 'task' | 'recipe';
 		/** Map of task ID → title, used to display dependency titles instead of IDs. */
 		taskTitleMap?: Map<string, string>;
+		/** Name of the parent container (recipe or job name) for breadcrumb. */
+		parentName?: string;
+		/** Type of the parent container for breadcrumb icon. */
+		parentType?: 'recipe' | 'job';
+		/** Called when the user clicks the parent breadcrumb to navigate back. */
+		onnavparent?: () => void;
+		/** Called when a dependency badge is clicked — selects that task in the graph. */
+		onselecttask?: (taskId: string) => void;
+		/** Whether to hide the sub-tasks section (e.g. for recipe/job root tasks). */
+		hideSubTasks?: boolean;
 	}
 
-	let { task, spaceId, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false, mode = 'task', taskTitleMap = new Map() }: Props = $props();
+	let {
+		task, spaceId, stationMap = new Map(), deps = null,
+		onaction, oncomplete, isLoading = false, mode = 'task',
+		taskTitleMap = new Map(),
+		parentName, parentType, onnavparent, onselecttask,
+		hideSubTasks = false,
+	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
@@ -187,11 +206,6 @@
 
 	// --- Forward navigation ---
 
-	/**
-	 * The first dependent (successor) task ID, used for the "Next" button.
-	 * In deps.dependents: fromTaskId = the downstream task, toTaskId = this task (upstream/blocker).
-	 * GetDependents queries WHERE to_task_id = currentTask, so fromTaskId is the successor.
-	 */
 	let nextTaskId = $derived.by((): string | null => {
 		if (!deps || deps.dependents.length === 0) return null;
 		return deps.dependents[0].fromTaskId;
@@ -200,6 +214,14 @@
 	function navigateToNextTask(): void {
 		if (nextTaskId) {
 			goto(`/spaces/${slug}/${nextTaskId}`);
+		}
+	}
+
+	/** Handle dependency badge click — select in graph if handler provided, else navigate. */
+	function handleDepClick(e: MouseEvent, depTaskId: string): void {
+		if (onselecttask) {
+			e.preventDefault();
+			onselecttask(depTaskId);
 		}
 	}
 
@@ -277,12 +299,31 @@
 			</div>
 		</div>
 	{:else}
-		<!-- Header: title, ID, type -->
+		<!-- Breadcrumb: Parent (recipe/job) > Task -->
+		{#if parentName && parentType}
+			<nav class="flex items-center gap-1 text-xs text-muted-foreground">
+				<button
+					class="flex items-center gap-1 hover:text-foreground transition-colors truncate max-w-[45%]"
+					onclick={() => onnavparent?.()}
+				>
+					{#if parentType === 'recipe'}
+						<BookOpen class="size-3 shrink-0" />
+					{:else}
+						<Briefcase class="size-3 shrink-0" />
+					{/if}
+					<span class="truncate">{parentName}</span>
+				</button>
+				<ChevronRight class="size-3 shrink-0 text-muted-foreground/50" />
+				<span class="flex items-center gap-1 text-foreground truncate">
+					<ListTodo class="size-3 shrink-0" />
+					<span class="truncate">{task.title}</span>
+				</span>
+			</nav>
+		{/if}
+
+		<!-- Header: title, type badge -->
 		<div>
 			<div class="flex items-center gap-2 mb-2">
-				<Badge variant="outline" class="text-xs font-mono">
-					{task.id}
-				</Badge>
 				<Badge variant="outline" class="text-xs">
 					{typeLabel(task.type)}
 				</Badge>
@@ -305,7 +346,7 @@
 					class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
 					onclick={navigateToNextTask}
 				>
-					<span class="text-sm">Next: <span class="font-mono">{nextTaskId}</span></span>
+					<span class="text-sm">Next: <span class="font-medium">{taskTitleMap.get(nextTaskId) ?? 'Task'}</span></span>
 					<ChevronRight class="size-4" />
 				</Button>
 			{/if}
@@ -437,9 +478,11 @@
 			{/if}
 		</div>
 
-		<!-- Sub-tasks (checklist items) -->
-		<Separator />
-		<SubTaskList spaceId={spaceId} taskId={task.id} />
+		<!-- Sub-tasks (hidden for recipe/job root tasks) -->
+		{#if !hideSubTasks}
+			<Separator />
+			<SubTaskList spaceId={spaceId} taskId={task.id} />
+		{/if}
 
 		<!-- Children progress (child tasks in the graph) -->
 		{#if progress.total > 0}
@@ -465,12 +508,15 @@
 						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocked by</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each deps.blockers as dep (dep.id)}
-								<a href="/spaces/{slug}/{dep.toTaskId}" class="no-underline">
+								<button
+									class="inline-flex"
+									onclick={(e) => handleDepClick(e, dep.toTaskId)}
+								>
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowLeft class="w-3 h-3 text-red-400 shrink-0" />
 										<span class="text-xs">{taskTitleMap.get(dep.toTaskId) ?? dep.toTaskId}</span>
 									</Badge>
-								</a>
+								</button>
 							{/each}
 						</div>
 					</div>
@@ -481,12 +527,15 @@
 						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocks</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each deps.dependents as dep (dep.id)}
-								<a href="/spaces/{slug}/{dep.fromTaskId}" class="no-underline">
+								<button
+									class="inline-flex"
+									onclick={(e) => handleDepClick(e, dep.fromTaskId)}
+								>
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowRight class="w-3 h-3 text-orange-400 shrink-0" />
 										<span class="text-xs">{taskTitleMap.get(dep.fromTaskId) ?? dep.fromTaskId}</span>
 									</Badge>
-								</a>
+								</button>
 							{/each}
 						</div>
 					</div>

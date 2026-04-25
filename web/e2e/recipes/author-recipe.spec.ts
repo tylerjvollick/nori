@@ -29,7 +29,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
 
     // Recipe creation automatically creates a root task, so the graph editor loads.
     // Wait for graph toolbar to appear (loading skeleton clears).
-    await expect(page.getByRole('button', { name: 'Add Node' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({ timeout: 10000 });
   });
 
   test('graph editor toolbar shows controls after loading', async ({ page }) => {
@@ -41,7 +41,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
     // Wait for graph to load
-    await expect(page.getByRole('button', { name: 'Add Node' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole('button', { name: 'Re-layout' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
   });
@@ -73,7 +73,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
     // Wait for graph to load
-    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
     // Count graph nodes before adding
@@ -101,7 +101,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
     // Wait for graph to load, add a node so we have a visible node to check
-    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
     const nodesBefore = await page.locator('.svelte-flow__node').count();
@@ -129,7 +129,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
     // Wait for graph
-    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
     // Add first node
@@ -168,7 +168,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.getByRole('button', { name: 'Create Recipe' }).click();
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
-    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
     const nodes = page.locator('.svelte-flow__node');
@@ -204,7 +204,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.getByRole('button', { name: 'Create Recipe' }).click();
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
-    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
     const nodes = page.locator('.svelte-flow__node');

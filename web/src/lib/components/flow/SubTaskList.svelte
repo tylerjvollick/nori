@@ -87,9 +87,27 @@
 		addingActive = false;
 	}
 
+	let addInputEl: HTMLInputElement | undefined = $state(undefined);
+
+	async function submitAndContinue() {
+		await submitAdd();
+		// Re-open the add input immediately for rapid entry
+		addingActive = true;
+		// Need a tick for the input to mount before focusing
+		requestAnimationFrame(() => addInputEl?.focus());
+	}
+
 	function onAddKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') { e.preventDefault(); submitAdd(); }
-		if (e.key === 'Escape') cancelAdd();
+		if (e.key === 'Enter' && e.metaKey) {
+			// Cmd+Enter: submit and immediately re-open for next sub-task
+			e.preventDefault();
+			submitAndContinue();
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			submitAdd();
+		} else if (e.key === 'Escape') {
+			cancelAdd();
+		}
 	}
 
 	// --- Delete ---
@@ -219,6 +237,15 @@
 								<!-- Drag handle -->
 								<div class="cursor-grab text-muted-foreground/40 hover:text-muted-foreground shrink-0">
 									<GripVertical class="size-3.5" />
+								</div>
+
+								<!-- Photo thumbnail -->
+								<div class="size-7 shrink-0 rounded border border-border bg-muted flex items-center justify-center overflow-hidden">
+									{#if item.images && item.images.length > 0}
+										<img src={item.images[0].imageUrl} alt="" class="size-full object-cover" />
+									{:else}
+										<ImageIcon class="size-3 text-muted-foreground/30" />
+									{/if}
 								</div>
 
 								<!-- Expand toggle (only if description exists) -->
@@ -414,6 +441,7 @@
 			<div class="flex items-center gap-1.5 mt-1">
 				<Input
 					bind:value={addingTitle}
+					bind:ref={addInputEl}
 					placeholder="Sub-task title…"
 					class="h-7 text-xs flex-1"
 					onkeydown={onAddKeydown}

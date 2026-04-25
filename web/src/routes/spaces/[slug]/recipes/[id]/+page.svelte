@@ -223,6 +223,22 @@
 		}
 	}
 
+	/** Navigate the detail panel back to the recipe root task. */
+	function handleNavToRecipeRoot(): void {
+		if (tree) {
+			graphPanelTask = tree;
+			graphPanelDeps = null;
+		}
+	}
+
+	/** Select a task in the graph (called from dep badge clicks in detail panel). */
+	function handleSelectTaskInGraph(taskId: string): void {
+		handleGraphNodeSelect(taskId);
+	}
+
+	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
+	let panelIsRoot = $derived(graphPanelTask?.id === tree?.id);
+
 	/** Reload tree after graph mutations (node add/delete/rename). */
 	async function handleTreeMutate(): Promise<void> {
 		if (currentVersion?.rootTaskId) {
@@ -491,6 +507,11 @@
 								deps={graphPanelDeps}
 								isLoading={graphPanelLoading}
 								mode="recipe"
+								parentName={recipe?.name}
+								parentType="recipe"
+								onnavparent={handleNavToRecipeRoot}
+								onselecttask={handleSelectTaskInGraph}
+								hideSubTasks={panelIsRoot}
 							/>
 						</div>
 					{/if}
@@ -516,6 +537,11 @@
 									deps={graphPanelDeps}
 									isLoading={graphPanelLoading}
 									mode="recipe"
+									parentName={recipe?.name}
+									parentType="recipe"
+									onnavparent={handleNavToRecipeRoot}
+									onselecttask={handleSelectTaskInGraph}
+									hideSubTasks={panelIsRoot}
 								/>
 							</div>
 						</div>

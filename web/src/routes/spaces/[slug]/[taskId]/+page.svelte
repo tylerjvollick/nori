@@ -382,6 +382,22 @@
 	/** Whether the root task is a job (save-as-recipe is only available for jobs). */
 	let isJob = $derived(tree?.type === 'job');
 
+	/** Navigate the detail panel back to the job/task root. */
+	function handleNavToRoot(): void {
+		if (tree) {
+			graphPanelTask = tree;
+			graphPanelDeps = null;
+		}
+	}
+
+	/** Select a task in the graph (called from dep badge clicks in detail panel). */
+	function handleSelectTaskInGraph(depTaskId: string): void {
+		handleGraphNodeSelect(depTaskId);
+	}
+
+	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
+	let graphPanelIsRoot = $derived(graphPanelTask?.id === tree?.id);
+
 	async function handleSaveAsRecipe(): Promise<void> {
 		if (!tree || !recipeName.trim()) return;
 		isSavingAsRecipe = true;
@@ -424,7 +440,7 @@
 				</Breadcrumb.Item>
 				<Breadcrumb.Separator />
 				<Breadcrumb.Item>
-					<Breadcrumb.Page>{taskId}</Breadcrumb.Page>
+					<Breadcrumb.Page>{tree?.title ?? taskId}</Breadcrumb.Page>
 				</Breadcrumb.Item>
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
@@ -562,6 +578,11 @@
 							isLoading={graphPanelLoading}
 							onaction={handleTaskAction}
 							oncomplete={handleCompletion}
+							parentName={tree?.title}
+							parentType={isJob ? 'job' : undefined}
+							onnavparent={handleNavToRoot}
+							onselecttask={handleSelectTaskInGraph}
+							hideSubTasks={graphPanelIsRoot}
 						/>
 					</div>
 				{/if}
@@ -588,6 +609,11 @@
 								isLoading={graphPanelLoading}
 								onaction={handleTaskAction}
 								oncomplete={handleCompletion}
+								parentName={tree?.title}
+								parentType={isJob ? 'job' : undefined}
+								onnavparent={handleNavToRoot}
+								onselecttask={handleSelectTaskInGraph}
+								hideSubTasks={graphPanelIsRoot}
 							/>
 						</div>
 					</div>

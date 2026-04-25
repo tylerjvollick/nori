@@ -109,79 +109,66 @@
 	> = {
 		open: {
 			bg: 'bg-gray-50 dark:bg-gray-900/50',
-			border: 'border-gray-300 dark:border-gray-700',
+			border: 'border-gray-200 dark:border-gray-800',
 			text: 'text-gray-500',
 			icon: Circle,
 		},
 		active: {
 			bg: 'bg-blue-50 dark:bg-blue-950/50',
-			border: 'border-blue-400 dark:border-blue-600',
+			border: 'border-blue-200 dark:border-blue-900',
 			text: 'text-blue-500',
 			icon: CircleDot,
 		},
 		paused: {
 			bg: 'bg-yellow-50 dark:bg-yellow-950/50',
-			border: 'border-yellow-400 dark:border-yellow-600',
+			border: 'border-yellow-200 dark:border-yellow-900',
 			text: 'text-yellow-500',
 			icon: CirclePause,
 		},
 		done: {
 			bg: 'bg-green-50 dark:bg-green-950/50',
-			border: 'border-green-400 dark:border-green-600',
+			border: 'border-green-200 dark:border-green-900',
 			text: 'text-green-500',
 			icon: CircleCheck,
 		},
 		skipped: {
 			bg: 'bg-gray-50 dark:bg-gray-900/50',
-			border: 'border-gray-300 dark:border-gray-600',
+			border: 'border-gray-200 dark:border-gray-800',
 			text: 'text-gray-400 line-through',
 			icon: CircleMinus,
 		},
 		cancelled: {
 			bg: 'bg-red-50 dark:bg-red-950/50',
-			border: 'border-red-400 dark:border-red-600',
+			border: 'border-red-200 dark:border-red-900',
 			text: 'text-red-500',
 			icon: CircleX,
 		},
 	};
 
-	// Priority → badge color
-	const PRIORITY_COLORS: Record<number, string> = {
-		0: 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300',
-		1: 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300',
-		2: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
-		3: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
-		4: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',
-	};
-
 	// Blocked tasks get red styling to make blockers immediately visible
 	const BLOCKED_CONFIG = {
 		bg: 'bg-red-50 dark:bg-red-950/50',
-		border: 'border-red-400 dark:border-red-600',
+		border: 'border-red-200 dark:border-red-900',
 		text: 'text-red-500',
 		icon: Ban,
 	};
 
-	// Priority → node styling for recipe mode (no status, color by priority)
-	const PRIORITY_NODE_CONFIG: Record<number, { bg: string; border: string }> = {
-		0: { bg: 'bg-red-50 dark:bg-red-950/50', border: 'border-red-400 dark:border-red-600' },
-		1: { bg: 'bg-orange-50 dark:bg-orange-950/50', border: 'border-orange-400 dark:border-orange-600' },
-		2: { bg: 'bg-blue-50 dark:bg-blue-950/50', border: 'border-blue-400 dark:border-blue-600' },
-		3: { bg: 'bg-gray-50 dark:bg-gray-900/50', border: 'border-gray-300 dark:border-gray-700' },
-		4: { bg: 'bg-gray-50 dark:bg-gray-900/50', border: 'border-gray-300 dark:border-gray-700' },
+	// Recipe mode: all nodes use the same neutral styling (no priority coloring)
+	const RECIPE_NODE_CONFIG = {
+		bg: 'bg-background',
+		border: 'border-border/50',
 	};
 
 	let isRecipe = $derived(data.mode === 'recipe');
 
 	let config = $derived(
 		isRecipe
-			? { ...(PRIORITY_NODE_CONFIG[data.priority] ?? PRIORITY_NODE_CONFIG[2]), text: 'text-muted-foreground', icon: Circle }
+			? { ...RECIPE_NODE_CONFIG, text: 'text-muted-foreground', icon: Circle }
 			: data.isBlocked && data.status === 'open'
 				? BLOCKED_CONFIG
 				: (STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open),
 	);
 	let StatusIcon = $derived(config.icon);
-	let isJob = $derived(data.type === 'job');
 
 	function formatEstimate(seconds: number): string {
 		if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
@@ -196,12 +183,12 @@
 	<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
 	<div
-		class="rounded-lg border-2 px-3 py-2 transition-shadow {config.bg} {selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : config.border + ' border-opacity-40 dark:border-opacity-40 shadow-sm'} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[140px]' : 'min-w-[120px]'}"
+		class="rounded-lg border-2 px-3 py-2 w-[180px] h-[72px] flex flex-col transition-shadow {config.bg} {selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : config.border + ' shadow-sm'} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''}"
 	>
-		<!-- Header: status icon + title -->
-		<div class="flex items-center gap-1.5">
+		<!-- Title area: 2-line clamp -->
+		<div class="flex items-start gap-1.5 flex-1 min-h-0">
 			{#if !isRecipe}
-				<StatusIcon class="size-3.5 shrink-0 {config.text}" data-testid="status-icon" />
+				<StatusIcon class="size-3.5 shrink-0 mt-0.5 {config.text}" data-testid="status-icon" />
 			{/if}
 			{#if data.editing}
 				<input
@@ -209,12 +196,12 @@
 					bind:value={editTitle}
 					onkeydown={handleInputKeydown}
 					onblur={commitTitle}
-					class="w-full min-w-0 bg-transparent text-xs font-medium text-foreground outline-none border-b border-primary placeholder:text-muted-foreground"
+					class="w-full min-w-0 bg-transparent text-xs font-normal text-foreground outline-none border-b border-primary placeholder:text-muted-foreground"
 					placeholder="Task title..."
 				/>
 			{:else}
 				<span
-					class="truncate text-xs font-medium text-foreground {!isRecipe && data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
+					class="text-xs font-normal text-foreground leading-tight line-clamp-2 {!isRecipe && data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
 					title={data.title}
 				>
 					{data.title}
@@ -222,26 +209,18 @@
 			{/if}
 		</div>
 
-		<!-- Footer: estimated time (recipe) or badges (task/job) -->
-		{#if !data.editing}
-			{#if isRecipe && data.estimatedTimeSeconds}
-				<div class="mt-1">
-					<span class="text-[10px] text-muted-foreground">{formatEstimate(data.estimatedTimeSeconds)}</span>
-				</div>
-			{:else if !isRecipe && (data.priority <= 1 || data.stationName)}
-				<div class="mt-1 flex items-center gap-1.5">
-					{#if data.priority <= 1}
-						<span class="rounded px-1 py-0.5 text-[9px] font-medium leading-none {PRIORITY_COLORS[data.priority] ?? ''}">
-							P{data.priority}
-						</span>
-					{/if}
-					{#if data.stationName}
-						<span class="rounded bg-secondary px-1 py-0.5 text-[9px] text-secondary-foreground leading-none">
-							{data.stationName}
-						</span>
-					{/if}
-				</div>
-			{/if}
+		<!-- Footer: station (left) + estimated time (right) -->
+		{#if !data.editing && (data.stationName || data.estimatedTimeSeconds)}
+			<div class="flex items-center justify-between mt-auto pt-0.5">
+				<span class="text-[9px] text-muted-foreground truncate max-w-[60%]">
+					{data.stationName ?? ''}
+				</span>
+				{#if data.estimatedTimeSeconds}
+					<span class="text-[9px] text-muted-foreground shrink-0">
+						{formatEstimate(data.estimatedTimeSeconds)}
+					</span>
+				{/if}
+			</div>
 		{/if}
 	</div>
 

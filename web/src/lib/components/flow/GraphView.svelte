@@ -49,7 +49,7 @@
 	const POLL_INTERVAL_MS = 30_000;
 	const TASK_LIMIT = 500;
 	const NODE_WIDTH = 180;
-	const NODE_HEIGHT = 56;
+	const NODE_HEIGHT = 72;
 
 	// ---- Custom node types ----
 	const nodeTypes: NodeTypes = {
@@ -112,9 +112,8 @@
 		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 20, marginx: 20, marginy: 20, align: undefined });
 
 		for (const node of inputNodes) {
-			const isJob = (node.data as { type?: string }).type === 'job';
 			g.setNode(node.id, {
-				width: isJob ? NODE_WIDTH + 20 : NODE_WIDTH,
+				width: NODE_WIDTH,
 				height: NODE_HEIGHT,
 			});
 		}
@@ -902,10 +901,10 @@
 	function navigateVim(dir: 'upstream' | 'downstream' | 'prev-sibling' | 'next-sibling'): void {
 		if (nodes.length === 0) return;
 
-		// No selection → select the first visible node.
+		// No selection → select the topmost node (TB layout: sort by Y first).
 		if (!selectedNodeId) {
 			const sorted = [...nodes].sort(
-				(a, b) => a.position.x - b.position.x || a.position.y - b.position.y,
+				(a, b) => a.position.y - b.position.y || a.position.x - b.position.x,
 			);
 			selectNode(sorted[0].id);
 			return;
@@ -1243,3 +1242,10 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	/* Slow down the animated edge dash movement (xyflow default is 0.5s) */
+	:global(.svelte-flow .svelte-flow__edge.animated path) {
+		animation-duration: 2s !important;
+	}
+</style>
