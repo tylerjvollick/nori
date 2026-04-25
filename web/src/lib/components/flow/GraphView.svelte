@@ -1080,11 +1080,8 @@
 
 		switch (e.key) {
 			case 'Enter': {
-				if (selectedNodeId) {
-					e.preventDefault();
-					// Open / focus the detail panel for the selected node.
-					onselect?.(selectedNodeId);
-				}
+				// No-op: hjkl navigation and clicking already open the detail panel.
+				e.preventDefault();
 				break;
 			}
 			case 'Escape': {
