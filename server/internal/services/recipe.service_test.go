@@ -4405,3 +4405,335 @@ func TestSaveAsRecipe_WithDescription(t *testing.T) {
 		t.Errorf("root task Description = %v, want %q", rootTask.Description, desc)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Time Formula Evaluation During Roll
+// ---------------------------------------------------------------------------
+
+// setupPublishedRecipeWithFormulas creates a recipe with time formulas on its steps.
+func setupPublishedRecipeWithFormulas(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Time Formula Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := *version.RootTaskID
+
+	// Step "Cut" — variable formula, no explicit batch size (default 1).
+	cutFormula := "5m * {{batch_size}}"
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Cut", AddStepOptions{
+		EstimatedTimeFormula: &cutFormula,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep cut: %v", err)
+	}
+
+	// Step "Finish" — flat time formula.
+	finishFormula := "=30m"
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Finish", AddStepOptions{
+		EstimatedTimeFormula: &finishFormula,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep finish: %v", err)
+	}
+
+	// Step "No Formula" — nil formula.
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Pack", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep pack: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipe.ID
+}
+
+func TestRollRecipe_VariableFormula_SimpleClone(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithFormulas(t)
+
+	// Roll with orderQty=1 (simple clone path).
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	for _, child := range children {
+		switch child.Title {
+		case "Cut":
+			// "5m * {{batch_size}}" with Quantity=1 → 300 seconds.
+			if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 300 {
+				t.Errorf("Cut: EstimatedTimeFromRecipeSecs = %v, want 300", child.EstimatedTimeFromRecipeSecs)
+			}
+			if child.EstimatedTimeSecs != nil {
+				t.Errorf("Cut: EstimatedTimeSecs should be nil, got %v", *child.EstimatedTimeSecs)
+			}
+		case "Finish":
+			// "=30m" → 1800 regardless of batch.
+			if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 1800 {
+				t.Errorf("Finish: EstimatedTimeFromRecipeSecs = %v, want 1800", child.EstimatedTimeFromRecipeSecs)
+			}
+		case "Pack":
+			// nil formula → nil estimated.
+			if child.EstimatedTimeFromRecipeSecs != nil {
+				t.Errorf("Pack: EstimatedTimeFromRecipeSecs should be nil, got %v", *child.EstimatedTimeFromRecipeSecs)
+			}
+		}
+	}
+}
+
+func setupPublishedRecipeWithFormulaAndBatch(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTaskRepo, *mockTaskDepRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Batch Formula Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	rootTaskID := *version.RootTaskID
+
+	// Step with batch_size=2, formula "30m + (5m * {{batch_size}})"
+	batchSize := 2
+	setupPlusVar := "30m + (5m * {{batch_size}})"
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Assembly", AddStepOptions{
+		BatchSize:            &batchSize,
+		EstimatedTimeFormula: &setupPlusVar,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep assembly: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, recipeRepo, taskRepo, depRepo, recipe.ID
+}
+
+func TestRollRecipe_FormulaWithBatchExpansion(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithFormulaAndBatch(t)
+
+	// orderQty=6, batchSize=2 → 3 tickets, each with Quantity=2.
+	// Formula: "30m + (5m * {{batch_size}})" with batchSize=2 → 1800 + 600 = 2400.
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	if len(children) != 3 {
+		t.Fatalf("expected 3 children (6/2), got %d", len(children))
+	}
+
+	for _, child := range children {
+		if child.EstimatedTimeFromRecipeSecs == nil {
+			t.Errorf("child %q: EstimatedTimeFromRecipeSecs should not be nil", child.ID)
+			continue
+		}
+		if *child.EstimatedTimeFromRecipeSecs != 2400 {
+			t.Errorf("child %q: EstimatedTimeFromRecipeSecs = %d, want 2400", child.ID, *child.EstimatedTimeFromRecipeSecs)
+		}
+		if child.EstimatedTimeSecs != nil {
+			t.Errorf("child %q: EstimatedTimeSecs should be nil (user override only), got %v", child.ID, *child.EstimatedTimeSecs)
+		}
+	}
+}
+
+func TestRollRecipe_FlatFormula(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithFormulas(t)
+
+	// Roll with orderQty=6 — "=30m" should be 1800 regardless of batch.
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	for _, child := range children {
+		if child.Title == "Finish" {
+			if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 1800 {
+				t.Errorf("Finish: EstimatedTimeFromRecipeSecs = %v, want 1800", child.EstimatedTimeFromRecipeSecs)
+			}
+		}
+	}
+}
+
+func TestRollRecipe_NilFormula_NilEstimate(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithFormulas(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	for _, child := range children {
+		if child.Title == "Pack" {
+			if child.EstimatedTimeFromRecipeSecs != nil {
+				t.Errorf("Pack: EstimatedTimeFromRecipeSecs should be nil, got %v", *child.EstimatedTimeFromRecipeSecs)
+			}
+		}
+	}
+}
+
+// AC#8: roll recipe with formula '5m * {{batch_size}}', orderQty=6, nil batchSize → 1800.
+func TestRollRecipe_Formula_5mTimesBatchSize_OrderQty6(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "AC8 Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	f := "5m * {{batch_size}}"
+	_, err = svc.AddRecipeStep(recipe.ID, *version.RootTaskID, "Step", AddStepOptions{
+		EstimatedTimeFormula: &f,
+		// nil BatchSize — defaults to 1, so orderQty=6 → 6 tickets each with batchSize=1.
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipe.ID, spaceID, userID, RollRecipeOptions{OrderQty: &orderQty})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	// nil batchSize defaults to 1 for ticket count (6 tickets), but {{batch_size}}
+	// resolves to orderQty (6) per AC#5. Each task gets "5m * 6" = 1800.
+	if len(children) != 6 {
+		t.Fatalf("expected 6 children (6/1), got %d", len(children))
+	}
+	for _, child := range children {
+		if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 1800 {
+			t.Errorf("child %q: EstimatedTimeFromRecipeSecs = %v, want 1800", child.ID, child.EstimatedTimeFromRecipeSecs)
+		}
+	}
+}
+
+// AC#10: roll recipe with formula '=30m' → 1800 regardless of batch.
+func TestRollRecipe_Formula_Flat30m(t *testing.T) {
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "AC10 Recipe", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+
+	f := "=30m"
+	bs := 3
+	_, err = svc.AddRecipeStep(recipe.ID, *version.RootTaskID, "Step", AddStepOptions{
+		EstimatedTimeFormula: &f,
+		BatchSize:            &bs,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipe.ID, spaceID, userID, RollRecipeOptions{OrderQty: &orderQty})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	for _, child := range children {
+		if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 1800 {
+			t.Errorf("child %q: EstimatedTimeFromRecipeSecs = %v, want 1800", child.ID, child.EstimatedTimeFromRecipeSecs)
+		}
+	}
+}
+
+func TestRollRecipe_EstimatedTimeSecsNotSetDuringRoll(t *testing.T) {
+	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithFormulas(t)
+
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, err := taskRepo.GetChildren(job.ID)
+	if err != nil {
+		t.Fatalf("GetChildren: %v", err)
+	}
+
+	for _, child := range children {
+		if child.EstimatedTimeSecs != nil {
+			t.Errorf("child %q: EstimatedTimeSecs should be nil during roll (user override only), got %v", child.ID, *child.EstimatedTimeSecs)
+		}
+	}
+}

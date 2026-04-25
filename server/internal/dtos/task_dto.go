@@ -19,12 +19,13 @@ type CreateTaskRequest struct {
 
 // UpdateTaskRequest represents the request body for updating a task.
 type UpdateTaskRequest struct {
-	Title        *string            `json:"title,omitempty"`
-	Description  *string            `json:"description,omitempty"`
-	StationID    *uuid.UUID         `json:"stationId,omitempty"`
-	Priority     *int               `json:"priority,omitempty"`
-	Status       *models.TaskStatus `json:"status,omitempty"`
-	AssignedToID *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
+	Title                *string            `json:"title,omitempty"`
+	Description          *string            `json:"description,omitempty"`
+	StationID            *uuid.UUID         `json:"stationId,omitempty"`
+	Priority             *int               `json:"priority,omitempty"`
+	Status               *models.TaskStatus `json:"status,omitempty"`
+	AssignedToID         *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
+	EstimatedTimeFormula *string            `json:"estimatedTimeFormula,omitempty"`
 }
 
 // AddChildTaskRequest represents the request body for adding a child task.
@@ -76,9 +77,11 @@ type TaskResponse struct {
 	StartedAt       *time.Time        `json:"startedAt,omitempty"`
 	PausedAt        *time.Time        `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time        `json:"completedAt,omitempty"`
-	ActualTimeSecs     int               `json:"actualTimeSeconds"`
-	EstimatedTimeSecs  *int              `json:"estimatedTimeSeconds,omitempty"`
-	DeviationNotes     *string           `json:"deviationNotes,omitempty"`
+	ActualTimeSecs              int     `json:"actualTimeSeconds"`
+	EstimatedTimeSecs           *int    `json:"estimatedTimeSeconds,omitempty"`
+	EstimatedTimeFormula        *string `json:"estimatedTimeFormula,omitempty"`
+	EstimatedTimeFromRecipeSecs *int    `json:"estimatedTimeFromRecipeSeconds,omitempty"`
+	DeviationNotes              *string `json:"deviationNotes,omitempty"`
 	Metadata        models.JSONB      `json:"metadata,omitempty"`
 	CreatedAt       string            `json:"createdAt"`
 	UpdatedAt       string            `json:"updatedAt"`
@@ -155,9 +158,11 @@ func TaskResponseFromModel(t *models.Task) TaskResponse {
 		StartedAt:       t.StartedAt,
 		PausedAt:        t.PausedAt,
 		CompletedAt:     t.CompletedAt,
-		ActualTimeSecs:     t.ActualTimeSecs,
-		EstimatedTimeSecs:  t.EstimatedTimeSecs,
-		DeviationNotes:     t.DeviationNotes,
+		ActualTimeSecs:              t.ActualTimeSecs,
+		EstimatedTimeSecs:           t.EstimatedTimeSecs,
+		EstimatedTimeFormula:        t.EstimatedTimeFormula,
+		EstimatedTimeFromRecipeSecs: t.EstimatedTimeFromRecipeSecs,
+		DeviationNotes:              t.DeviationNotes,
 		Metadata:        t.Metadata,
 		CreatedAt:       t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:       t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),

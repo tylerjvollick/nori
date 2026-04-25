@@ -147,6 +147,9 @@ func (s *TaskService) UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*model
 	if dto.Status != nil {
 		task.Status = *dto.Status
 	}
+	if dto.EstimatedTimeFormula != nil {
+		task.EstimatedTimeFormula = dto.EstimatedTimeFormula
+	}
 	if dto.AssignedToID != nil {
 		if *dto.AssignedToID == "" {
 			task.AssignedToID = nil // unassign

@@ -520,6 +520,22 @@ func (s *RecipeService) DeepCloneTaskTree(
 				est := src.ActualTimeSecs
 				clone.EstimatedTimeSecs = &est
 			}
+			// Evaluate time formula when rolling into a job. For the simple
+			// clone path (orderQty ≤ 1), batch_size defaults to 1. If the task
+			// has an explicit BatchSize, use that; otherwise use 1.
+			if opts.ResetStatus && clone.EstimatedTimeFormula != nil {
+				bs := 1
+				if clone.BatchSize != nil {
+					bs = *clone.BatchSize
+				}
+				estimated, evalErr := formula.EvalTimeFormula(clone.EstimatedTimeFormula, bs)
+				if evalErr != nil {
+					return fmt.Errorf("task %q: %w", clone.Title, evalErr)
+				}
+				clone.EstimatedTimeFromRecipeSecs = estimated
+				// Clear the formula on the job task — it was only needed for evaluation.
+				clone.EstimatedTimeFormula = nil
+			}
 
 			// Clear GORM relation pointers to avoid accidental nested creates.
 			clone.Space = nil
@@ -586,19 +602,21 @@ func (s *RecipeService) DeepCloneTaskTree(
 
 // AddStepOptions configures optional fields when adding a recipe step.
 type AddStepOptions struct {
-	Description       *string
-	StationID         *uuid.UUID
-	EstimatedTimeSecs *int
-	BatchSize         *int
+	Description          *string
+	StationID            *uuid.UUID
+	EstimatedTimeSecs    *int
+	EstimatedTimeFormula *string
+	BatchSize            *int
 }
 
 // UpdateStepOptions configures which fields to update on a recipe step.
 type UpdateStepOptions struct {
-	Title             *string
-	Description       *string
-	StationID         *uuid.UUID
-	EstimatedTimeSecs *int
-	BatchSize         *int
+	Title                *string
+	Description          *string
+	StationID            *uuid.UUID
+	EstimatedTimeSecs    *int
+	EstimatedTimeFormula *string
+	BatchSize            *int
 }
 
 // CreateRecipeWithTaskTree creates a new recipe with a root task (Type='recipe')
@@ -738,9 +756,10 @@ func (s *RecipeService) AddRecipeStep(
 		Title:             title,
 		Description:       opts.Description,
 		StationID:         opts.StationID,
-		EstimatedTimeSecs: opts.EstimatedTimeSecs,
-		BatchSize:         opts.BatchSize,
-		DisplayOrder:      nextSeq,
+		EstimatedTimeSecs:    opts.EstimatedTimeSecs,
+		EstimatedTimeFormula: opts.EstimatedTimeFormula,
+		BatchSize:            opts.BatchSize,
+		DisplayOrder:         nextSeq,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
@@ -863,6 +882,9 @@ func (s *RecipeService) UpdateRecipeStep(recipeID uuid.UUID, taskID string, opts
 	}
 	if opts.EstimatedTimeSecs != nil {
 		task.EstimatedTimeSecs = opts.EstimatedTimeSecs
+	}
+	if opts.EstimatedTimeFormula != nil {
+		task.EstimatedTimeFormula = opts.EstimatedTimeFormula
 	}
 	if opts.BatchSize != nil {
 		task.BatchSize = opts.BatchSize
@@ -1619,25 +1641,37 @@ func expandTaskTree(
 				title = strings.ReplaceAll(title, "{{batch_count}}", strconv.Itoa(ticketCount))
 			}
 
+			// Evaluate time formula. For nil batchSize (inherit), {{batch_size}}
+			// resolves to the job's orderQty. For explicit batchSize, it resolves
+			// to the task's batch size.
+			formulaBatchSize := orderQty
+			if src.BatchSize != nil {
+				formulaBatchSize = batchSize
+			}
+			estimatedFromRecipe, err := formula.EvalTimeFormula(src.EstimatedTimeFormula, formulaBatchSize)
+			if err != nil {
+				return fmt.Errorf("task %q: %w", src.Title, err)
+			}
+
 			task := &models.Task{
-				ID:                childID,
-				SpaceID:           spaceID,
-				ParentID:          &parentID,
-				CreatedByID:       createdByID,
-				RecipeID:          recipeID,
-				RecipeVersionID:   recipeVersionID,
-				Type:              models.TaskTypeTask,
-				Status:            models.TaskStatusOpen,
-				Title:             title,
-				Description:       src.Description,
-				Quantity:          batchSize,
-				Priority:          src.Priority,
-				StationID:         src.StationID,
-				DisplayOrder:      childSeq - 1,
-				EstimatedTimeSecs: src.EstimatedTimeSecs,
-				BatchSize:         src.BatchSize,
-				CreatedAt:         now,
-				UpdatedAt:         now,
+				ID:                          childID,
+				SpaceID:                     spaceID,
+				ParentID:                    &parentID,
+				CreatedByID:                 createdByID,
+				RecipeID:                    recipeID,
+				RecipeVersionID:             recipeVersionID,
+				Type:                        models.TaskTypeTask,
+				Status:                      models.TaskStatusOpen,
+				Title:                       title,
+				Description:                 src.Description,
+				Quantity:                    batchSize,
+				Priority:                    src.Priority,
+				StationID:                   src.StationID,
+				DisplayOrder:                childSeq - 1,
+				EstimatedTimeFromRecipeSecs: estimatedFromRecipe,
+				BatchSize:                   src.BatchSize,
+				CreatedAt:                   now,
+				UpdatedAt:                   now,
 			}
 
 			if err := taskRepo.Create(task); err != nil {
