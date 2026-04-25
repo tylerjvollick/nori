@@ -100,7 +100,7 @@
 
 	// ---- Dagre layout ----
 
-	const currentDirection: GraphDirection = 'TB';
+	const currentDirection: GraphDirection = 'LR';
 
 	function getLayoutedElements(
 		inputNodes: Node[],
@@ -901,19 +901,23 @@
 	function navigateVim(dir: 'upstream' | 'downstream' | 'prev-sibling' | 'next-sibling'): void {
 		if (nodes.length === 0) return;
 
-		// No selection → select the topmost node (TB layout: sort by Y first).
+		// No selection → select the first node based on layout direction.
+		// LR: leftmost (X first); TB: topmost (Y first).
 		if (!selectedNodeId) {
-			const sorted = [...nodes].sort(
-				(a, b) => a.position.y - b.position.y || a.position.x - b.position.x,
-			);
+			const sorted =
+				currentDirection === 'LR' || currentDirection === 'RL'
+					? [...nodes].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y)
+					: [...nodes].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
 			selectNode(sorted[0].id);
 			return;
 		}
 
 		// Helper: sort sibling/fork candidates by visual position.
-		// In LR/RL layouts siblings are stacked vertically; in TB/BT they're horizontal.
+		// LR/RL: siblings stacked vertically → sort by Y. TB/BT: horizontal → sort by X.
 		function sortByPosition(ns: Node[]): Node[] {
-			return [...ns].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
+			return currentDirection === 'LR' || currentDirection === 'RL'
+				? [...ns].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+				: [...ns].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
 		}
 
 		switch (dir) {
@@ -937,10 +941,8 @@
 					.map((e) => nodes.find((n) => n.id === e.target))
 					.filter(Boolean) as Node[];
 				if (candidates.length === 0) return;
-				// "prefer left branch at forks" = sort by X asc (leftmost first)
-				const sorted = [...candidates].sort(
-					(a, b) => a.position.x - b.position.x || a.position.y - b.position.y,
-				);
+				// Prefer first branch at forks: LR → topmost (Y), TB → leftmost (X)
+				const sorted = sortByPosition(candidates);
 				selectNode(sorted[0].id);
 				break;
 			}
@@ -1016,23 +1018,26 @@
 		}
 
 		// Vim-style navigation — skip if any modifier is held (avoid clashing with Alt+L etc.)
+		// LR: h=upstream, l=downstream, j=next-sibling (down), k=prev-sibling (up)
+		// TB: h=prev-sibling, j=downstream, k=upstream, l=next-sibling
 		if (!e.altKey && !e.metaKey && !e.ctrlKey) {
+			const isHorizontal = currentDirection === 'LR' || currentDirection === 'RL';
 			switch (e.key) {
 				case 'h':
 					e.preventDefault();
-					navigateVim('prev-sibling');
+					navigateVim(isHorizontal ? 'upstream' : 'prev-sibling');
 					return;
 				case 'j':
 					e.preventDefault();
-					navigateVim('downstream');
+					navigateVim(isHorizontal ? 'next-sibling' : 'downstream');
 					return;
 				case 'k':
 					e.preventDefault();
-					navigateVim('upstream');
+					navigateVim(isHorizontal ? 'prev-sibling' : 'upstream');
 					return;
 				case 'l':
 					e.preventDefault();
-					navigateVim('next-sibling');
+					navigateVim(isHorizontal ? 'downstream' : 'next-sibling');
 					return;
 			}
 		}

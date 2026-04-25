@@ -196,12 +196,12 @@
 					bind:value={editTitle}
 					onkeydown={handleInputKeydown}
 					onblur={commitTitle}
-					class="w-full min-w-0 bg-transparent text-xs font-normal text-foreground outline-none border-b border-primary placeholder:text-muted-foreground"
+					class="w-full min-w-0 bg-transparent text-xs font-light text-foreground outline-none border-b border-primary placeholder:text-muted-foreground"
 					placeholder="Task title..."
 				/>
 			{:else}
 				<span
-					class="text-xs font-normal text-foreground leading-tight line-clamp-2 {!isRecipe && data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
+					class="text-xs font-light text-foreground leading-tight line-clamp-2 {!isRecipe && data.status === 'skipped' ? 'line-through text-muted-foreground' : ''}"
 					title={data.title}
 				>
 					{data.title}
