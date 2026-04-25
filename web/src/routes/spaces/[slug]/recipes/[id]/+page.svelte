@@ -480,7 +480,7 @@
 
 					<!-- Detail panel (desktop sidebar) -->
 					{#if graphPanelOpen}
-						<div class="hidden lg:flex w-80 xl:w-96 flex-col border-l border-border overflow-y-auto shrink-0">
+						<div class="hidden lg:flex w-1/2 flex-col border-l border-border overflow-y-auto shrink-0">
 							<TaskDetailPanel
 								task={graphPanelTask ?? tree ?? undefined}
 								{spaceId}
