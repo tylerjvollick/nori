@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 )
+
+// ErrMaxDepthExceeded is returned when a task operation would create nesting
+// deeper than 2 levels (root → child). Tasks may not be nested under a task
+// that already has a parent.
+var ErrMaxDepthExceeded = errors.New("tasks cannot be nested more than 2 levels deep (root → child)")
 
 // TaskRepositoryInterface defines the methods needed from a task repository.
 type TaskRepositoryInterface interface {
@@ -52,6 +58,18 @@ func NewTaskService(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepReposit
 func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *dtos.CreateTaskRequest) (*models.Task, error) {
 	if dto.Title == "" {
 		return nil, fmt.Errorf("title is required")
+	}
+
+	// Enforce max nesting depth of 2 levels. If ParentID is set, the parent
+	// must be a root task (i.e., its own ParentID must be nil).
+	if dto.ParentID != nil {
+		parent, err := s.taskRepo.GetByID(*dto.ParentID)
+		if err != nil {
+			return nil, fmt.Errorf("parent task %q not found: %w", *dto.ParentID, err)
+		}
+		if parent.ParentID != nil {
+			return nil, ErrMaxDepthExceeded
+		}
 	}
 
 	task := &models.Task{
@@ -394,6 +412,12 @@ func (s *TaskService) AddChildTask(parentID string, dto *dtos.AddChildTaskReques
 	parent, err := s.taskRepo.GetByID(parentID)
 	if err != nil {
 		return nil, fmt.Errorf("parent task %q not found: %w", parentID, err)
+	}
+
+	// Enforce max nesting depth of 2 levels. If the parent already has a
+	// parent, adding a child would create depth > 2.
+	if parent.ParentID != nil {
+		return nil, ErrMaxDepthExceeded
 	}
 
 	// Get existing children to determine the next sequence number.

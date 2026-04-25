@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -171,6 +172,11 @@ func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
 
 	task, err := h.taskService.CreateTask(spaceID, authDTO.User.ID, &dto)
 	if err != nil {
+		if errors.Is(err, services.ErrMaxDepthExceeded) {
+			return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -561,6 +567,11 @@ func (h *TaskHandler) AddChildTask(c *fiber.Ctx) error {
 
 	task, err := h.taskService.AddChildTask(id, &dto, authDTO.User.ID)
 	if err != nil {
+		if errors.Is(err, services.ErrMaxDepthExceeded) {
+			return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})

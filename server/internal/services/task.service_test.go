@@ -1670,21 +1670,19 @@ func TestAddChildTask_Success_SequentialIDs(t *testing.T) {
 	assert.Equal(t, "job-abc.4", result.ID)
 }
 
-func TestAddChildTask_Success_NestedHierarchy(t *testing.T) {
-	// Adding a child to a child task produces deeper hierarchical IDs.
+func TestAddChildTask_RejectsNestedHierarchy(t *testing.T) {
+	// Adding a child to a child task (depth > 2) must be rejected.
 	parentID := "job-abc.2"
+	rootID := "job-abc"
 	userID := uuid.New()
 	spaceID := uuid.New()
 
 	parentTask := &models.Task{
-		ID:      parentID,
-		SpaceID: spaceID,
-		Status:  models.TaskStatusActive,
-		Title:   "Assemble frame",
-	}
-
-	existingChildren := []models.Task{
-		{ID: "job-abc.2.1", ParentID: &parentID, Title: "Sub-step 1"},
+		ID:       parentID,
+		SpaceID:  spaceID,
+		ParentID: &rootID, // parent is itself a child
+		Status:   models.TaskStatusActive,
+		Title:    "Assemble frame",
 	}
 
 	mockRepo := &MockTaskRepository{
@@ -1694,15 +1692,6 @@ func TestAddChildTask_Success_NestedHierarchy(t *testing.T) {
 			}
 			return nil, errors.New("task not found")
 		},
-		getChildrenFunc: func(pid string) ([]models.Task, error) {
-			if pid == parentID {
-				return existingChildren, nil
-			}
-			return nil, nil
-		},
-		createFunc: func(task *models.Task) error {
-			return nil
-		},
 	}
 
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
@@ -1711,9 +1700,9 @@ func TestAddChildTask_Success_NestedHierarchy(t *testing.T) {
 	result, err := svc.AddChildTask(parentID, &dtos.AddChildTaskRequest{Title: "Sub-step 2"}, userID)
 
 	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, "job-abc.2.2", result.ID)
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrMaxDepthExceeded)
 }
 
 func TestAddChildTask_Success_NilDescription(t *testing.T) {
@@ -1850,4 +1839,160 @@ func TestAddChildTask_CreateFails(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "failed to create child task")
+}
+
+// --- Max Depth (2 levels) Tests ---
+
+func TestAddChildTask_ChildOfRootTask_Succeeds(t *testing.T) {
+	// Adding a child to a root task (no parent) should succeed.
+	rootID := "job-abc"
+	userID := uuid.New()
+	spaceID := uuid.New()
+
+	rootTask := &models.Task{
+		ID:       rootID,
+		SpaceID:  spaceID,
+		ParentID: nil, // root task
+		Status:   models.TaskStatusActive,
+		Title:    "Build dining table",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == rootID {
+				return rootTask, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		getChildrenFunc: func(pid string) ([]models.Task, error) {
+			return []models.Task{}, nil
+		},
+		createFunc: func(task *models.Task) error {
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.AddChildTask(rootID, &dtos.AddChildTaskRequest{Title: "Cut mortises"}, userID)
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "job-abc.1", result.ID)
+	assert.Equal(t, &rootID, result.ParentID)
+}
+
+func TestAddChildTask_ChildOfChildTask_Fails(t *testing.T) {
+	// Adding a child to a child task (parent has a parent) must fail.
+	childID := "job-abc.1"
+	rootID := "job-abc"
+	userID := uuid.New()
+	spaceID := uuid.New()
+
+	childTask := &models.Task{
+		ID:       childID,
+		SpaceID:  spaceID,
+		ParentID: &rootID, // already a child
+		Status:   models.TaskStatusActive,
+		Title:    "Cut mortises",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == childID {
+				return childTask, nil
+			}
+			return nil, errors.New("task not found")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.AddChildTask(childID, &dtos.AddChildTaskRequest{Title: "Sub-sub-step"}, userID)
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrMaxDepthExceeded)
+}
+
+func TestCreateTask_WithParentPointingToChild_Fails(t *testing.T) {
+	// CreateTask with ParentID pointing to a task that is itself a child must fail.
+	childID := "job-abc.1"
+	rootID := "job-abc"
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	childTask := &models.Task{
+		ID:       childID,
+		SpaceID:  spaceID,
+		ParentID: &rootID, // already a child
+		Status:   models.TaskStatusOpen,
+		Title:    "Cut mortises",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == childID {
+				return childTask, nil
+			}
+			return nil, errors.New("task not found")
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.CreateTask(spaceID, userID, &dtos.CreateTaskRequest{
+		Title:    "Grandchild task",
+		ParentID: &childID,
+	})
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, ErrMaxDepthExceeded)
+}
+
+func TestCreateTask_WithParentPointingToRoot_Succeeds(t *testing.T) {
+	// CreateTask with ParentID pointing to a root task should succeed.
+	rootID := "job-abc"
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	rootTask := &models.Task{
+		ID:       rootID,
+		SpaceID:  spaceID,
+		ParentID: nil, // root task
+		Status:   models.TaskStatusActive,
+		Title:    "Build dining table",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			if id == rootID {
+				return rootTask, nil
+			}
+			return nil, errors.New("task not found")
+		},
+		createFunc: func(task *models.Task) error {
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	// Act
+	result, err := svc.CreateTask(spaceID, userID, &dtos.CreateTaskRequest{
+		Title:    "Child task",
+		ParentID: &rootID,
+	})
+
+	// Assert
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, &rootID, result.ParentID)
 }
