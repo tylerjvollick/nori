@@ -250,14 +250,6 @@
 
 	function toggleGraphFullscreen(): void {
 		graphFullscreen = !graphFullscreen;
-		// After the layout shift, trigger resize so xyflow recalculates, then fitView
-		setTimeout(() => {
-			window.dispatchEvent(new Event('resize'));
-			const fitBtn = graphAreaEl?.querySelector<HTMLButtonElement>(
-				'.svelte-flow__controls button[title="fit view"]',
-			);
-			fitBtn?.click();
-		}, 50);
 	}
 
 	async function handlePublish() {

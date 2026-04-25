@@ -114,7 +114,7 @@
 	): { nodes: Node[]; edges: Edge[] } {
 		const g = new dagre.graphlib.Graph();
 		g.setDefaultEdgeLabel(() => ({}));
-		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 20, marginx: 20, marginy: 20, align: undefined });
+		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 50, marginx: 20, marginy: 20, align: undefined });
 
 		for (const node of inputNodes) {
 			g.setNode(node.id, {
@@ -894,7 +894,25 @@
 	let flowContainer: HTMLDivElement | undefined = $state(undefined);
 
 	// Flow actions handle — populated by FlowActions child inside <SvelteFlow>
-	let flowHandle: { setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void } | undefined = $state(undefined);
+	let flowHandle: {
+		setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void;
+		fitView: (opts?: { padding?: number; duration?: number }) => void;
+	} | undefined = $state(undefined);
+
+	// When fullscreen changes, wait for the container to resize then fit the graph
+	$effect(() => {
+		// Track isFullscreen to trigger on change
+		const _fs = isFullscreen;
+		if (flowHandle) {
+			// Wait for DOM to settle with new container dimensions
+			setTimeout(() => {
+				window.dispatchEvent(new Event('resize'));
+				setTimeout(() => {
+					flowHandle?.fitView({ padding: 0.1, duration: 200 });
+				}, 100);
+			}, 50);
+		}
+	});
 
 	/** Programmatically select a node, notify the detail panel, and pan to center it. */
 	function selectNode(nodeId: string): void {
@@ -906,7 +924,7 @@
 		if (node && flowHandle) {
 			const centerX = node.position.x + NODE_WIDTH / 2;
 			const centerY = node.position.y + NODE_HEIGHT / 2;
-			flowHandle.setCenter(centerX, centerY, { zoom: 0.85, duration: 200 });
+			flowHandle.setCenter(centerX, centerY, { zoom: 1, duration: 200 });
 		}
 	}
 
