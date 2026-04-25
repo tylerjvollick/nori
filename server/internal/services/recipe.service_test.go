@@ -327,7 +327,6 @@ func setupRecipeService(tomlContent string) (*RecipeService, uuid.UUID, uuid.UUI
 	recipeRepo.recipes[recipeID] = &models.Recipe{
 		ID:               recipeID,
 		SpaceID:          spaceID,
-		Name:             "Test Recipe",
 		Slug:             "test-recipe",
 		CurrentVersionID: &versionID,
 		CreatedByID:      userID,
@@ -447,7 +446,6 @@ func TestPourRecipe_NoPublishedVersion(t *testing.T) {
 	recipeRepo.recipes[recipeID] = &models.Recipe{
 		ID:               recipeID,
 		SpaceID:          spaceID,
-		Name:             "Empty Recipe",
 		Slug:             "empty-recipe",
 		CurrentVersionID: nil,
 		CreatedByID:      userID,
@@ -2417,9 +2415,6 @@ func TestCreateRecipeWithTaskTree_Basic(t *testing.T) {
 	}
 
 	// Recipe should be created.
-	if recipe.Name != "Test Recipe" {
-		t.Errorf("expected name %q, got %q", "Test Recipe", recipe.Name)
-	}
 	if recipe.Slug != "test-recipe" {
 		t.Errorf("expected slug %q, got %q", "test-recipe", recipe.Slug)
 	}
@@ -2565,7 +2560,7 @@ func TestAddRecipeStep_NoDraftVersion(t *testing.T) {
 	versionID := 1
 	recipeRepo.recipes[recipeID] = &models.Recipe{
 		ID:               recipeID,
-		Name:             "Published Recipe",
+		Slug:             "published-recipe",
 		CurrentVersionID: &versionID,
 	}
 	content := "some content"
@@ -2852,7 +2847,7 @@ func TestGetDraftVersion_NoDraft(t *testing.T) {
 	svc := NewRecipeService(nil, recipeRepo, newMockTaskRepo(), newMockTaskDepRepo())
 
 	recipeID := uuid.New()
-	recipeRepo.recipes[recipeID] = &models.Recipe{ID: recipeID, Name: "Test"}
+	recipeRepo.recipes[recipeID] = &models.Recipe{ID: recipeID, Slug: "test"}
 
 	_, err := svc.getDraftVersion(recipeID)
 	if err == nil {
@@ -3094,7 +3089,7 @@ func TestPublishVersion_ErrorNoDraftVersion(t *testing.T) {
 	recipeID := uuid.New()
 	recipeRepo.recipes[recipeID] = &models.Recipe{
 		ID:   recipeID,
-		Name: "No Draft",
+		Slug: "no-draft",
 	}
 
 	_, err := svc.PublishVersion(recipeID)
@@ -3353,17 +3348,16 @@ func TestRollRecipe_TitleOverride(t *testing.T) {
 }
 
 func TestRollRecipe_DefaultTitleFromRecipe(t *testing.T) {
-	svc, recipeRepo, _, _, recipeID := setupPublishedRecipe(t)
+	svc, _, _, _, recipeID := setupPublishedRecipe(t)
 
 	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
 	if err != nil {
 		t.Fatalf("RollRecipe: %v", err)
 	}
 
-	// Default title should come from the recipe's task tree root (which has the recipe name).
-	recipe := recipeRepo.recipes[recipeID]
-	if job.Title != recipe.Name {
-		t.Errorf("job Title = %q, want recipe name %q", job.Title, recipe.Name)
+	// Default title should come from the published task tree root.
+	if job.Title != "Publish Test" {
+		t.Errorf("job Title = %q, want %q", job.Title, "Publish Test")
 	}
 }
 
@@ -3398,7 +3392,7 @@ func TestRollRecipe_ErrorNoPublishedVersion(t *testing.T) {
 	recipeID := uuid.New()
 	recipeRepo.recipes[recipeID] = &models.Recipe{
 		ID:   recipeID,
-		Name: "Unpublished Recipe",
+		Slug: "unpublished-recipe",
 	}
 
 	_, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{})
@@ -4035,9 +4029,6 @@ func TestSaveAsRecipe_CreatesRecipe(t *testing.T) {
 		t.Fatalf("SaveAsRecipe: %v", err)
 	}
 
-	if recipe.Name != "My Template" {
-		t.Errorf("Name = %q, want %q", recipe.Name, "My Template")
-	}
 	if recipe.Slug != "my-template" {
 		t.Errorf("Slug = %q, want %q", recipe.Slug, "my-template")
 	}
@@ -4050,8 +4041,8 @@ func TestSaveAsRecipe_CreatesRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recipe not found in repo: %v", err)
 	}
-	if stored.Name != "My Template" {
-		t.Errorf("stored Name = %q, want %q", stored.Name, "My Template")
+	if stored.Slug != "my-template" {
+		t.Errorf("stored Slug = %q, want %q", stored.Slug, "my-template")
 	}
 }
 
@@ -4387,7 +4378,7 @@ func TestSaveAsRecipe_ErrorOnEmptyName(t *testing.T) {
 }
 
 func TestSaveAsRecipe_WithDescription(t *testing.T) {
-	svc, recipeRepo, _, _, jobID := setupJobFromRecipe(t)
+	svc, recipeRepo, taskRepo, _, jobID := setupJobFromRecipe(t)
 
 	desc := "A recipe from a completed job"
 	recipe, err := svc.SaveAsRecipe(jobID, uuid.New(), uuid.New(), "Described Recipe", SaveAsRecipeOptions{
@@ -4397,8 +4388,20 @@ func TestSaveAsRecipe_WithDescription(t *testing.T) {
 		t.Fatalf("SaveAsRecipe: %v", err)
 	}
 
+	// Description should be on the cloned root task, not on the recipe.
 	stored, _ := recipeRepo.GetByID(recipe.ID)
-	if stored.Description == nil || *stored.Description != desc {
-		t.Errorf("Description = %v, want %q", stored.Description, desc)
+	_ = stored // recipe no longer stores description
+
+	// Find the version to get the root task ID.
+	versions, _ := recipeRepo.ListVersions(recipe.ID)
+	if len(versions) == 0 {
+		t.Fatal("expected at least one version")
+	}
+	rootTask, err := taskRepo.GetByID(*versions[0].RootTaskID)
+	if err != nil {
+		t.Fatalf("root task not found: %v", err)
+	}
+	if rootTask.Description == nil || *rootTask.Description != desc {
+		t.Errorf("root task Description = %v, want %q", rootTask.Description, desc)
 	}
 }

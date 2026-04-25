@@ -87,6 +87,19 @@ CREATE INDEX idx_recipe_version_root_task_id ON recipe_version(root_task_id);
 | `root_task_id` | **Added** | FK to `task.id`. Points to the frozen task tree for this version. |
 | `content` | **Made nullable** | The old TOML text column. Kept for backward compatibility but no longer written to. Will be dropped in a future migration. |
 
+### Recipe Table Changes
+
+```sql
+-- Migration 000046
+ALTER TABLE recipe DROP COLUMN name;
+ALTER TABLE recipe DROP COLUMN description;
+```
+
+| Column | Change | Description |
+|--------|--------|-------------|
+| `name` | **Dropped** | Duplicated root task title. Now derived from `CurrentVersion.RootTask.Title` in the API response. Falls back to slug when no current version exists. |
+| `description` | **Dropped** | Duplicated root task description. Now derived from `CurrentVersion.RootTask.Description`. |
+
 ### Go Model Updates
 
 ```go
@@ -112,7 +125,7 @@ type RecipeVersion struct {
 Recipe authoring uses the existing Task API. The recipe service is a thin
 wrapper that:
 
-1. Creates a `Recipe` record (identity: name, slug, space, created_by)
+1. Creates a `Recipe` record (identity: slug, space, created_by)
 2. Creates a root `Task` with `Type = 'recipe'`
 3. Creates a draft `RecipeVersion` with `RootTaskID` pointing to the root task
 

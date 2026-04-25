@@ -58,8 +58,6 @@ export interface CreateRecipeRequest {
 }
 
 export interface UpdateRecipeRequest {
-	name?: string;
-	description?: string;
 	categoryId?: string;
 	isActive?: boolean;
 }

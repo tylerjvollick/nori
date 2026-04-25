@@ -316,13 +316,6 @@ func (h *RecipeHandler) UpdateRecipe(c *fiber.Ctx) error {
 		})
 	}
 
-	if dto.Name != nil {
-		recipe.Name = *dto.Name
-		recipe.Slug = slugify(*dto.Name)
-	}
-	if dto.Description != nil {
-		recipe.Description = dto.Description
-	}
 	if dto.CategoryID != nil {
 		recipe.CategoryID = dto.CategoryID
 	}

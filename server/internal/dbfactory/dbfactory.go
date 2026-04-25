@@ -151,7 +151,6 @@ func Task(tx *gorm.DB, overrides ...func(*models.Task)) models.Task {
 func Recipe(tx *gorm.DB, overrides ...func(*models.Recipe)) models.Recipe {
 	m := models.Recipe{
 		ID:       uuid.New(),
-		Name:     "Test Recipe",
 		Slug:     fmt.Sprintf("test-recipe-%s", uuid.New().String()[:8]),
 		IsActive: true,
 	}

@@ -21,9 +21,7 @@ const (
 type Recipe struct {
 	ID               uuid.UUID      `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	SpaceID          uuid.UUID      `gorm:"type:uuid;not null" json:"spaceId"`
-	Name             string         `gorm:"not null" json:"name"`
 	Slug             string         `gorm:"type:varchar(255);not null" json:"slug"`
-	Description      *string        `json:"description,omitempty"`
 	CategoryID       *uuid.UUID     `gorm:"type:uuid" json:"categoryId,omitempty"`
 	CurrentVersionID *int           `json:"currentVersionId,omitempty"`
 	ExtendsRecipeID  *uuid.UUID     `gorm:"type:uuid" json:"extendsRecipeId,omitempty"`

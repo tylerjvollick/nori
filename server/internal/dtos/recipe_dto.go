@@ -16,10 +16,8 @@ type CreateRecipeRequest struct {
 
 // UpdateRecipeRequest represents the request body for updating a recipe.
 type UpdateRecipeRequest struct {
-	Name        *string    `json:"name,omitempty"`
-	Description *string    `json:"description,omitempty"`
-	CategoryID  *uuid.UUID `json:"categoryId,omitempty"`
-	IsActive    *bool      `json:"isActive,omitempty"`
+	CategoryID *uuid.UUID `json:"categoryId,omitempty"`
+	IsActive   *bool      `json:"isActive,omitempty"`
 }
 
 // CreateRecipeVersionRequest represents the request body for creating a recipe version.
@@ -93,13 +91,14 @@ type RecipeVersionResponse struct {
 }
 
 // RecipeResponseFromModel converts a models.Recipe to a RecipeResponse DTO.
+// Name and Description are derived from the current version's root task.
+// If no current version or root task exists, Name falls back to the recipe slug.
 func RecipeResponseFromModel(r *models.Recipe) RecipeResponse {
 	resp := RecipeResponse{
 		ID:               r.ID,
 		SpaceID:          r.SpaceID,
-		Name:             r.Name,
+		Name:             r.Slug,
 		Slug:             r.Slug,
-		Description:      r.Description,
 		CategoryID:       r.CategoryID,
 		CurrentVersionID: r.CurrentVersionID,
 		ExtendsRecipeID:  r.ExtendsRecipeID,
@@ -112,6 +111,11 @@ func RecipeResponseFromModel(r *models.Recipe) RecipeResponse {
 	if r.CurrentVersion != nil {
 		cv := RecipeVersionResponseFromModel(r.CurrentVersion)
 		resp.CurrentVersion = &cv
+
+		if r.CurrentVersion.RootTask != nil {
+			resp.Name = r.CurrentVersion.RootTask.Title
+			resp.Description = r.CurrentVersion.RootTask.Description
+		}
 	}
 
 	return resp

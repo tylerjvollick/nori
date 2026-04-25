@@ -80,7 +80,7 @@ func (s *RecipeService) PourRecipe(
 	}
 
 	if recipe.CurrentVersionID == nil {
-		return nil, fmt.Errorf("recipe %q has no published version", recipe.Name)
+		return nil, fmt.Errorf("recipe %q has no published version", recipe.Slug)
 	}
 
 	version, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
@@ -150,7 +150,7 @@ func (s *RecipeService) PourRecipe(
 	rootID := generateTaskID()
 	jobTitle := formula.Substitute(f.Description, allVars)
 	if jobTitle == "" {
-		jobTitle = recipe.Name
+		jobTitle = recipe.Slug
 	}
 
 	rootTask := &models.Task{
@@ -623,9 +623,7 @@ func (s *RecipeService) CreateRecipeWithTaskTree(
 	recipe := &models.Recipe{
 		ID:          recipeID,
 		SpaceID:     spaceID,
-		Name:        name,
 		Slug:        serviceSlugify(name),
-		Description: description,
 		CategoryID:  categoryID,
 		CreatedByID: createdByID,
 		IsActive:    true,
@@ -1434,7 +1432,7 @@ func (s *RecipeService) RollRecipe(
 		return nil, fmt.Errorf("loading recipe: %w", err)
 	}
 	if recipe.CurrentVersionID == nil {
-		return nil, fmt.Errorf("recipe %q has no published version", recipe.Name)
+		return nil, fmt.Errorf("recipe %q has no published version", recipe.Slug)
 	}
 
 	version, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
@@ -1755,9 +1753,7 @@ func (s *RecipeService) SaveAsRecipe(
 	recipe := &models.Recipe{
 		ID:          recipeID,
 		SpaceID:     spaceID,
-		Name:        name,
 		Slug:        serviceSlugify(name),
-		Description: opts.Description,
 		CategoryID:  opts.CategoryID,
 		CreatedByID: createdByID,
 		IsActive:    true,

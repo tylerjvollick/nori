@@ -301,14 +301,18 @@ A process template identity. User-facing name is "Recipe" (sushi theme).
 Recipe
   - ID: uuid
   - SpaceID: uuid (FK → Space)
-  - Name: string ("Walnut Dining Table", "Milling Lumber", "Bandsaw Blade Change")
-  - Description: text (nullable)
+  - Slug: string (URL-friendly identifier, e.g. "walnut-dining-table")
   - CurrentVersionID: int (FK → RecipeVersion, nullable — latest published)
   - ExtendsRecipeID: uuid (FK → Recipe, nullable — inheritance, deferred)
   - CreatedByID: uuid (FK → User)
   - IsActive: bool
   - CreatedAt, UpdatedAt: timestamp
 ```
+
+**Name and Description** are derived from the current version's root task
+(`RecipeVersion.RootTaskID → Task.Title/Description`). When no current version
+or root task exists, the recipe slug is used as the display name. This avoids
+duplicating title/description across the recipe and its root task.
 
 **Inheritance** (deferred): Recipes can extend other recipes. A "Walnut Dining
 Table" recipe might extend a "Generic Dining Table" recipe, overriding specific
