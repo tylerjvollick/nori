@@ -12,10 +12,11 @@
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { RefreshCw, CircleAlert, Maximize2, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
+	import { RefreshCw, CircleAlert, Maximize2, Minimize2, Plus, Trash2, LayoutDashboard } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
+	import FlowActions from './FlowActions.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
 
@@ -38,9 +39,13 @@
 		rootTaskId?: string;
 		/** Called after a graph mutation (node/edge add/delete) so the parent can re-fetch data. */
 		onmutate?: () => Promise<void> | void;
+		/** Called when the fullscreen toggle is clicked. */
+		onfullscreentoggle?: () => void;
+		/** Whether the graph is currently in fullscreen mode. */
+		isFullscreen?: boolean;
 	}
 
-	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate }: Props = $props();
+	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate, onfullscreentoggle, isFullscreen = false }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -713,6 +718,8 @@
 	/** After graph refresh, patch a specific node to show inline title editing. */
 	function activateNodeEditing(taskId: string, refocus = false): void {
 		editingNodeId = taskId;
+		// Select + center on the new/edited node
+		selectNode(taskId);
 		nodes = nodes.map((n) =>
 			n.id === taskId
 				? {
@@ -886,10 +893,21 @@
 	// Reference to the flow container div, used to restore focus on Escape.
 	let flowContainer: HTMLDivElement | undefined = $state(undefined);
 
-	/** Programmatically select a node and notify the detail panel. */
+	// Flow actions handle — populated by FlowActions child inside <SvelteFlow>
+	let flowHandle: { setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void } | undefined = $state(undefined);
+
+	/** Programmatically select a node, notify the detail panel, and pan to center it. */
 	function selectNode(nodeId: string): void {
 		nodes = nodes.map((n) => ({ ...n, selected: n.id === nodeId }));
 		onselect?.(nodeId);
+
+		// Smoothly pan so the selected node is centered in the viewport
+		const node = nodes.find((n) => n.id === nodeId);
+		if (node && flowHandle) {
+			const centerX = node.position.x + NODE_WIDTH / 2;
+			const centerY = node.position.y + NODE_HEIGHT / 2;
+			flowHandle.setCenter(centerX, centerY, { zoom: 0.85, duration: 200 });
+		}
 	}
 
 	/**
@@ -1052,8 +1070,10 @@
 				break;
 			}
 			case 'Escape': {
-				// Return focus to the graph canvas.
+				// Prevent xyflow from deselecting nodes — there should always be
+				// an active node unless viewing the root recipe/job.
 				e.preventDefault();
+				e.stopPropagation();
 				flowContainer?.focus();
 				break;
 			}
@@ -1207,7 +1227,20 @@
 			</div>
 		</div>
 	{:else}
-		<div bind:this={flowContainer} class="flex-1 min-h-0" tabindex="-1">
+		<div bind:this={flowContainer} class="flex-1 min-h-0 relative" tabindex="-1">
+			{#if onfullscreentoggle}
+				<button
+					onclick={onfullscreentoggle}
+					class="absolute top-3 right-3 z-10 flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+					title={isFullscreen ? 'Exit full size' : 'Full size'}
+				>
+					{#if isFullscreen}
+						<Minimize2 class="size-4" />
+					{:else}
+						<Maximize2 class="size-4" />
+					{/if}
+				</button>
+			{/if}
 			<SvelteFlow
 				{nodes}
 				{edges}
@@ -1221,9 +1254,16 @@
 				maxZoom={2}
 				colorMode="system"
 				onnodeclick={handleNodeClick}
+				onpaneclick={() => {
+					// Re-select the current node — prevent xyflow from deselecting
+					if (selectedNodeId) {
+						nodes = nodes.map((n) => ({ ...n, selected: n.id === selectedNodeId }));
+					}
+				}}
 				onconnect={handleConnect}
 				onbeforedelete={handleBeforeDelete}
 			>
+				<FlowActions bind:handle={flowHandle} />
 				<Background />
 				<Controls />
 				<MiniMap

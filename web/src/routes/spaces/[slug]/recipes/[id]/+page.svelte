@@ -53,6 +53,8 @@
 
 	// Graph detail panel state
 	let graphPanelOpen = $state(true);
+	let graphFullscreen = $state(false);
+	let graphAreaEl: HTMLDivElement | undefined = $state(undefined);
 	let graphPanelTask = $state<TaskTreeResponse | null>(null);
 	let graphPanelDeps = $state<TaskDepsResponse | null>(null);
 	let graphPanelLoading = $state(false);
@@ -244,6 +246,18 @@
 		if (currentVersion?.rootTaskId) {
 			await loadTaskTree(currentVersion.rootTaskId, true);
 		}
+	}
+
+	function toggleGraphFullscreen(): void {
+		graphFullscreen = !graphFullscreen;
+		// After the layout shift, trigger resize so xyflow recalculates, then fitView
+		setTimeout(() => {
+			window.dispatchEvent(new Event('resize'));
+			const fitBtn = graphAreaEl?.querySelector<HTMLButtonElement>(
+				'.svelte-flow__controls button[title="fit view"]',
+			);
+			fitBtn?.click();
+		}, 50);
 	}
 
 	async function handlePublish() {
@@ -473,7 +487,7 @@
 					</div>
 				</div>
 			{:else}
-				<div class="flex-1 flex overflow-hidden">
+				<div bind:this={graphAreaEl} class="{graphFullscreen ? 'fixed inset-0 z-50 bg-background' : 'flex-1'} flex overflow-hidden">
 					<!-- Graph canvas -->
 					<div class="flex-1 min-w-0 overflow-hidden relative">
 						<GraphView
@@ -485,19 +499,13 @@
 							{rootTaskId}
 							onselect={handleGraphNodeSelect}
 							onmutate={handleTreeMutate}
+							onfullscreentoggle={toggleGraphFullscreen}
+							isFullscreen={graphFullscreen}
 						/>
-						<!-- Panel toggle button (desktop) -->
-						<button
-							onclick={() => (graphPanelOpen = !graphPanelOpen)}
-							class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
-							title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
-						>
-							<PanelRight class="size-4" />
-						</button>
 					</div>
 
 					<!-- Detail panel (desktop sidebar) -->
-					{#if graphPanelOpen}
+					{#if graphPanelOpen && !graphFullscreen}
 						<div class="hidden lg:flex w-1/2 flex-col border-l border-border overflow-y-auto shrink-0">
 							<TaskDetailPanel
 								task={graphPanelTask ?? tree ?? undefined}

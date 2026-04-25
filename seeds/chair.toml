@@ -24,7 +24,7 @@
 # Import:  nori recipe create --from-toml seeds/chair.toml
 # Pour:    nori recipe pour dining-chair --var batch_size=6
 
-formula = "Dining Chair"
+formula = "Apprentice Chair"
 
 [recipe]
 name = "dining-chair"
