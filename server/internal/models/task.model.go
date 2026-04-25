@@ -79,9 +79,11 @@ type Task struct {
 	PausedAt        *time.Time `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time `json:"completedAt,omitempty"`
 	ActualTimeSecs    int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
-	BatchSize         *int       `json:"batchSize,omitempty"`
-	EstimatedTimeSecs *int       `json:"estimatedTimeSecs,omitempty"`
-	DeviationNotes    *string    `json:"deviationNotes,omitempty"`
+	BatchSize                  *int    `json:"batchSize,omitempty"`
+	EstimatedTimeSecs          *int    `json:"estimatedTimeSecs,omitempty"`
+	EstimatedTimeFormula       *string `json:"estimatedTimeFormula,omitempty"`
+	EstimatedTimeFromRecipeSecs *int   `json:"estimatedTimeFromRecipeSecs,omitempty"`
+	DeviationNotes             *string `json:"deviationNotes,omitempty"`
 	Metadata        JSONB      `gorm:"type:jsonb" json:"metadata,omitempty"`
 	CreatedAt       time.Time  `gorm:"default:now()" json:"createdAt"`
 	UpdatedAt       time.Time  `gorm:"default:now()" json:"updatedAt"`
