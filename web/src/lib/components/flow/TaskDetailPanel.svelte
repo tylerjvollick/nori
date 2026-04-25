@@ -46,9 +46,11 @@
 		 * 'task' (default): full detail view.
 		 */
 		mode?: 'task' | 'recipe';
+		/** Map of task ID → title, used to display dependency titles instead of IDs. */
+		taskTitleMap?: Map<string, string>;
 	}
 
-	let { task, spaceId, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false, mode = 'task' }: Props = $props();
+	let { task, spaceId, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false, mode = 'task', taskTitleMap = new Map() }: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
@@ -466,7 +468,7 @@
 								<a href="/spaces/{slug}/{dep.toTaskId}" class="no-underline">
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowLeft class="w-3 h-3 text-red-400 shrink-0" />
-										<span class="font-mono text-xs">{dep.toTaskId}</span>
+										<span class="text-xs">{taskTitleMap.get(dep.toTaskId) ?? dep.toTaskId}</span>
 									</Badge>
 								</a>
 							{/each}
@@ -482,7 +484,7 @@
 								<a href="/spaces/{slug}/{dep.fromTaskId}" class="no-underline">
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowRight class="w-3 h-3 text-orange-400 shrink-0" />
-										<span class="font-mono text-xs">{dep.fromTaskId}</span>
+										<span class="text-xs">{taskTitleMap.get(dep.fromTaskId) ?? dep.fromTaskId}</span>
 									</Badge>
 								</a>
 							{/each}

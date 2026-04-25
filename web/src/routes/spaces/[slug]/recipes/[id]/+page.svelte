@@ -49,6 +49,8 @@
 	let stationMap = $state<Map<string, string>>(new Map());
 	let treeLoading = $state(false);
 
+	let taskTitleMap = $derived(new Map(flatTasks.map((t) => [t.id, t.title])));
+
 	// Graph detail panel state
 	let graphPanelOpen = $state(true);
 	let graphPanelTask = $state<TaskTreeResponse | null>(null);
@@ -485,6 +487,7 @@
 								task={graphPanelTask ?? tree ?? undefined}
 								{spaceId}
 								{stationMap}
+								{taskTitleMap}
 								deps={graphPanelDeps}
 								isLoading={graphPanelLoading}
 								mode="recipe"
@@ -509,6 +512,7 @@
 									task={graphPanelTask}
 									{spaceId}
 									{stationMap}
+									{taskTitleMap}
 									deps={graphPanelDeps}
 									isLoading={graphPanelLoading}
 									mode="recipe"

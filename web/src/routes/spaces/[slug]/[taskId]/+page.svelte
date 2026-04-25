@@ -99,6 +99,8 @@
 		return all.slice(1);
 	});
 
+	let taskTitleMap = $derived(new Map(flatTasks.map((t) => [t.id, t.title])));
+
 	// ---- Neighborhood graph for leaf tasks ----
 	let neighborhoodTasks = $state<TaskResponse[]>([]);
 	let neighborhoodDeps = $state<Map<string, TaskDepsResponse>>(new Map());
@@ -502,6 +504,7 @@
 							task={selectedTask}
 							{spaceId}
 							{stationMap}
+							{taskTitleMap}
 							deps={selectedDeps}
 							onaction={handleTaskAction}
 							oncomplete={handleCompletion}
@@ -554,6 +557,7 @@
 							task={graphPanelTask ?? tree ?? undefined}
 							{spaceId}
 							{stationMap}
+							{taskTitleMap}
 							deps={graphPanelDeps}
 							isLoading={graphPanelLoading}
 							onaction={handleTaskAction}
@@ -579,6 +583,7 @@
 								task={graphPanelTask}
 								{spaceId}
 								{stationMap}
+								{taskTitleMap}
 								deps={graphPanelDeps}
 								isLoading={graphPanelLoading}
 								onaction={handleTaskAction}

@@ -117,6 +117,49 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(page.locator('[data-testid="status-icon"]')).toHaveCount(0);
   });
 
+  test('dependency section shows task title instead of ID', async ({ page }) => {
+    await page.goto(`/spaces/${spaceSlug}/recipes`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Recipe' }).click();
+    await page.locator('#recipe-name').fill('Dep Title Test');
+    await page.getByRole('button', { name: 'Create Recipe' }).click();
+    await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
+
+    // Wait for graph
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+
+    // Add first node
+    const nodes = page.locator('.svelte-flow__node');
+    const nodesBefore = await nodes.count();
+    await addNodeBtn.click();
+    await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
+
+    // Dismiss inline editing if active
+    await page.keyboard.press('Escape');
+
+    // Hover the node to reveal the [+] serial button, then click it
+    const firstNode = page.locator('.svelte-flow__node').first();
+    await firstNode.hover();
+    const serialBtn = firstNode.locator('button[title*="serial"]');
+    await expect(serialBtn).toBeVisible({ timeout: 5000 });
+    await serialBtn.click();
+    await expect(nodes).toHaveCount(nodesBefore + 2, { timeout: 10000 });
+
+    // Dismiss editing on new node, click away, then click the last node (downstream)
+    await page.keyboard.press('Escape');
+    await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
+    const lastNode = page.locator('.svelte-flow__node').last();
+    await lastNode.click();
+
+    // The detail panel should show "Blocked by" with a task title, not a UUID
+    const blockedByLabel = page.getByText('Blocked by').first();
+    await expect(blockedByLabel).toBeVisible({ timeout: 10000 });
+    // The blocker badge should show "New Task" (the title), not a UUID
+    const depSection = blockedByLabel.locator('..').locator('..');
+    await expect(depSection.getByText('New Task')).toBeVisible({ timeout: 5000 });
+  });
+
   test('recipe appears in the recipes list after creation', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');
