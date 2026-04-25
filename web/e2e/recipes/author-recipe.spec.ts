@@ -142,7 +142,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     const editInput = page.locator('.svelte-flow__node input');
     await expect(editInput).toBeVisible({ timeout: 10000 });
     await editInput.focus();
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Meta+Enter');
     await expect(nodes).toHaveCount(nodesBefore + 2, { timeout: 10000 });
 
     // Dismiss editing on new serial node
@@ -160,11 +160,11 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(depSection.getByText('New Task')).toBeVisible({ timeout: 5000 });
   });
 
-  test('Tab commits title and creates serial downstream node', async ({ page }) => {
+  test('Cmd+Enter commits title and creates serial downstream node', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New Recipe' }).click();
-    await page.locator('#recipe-name').fill('Tab Test');
+    await page.locator('#recipe-name').fill('CmdEnter Test');
     await page.getByRole('button', { name: 'Create Recipe' }).click();
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
 
@@ -178,17 +178,22 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await addNodeBtn.click();
     await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
 
-    // Type a name and press Tab — should commit and create serial node
+    // Type a name and press Cmd+Enter — should commit and create serial node
     const inlineInput = page.locator('.svelte-flow__node input');
     await expect(inlineInput).toBeVisible({ timeout: 10000 });
     await inlineInput.fill('Cut Wood');
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('Meta+Enter');
 
     // Should now have 2 new nodes (the named one + serial downstream)
     await expect(nodes).toHaveCount(nodesBefore + 2, { timeout: 10000 });
 
     // The first node should have the committed title
     await expect(page.locator('.svelte-flow__node', { hasText: 'Cut Wood' })).toBeVisible({ timeout: 5000 });
+
+    // The new serial node should have inline editing active (focused input)
+    const newInput = page.locator('.svelte-flow__node input');
+    await expect(newInput).toBeVisible({ timeout: 10000 });
+    await expect(newInput).toBeFocused({ timeout: 5000 });
   });
 
   test('Ctrl+R renames an existing node', async ({ page }) => {
@@ -208,12 +213,23 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     // Add a node and dismiss editing
     await addNodeBtn.click();
     await expect(nodes).toHaveCount(nodesBefore + 1, { timeout: 10000 });
-    await page.keyboard.press('Escape');
-    await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
 
-    // Click the node to select it
-    const node = page.locator('.svelte-flow__node').first();
-    await node.click();
+    // Focus the inline input explicitly, then press Escape to dismiss
+    const inlineInput = page.locator('.svelte-flow__node input');
+    await expect(inlineInput).toBeVisible({ timeout: 5000 });
+    await inlineInput.focus();
+    await page.keyboard.press('Escape');
+
+    // Wait for the input to disappear (editing dismissed)
+    await expect(inlineInput).not.toBeVisible({ timeout: 5000 });
+
+    // Click away to deselect, then click node to re-select
+    await page.locator('.svelte-flow').click({ position: { x: 10, y: 10 } });
+    const nodeEl = page.locator('.svelte-flow__node', { hasText: 'New Task' }).first();
+    await nodeEl.click();
+
+    // Verify node is selected (detail panel heading)
+    await expect(page.getByRole('heading', { name: 'New Task', level: 2 }).first()).toBeVisible({ timeout: 5000 });
 
     // Ctrl+R should open inline rename input
     await page.keyboard.press('Control+r');

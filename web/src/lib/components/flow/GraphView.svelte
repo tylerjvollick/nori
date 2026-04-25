@@ -109,7 +109,7 @@
 	): { nodes: Node[]; edges: Edge[] } {
 		const g = new dagre.graphlib.Graph();
 		g.setDefaultEdgeLabel(() => ({}));
-		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80, marginx: 20, marginy: 20 });
+		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 20, marginx: 20, marginy: 20, align: undefined });
 
 		for (const node of inputNodes) {
 			const isJob = (node.data as { type?: string }).type === 'job';
@@ -368,7 +368,8 @@
 
 		lastClickTime = now;
 		lastClickedNodeId = nodeId;
-		onselect?.(nodeId);
+		// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
+		selectNode(nodeId);
 	}
 
 	// ---- Re-fetch when filters change ----
@@ -529,7 +530,7 @@
 		if (eid && nodes.some(n => n.id === eid)) {
 			const node = nodes.find(n => n.id === eid);
 			if (node && !(node.data as any).editing) {
-				untrack(() => activateNodeEditing(eid));
+				untrack(() => activateNodeEditing(eid, true));
 			}
 		}
 	});
@@ -711,7 +712,7 @@
 	// ---- Node creation ----
 
 	/** After graph refresh, patch a specific node to show inline title editing. */
-	function activateNodeEditing(taskId: string): void {
+	function activateNodeEditing(taskId: string, refocus = false): void {
 		editingNodeId = taskId;
 		nodes = nodes.map((n) =>
 			n.id === taskId
@@ -725,6 +726,17 @@
 					}
 				: n,
 		);
+		// For newly created nodes, xyflow steals focus during init.
+		// Re-grab focus after xyflow settles.
+		if (refocus) {
+			setTimeout(() => {
+				const input = flowContainer?.querySelector<HTMLInputElement>(
+					`.svelte-flow__node[data-id="${taskId}"] input`,
+				);
+				input?.focus();
+				input?.select();
+			}, 60);
+		}
 	}
 
 	async function refreshGraph(): Promise<void> {
@@ -970,8 +982,8 @@
 	function handleKeydown(e: KeyboardEvent): void {
 		if (isEditableTarget(e)) return;
 
-		// Alt+S: Add serial node on selected node
-		if ((e.altKey || e.metaKey) && e.key === 's') {
+		// Option+S (Mac) / Alt+S: Add serial node on selected node
+		if (e.altKey && e.code === 'KeyS') {
 			if (selectedNodeId) {
 				e.preventDefault();
 				handleAddSerial(selectedNodeId);
@@ -979,8 +991,8 @@
 			return;
 		}
 
-		// Alt+P: Add parallel node on selected node
-		if ((e.altKey || e.metaKey) && e.key === 'p') {
+		// Option+P (Mac) / Alt+P: Add parallel node on selected node
+		if (e.altKey && e.code === 'KeyP') {
 			if (selectedNodeId) {
 				e.preventDefault();
 				handleAddParallel(selectedNodeId);
@@ -988,17 +1000,17 @@
 			return;
 		}
 
-		// Ctrl+R: Rename selected node inline
+		// Ctrl+R: Rename selected node inline (preventDefault always to avoid browser reload)
 		if (e.ctrlKey && e.key === 'r') {
+			e.preventDefault();
 			if (selectedNodeId) {
-				e.preventDefault();
 				activateNodeEditing(selectedNodeId);
 			}
 			return;
 		}
 
-		// Alt+L: Re-run dagre layout
-		if ((e.altKey || e.metaKey) && e.key === 'l') {
+		// Option+L (Mac) / Alt+L: Re-run dagre layout
+		if (e.altKey && e.code === 'KeyL') {
 			e.preventDefault();
 			handleRelayout();
 			return;

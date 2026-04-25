@@ -66,13 +66,14 @@
 	}
 
 	function handleInputKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			commitTitle();
-		} else if (e.key === 'Tab') {
+		if (e.key === 'Enter' && e.metaKey) {
+			// Cmd+Enter: commit title and create serial downstream node
 			e.preventDefault();
 			const trimmed = editTitle.trim() || 'New Task';
 			data.onTabCommit?.(trimmed);
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			commitTitle();
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			// Revert to original title
@@ -195,7 +196,7 @@
 	<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
 	<div
-		class="rounded-lg border-2 px-3 py-2 shadow-sm transition-shadow {config.bg} {config.border} {selected ? 'ring-2 ring-ring shadow-md' : ''} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[140px]' : 'min-w-[120px]'}"
+		class="rounded-lg border-2 px-3 py-2 transition-shadow {config.bg} {selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : config.border + ' border-opacity-40 dark:border-opacity-40 shadow-sm'} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''} {isJob ? 'min-w-[140px]' : 'min-w-[120px]'}"
 	>
 		<!-- Header: status icon + title -->
 		<div class="flex items-center gap-1.5">
@@ -251,7 +252,7 @@
 	{#if data.onAddSerial}
 		<button
 			class="absolute -bottom-5 left-1/2 -translate-x-1/2 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground group-hover/tasknode:opacity-100 {selected ? 'opacity-100' : ''}"
-			title="Add serial node (Alt+S)"
+			title="Add serial node (⌥S)"
 			onmousedown={(e) => { e.stopPropagation(); e.preventDefault(); }}
 			onclick={(e) => { e.stopPropagation(); e.preventDefault(); data.onAddSerial?.(); }}
 		>

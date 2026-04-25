@@ -68,7 +68,7 @@
 			title: 'Inline Editing',
 			shortcuts: [
 				{ key: 'Enter', description: 'Commit title' },
-				{ key: 'Tab', description: 'Commit title + add serial node' },
+				{ key: '⌘ Enter', description: 'Commit title + add serial node' },
 				{ key: 'Esc', description: 'Cancel and revert' },
 			],
 		},
