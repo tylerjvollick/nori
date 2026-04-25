@@ -24,8 +24,10 @@
 	// ---- Help overlay ----
 	let showHelp = $state(false);
 
-	// ---- Check if we're on task detail page ----
+	// ---- Check if we're on a detail page (task/job or recipe) ----
 	let isTaskDetail = $derived(!!$page.params.taskId);
+	let isRecipeDetail = $derived(!!$page.params.id);
+	let isDetailView = $derived(isTaskDetail || isRecipeDetail);
 
 	// ---- Tab definitions ----
 	const TABS = [
@@ -66,7 +68,7 @@
 
 <div class="flex h-full flex-col overflow-hidden">
 	<!-- Space header + tabs (hidden on task detail pages — they have their own nav) -->
-	{#if !isTaskDetail}
+	{#if !isDetailView}
 		<div class="flex-shrink-0 border-b bg-background px-4 pt-3 pb-0">
 			<!-- Breadcrumb + actions -->
 			<div class="flex items-center justify-between mb-2">
@@ -115,12 +117,12 @@
 	{/if}
 
 	<!-- Child page content -->
-	<div class="flex flex-col flex-1 {isTaskDetail ? 'overflow-hidden' : 'overflow-auto'}">
+	<div class="flex flex-col flex-1 {isDetailView ? 'overflow-hidden' : 'overflow-auto'}">
 		{@render children()}
 	</div>
 
 	<!-- Keyboard shortcut hint (hidden on task detail pages) -->
-	{#if !isTaskDetail}
+	{#if !isDetailView}
 		<div class="fixed bottom-4 right-4 z-40">
 			<Button
 				variant="outline"

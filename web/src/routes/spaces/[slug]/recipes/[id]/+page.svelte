@@ -26,14 +26,15 @@
 	import * as Card from '$lib/components/ui/card';
 	import {
 		CircleAlert,
-		ArrowLeft,
 		Send,
 		Play,
 		Plus,
 		History,
 		PanelRight,
 		X,
+		BookOpen,
 	} from '@lucide/svelte';
+	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
 	import { toast } from 'svelte-sonner';
 
 	let recipeId = $derived($page.params.id);
@@ -382,14 +383,31 @@
 			</Alert.Root>
 		</div>
 	{:else if recipe}
-		<!-- Header -->
+		<!-- Header: breadcrumbs + title + actions -->
 		<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
-			<div class="mb-1">
-				<Button variant="ghost" size="sm" href="/spaces/{$page.params.slug}/recipes" class="h-7 px-2 text-xs text-muted-foreground">
-					<ArrowLeft class="size-3 mr-1" />
-					Back to Recipes
-				</Button>
-			</div>
+			<!-- Breadcrumbs -->
+			<Breadcrumb.Root>
+				<Breadcrumb.List>
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces/{$page.params.slug}">{$page.data.space?.name ?? $page.params.slug}</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces/{$page.params.slug}/recipes">Recipes</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Page class="flex items-center gap-1">
+							<BookOpen class="size-3.5" />
+							{recipe.name}
+						</Breadcrumb.Page>
+					</Breadcrumb.Item>
+				</Breadcrumb.List>
+			</Breadcrumb.Root>
 
 			<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
 				<div class="flex items-center gap-2 min-w-0">

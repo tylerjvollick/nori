@@ -46,7 +46,7 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
   });
 
-  test('back to recipes navigates to the list', async ({ page }) => {
+  test('breadcrumb Recipes link navigates to the list', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/recipes`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New Recipe' }).click();
@@ -55,8 +55,8 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
     await page.waitForLoadState('networkidle');
 
-    // Click "Back to Recipes"
-    await page.getByRole('link', { name: 'Back to Recipes' }).click();
+    // Click "Recipes" breadcrumb segment
+    await page.locator('[data-slot="breadcrumb-link"]', { hasText: 'Recipes' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/recipes$`));
 
     // Verify we're on the recipes list
@@ -268,8 +268,8 @@ test.describe('Recipe Authoring (Graph Editor)', () => {
     await page.waitForURL(/\/spaces\/[^/]+\/recipes\/.+/);
     await page.waitForLoadState('networkidle');
 
-    // Navigate back to recipes list
-    await page.getByRole('link', { name: 'Back to Recipes' }).click();
+    // Navigate back to recipes list via breadcrumb
+    await page.locator('[data-slot="breadcrumb-link"]', { hasText: 'Recipes' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/recipes$`));
     await page.waitForLoadState('networkidle');
 

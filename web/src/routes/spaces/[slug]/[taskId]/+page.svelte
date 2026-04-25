@@ -17,7 +17,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X } from '@lucide/svelte';
+	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X, Briefcase, ListTodo } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -40,6 +40,9 @@
 	let selectedDeps = $state<TaskDepsResponse | null>(null);
 	/** Whether initial deps fetch for root has completed (success or failure). */
 	let rootDepsAttempted = $state(false);
+
+	// Parent task (for child task breadcrumbs: Spaces > Space > ParentJob > Task)
+	let parentTask = $state<TaskResponse | null>(null);
 
 	// ---- View mode ----
 	type ViewMode = 'graph' | 'board' | 'list' | 'cost';
@@ -352,6 +355,15 @@
 				selectedDeps = null;
 			}
 			rootDepsAttempted = true;
+
+			// Load parent task for breadcrumbs (child task under a job)
+			if (tree.parentId) {
+				try {
+					parentTask = await taskApi.getTask(spaceId, tree.parentId);
+				} catch {
+					parentTask = null;
+				}
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load task tree';
 		} finally {
@@ -438,10 +450,34 @@
 				<Breadcrumb.Item>
 					<Breadcrumb.Link href="/spaces/{slug}">{space.name}</Breadcrumb.Link>
 				</Breadcrumb.Item>
-				<Breadcrumb.Separator />
-				<Breadcrumb.Item>
-					<Breadcrumb.Page>{tree?.title ?? taskId}</Breadcrumb.Page>
-				</Breadcrumb.Item>
+				{#if parentTask}
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces/{slug}/{parentTask.id}" class="flex items-center gap-1">
+							<Briefcase class="size-3.5" />
+							{parentTask.title}
+						</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Page class="flex items-center gap-1">
+							<ListTodo class="size-3.5" />
+							{tree?.title ?? taskId}
+						</Breadcrumb.Page>
+					</Breadcrumb.Item>
+				{:else}
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Page class="flex items-center gap-1">
+							{#if tree?.type === 'job'}
+								<Briefcase class="size-3.5" />
+							{:else}
+								<ListTodo class="size-3.5" />
+							{/if}
+							{tree?.title ?? taskId}
+						</Breadcrumb.Page>
+					</Breadcrumb.Item>
+				{/if}
 			</Breadcrumb.List>
 		</Breadcrumb.Root>
 
