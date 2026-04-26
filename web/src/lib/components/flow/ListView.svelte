@@ -1050,11 +1050,19 @@
                     ? 'text-blue-500 dark:text-blue-400'
                     : ''}"
                 >
-                  {formatTimeSpent(
-                    task.actualTimeSeconds,
-                    task.status,
-                    task.startedAt,
-                  )}
+                  <span class="inline-flex items-center gap-1">
+                    {#if task.status === 'active'}
+                      <span class="relative flex size-2 shrink-0">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                      </span>
+                    {/if}
+                    {formatTimeSpent(
+                      task.actualTimeSeconds,
+                      task.status,
+                      task.startedAt,
+                    )}
+                  </span>
                 </td>
 
                 <!-- Due Date -->
