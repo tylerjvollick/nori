@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { TaskResponse, TaskStatus, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { timeEntryApi } from '$lib/api/timeEntry';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -106,12 +107,21 @@
 			switch (action) {
 				case 'start':
 					updated = await taskApi.startTask(spaceId, task.id);
+					// Also start a time entry for tracking.
+					await timeEntryApi.start(spaceId, task.id).catch((e) =>
+						console.warn('Time entry start failed (non-blocking):', e));
 					break;
 				case 'pause':
 					updated = await taskApi.pauseTask(spaceId, task.id);
+					// Also pause the running time entry.
+					await timeEntryApi.pause(spaceId, task.id).catch((e) =>
+						console.warn('Time entry pause failed (non-blocking):', e));
 					break;
 				case 'resume':
 					updated = await taskApi.resumeTask(spaceId, task.id);
+					// Resume creates a new time entry (discrete log).
+					await timeEntryApi.start(spaceId, task.id).catch((e) =>
+						console.warn('Time entry start failed (non-blocking):', e));
 					break;
 				case 'skip':
 					updated = await taskApi.skipTask(spaceId, task.id);
