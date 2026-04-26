@@ -95,6 +95,74 @@ test.describe('Recipe Time Estimation', () => {
     await expect(page.getByText('Formula:')).toBeVisible();
   });
 
+  test('completion modal shows time entries and total', async ({ page }) => {
+    // Create recipe, publish, roll to get a job task
+    await createRecipeWithTask(page, 'Completion Modal Test', 'Finishing Step');
+    await selectTask(page, 'Finishing Step');
+
+    // Enter a flat formula
+    const formulaInput = page.getByTestId('estimated-time-formula');
+    await formulaInput.fill('15m');
+    await formulaInput.blur();
+    await page.waitForTimeout(500);
+
+    // Publish
+    const publishBtn = page.getByRole('button', { name: 'Publish' });
+    await expect(publishBtn).toBeVisible({ timeout: 5000 });
+    await publishBtn.click();
+    await expect(page.getByTestId('recipe-status-tag').first()).toHaveText('Published', { timeout: 10000 });
+
+    // Roll
+    const rollBtn = page.getByRole('button', { name: 'Roll Job' });
+    await expect(rollBtn).toBeVisible({ timeout: 5000 });
+    await rollBtn.click();
+    const rollConfirmBtn = page.getByRole('button', { name: 'Roll', exact: true });
+    if (await rollConfirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await rollConfirmBtn.click();
+    }
+    await page.waitForURL(/\/spaces\/[^/]+\/nori-/, { timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('.svelte-flow__node')).toHaveCount(2, { timeout: 10000 });
+
+    // Select the task in the job
+    const taskNode = page.locator('.svelte-flow__node', { hasText: 'Finishing Step' });
+    await taskNode.click();
+    await expect(page.getByRole('heading', { name: 'Finishing Step', level: 2 }).first()).toBeVisible({ timeout: 5000 });
+
+    // Start the task (which also starts a timer)
+    const startBtn = page.getByRole('button', { name: 'Start' });
+    await expect(startBtn).toBeVisible({ timeout: 5000 });
+    await startBtn.click();
+
+    // Wait for task to become active
+    await expect(page.getByText('Active')).toBeVisible({ timeout: 5000 });
+
+    // Click Complete to open the modal
+    const completeBtn = page.getByRole('button', { name: 'Complete' });
+    await expect(completeBtn).toBeVisible({ timeout: 5000 });
+    await completeBtn.click();
+
+    // Modal should be visible with time entry list or empty message
+    await expect(page.getByText('Complete Task')).toBeVisible({ timeout: 5000 });
+
+    // Total should be visible
+    const total = page.getByTestId('completion-total');
+    await expect(total).toBeVisible({ timeout: 5000 });
+    await expect(total).toContainText('Total');
+
+    // "Add Time Entry" button should be present
+    await expect(page.getByRole('button', { name: 'Add Time Entry' })).toBeVisible();
+
+    // Confirm & Complete button should be present
+    await expect(page.getByRole('button', { name: 'Confirm & Complete' })).toBeVisible();
+
+    // Complete the task
+    await page.getByRole('button', { name: 'Confirm & Complete' }).click();
+
+    // Should show completed phase
+    await expect(page.getByText('Task Completed')).toBeVisible({ timeout: 10000 });
+  });
+
   test('rolled job task shows recipe estimate as read-only', async ({ page }) => {
     // Create recipe with formula, publish, and roll
     await createRecipeWithTask(page, 'Roll Estimate Test', 'Assembly Step');
