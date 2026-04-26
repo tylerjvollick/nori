@@ -516,6 +516,7 @@
 								hideSubTasks={panelIsRoot}
 								recipeStatus={panelIsRoot ? currentVersion?.status : undefined}
 								recipeVersion={panelIsRoot ? currentVersion?.versionNumber : undefined}
+								onmutate={handleTreeMutate}
 							/>
 						</div>
 					{/if}
@@ -548,6 +549,7 @@
 									hideSubTasks={panelIsRoot}
 									recipeStatus={panelIsRoot ? currentVersion?.status : undefined}
 									recipeVersion={panelIsRoot ? currentVersion?.versionNumber : undefined}
+									onmutate={handleTreeMutate}
 								/>
 							</div>
 						</div>

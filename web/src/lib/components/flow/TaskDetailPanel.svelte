@@ -30,6 +30,8 @@
 		ListTodo,
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
+	import { taskApi } from '$lib/api/task';
+	import { Input } from '$lib/components/ui/input';
 	import TaskActions from './TaskActions.svelte';
 	import SubTaskList from './SubTaskList.svelte';
 
@@ -65,6 +67,8 @@
 		recipeStatus?: string;
 		/** Recipe version number — shown on root task only. */
 		recipeVersion?: number;
+		/** Called after a field is saved to refresh data. */
+		onmutate?: () => void;
 	}
 
 	let {
@@ -74,6 +78,7 @@
 		parentName, parentType, onnavparent, onselecttask,
 		hideSubTasks = false,
 		recipeStatus, recipeVersion,
+		onmutate,
 	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
@@ -235,6 +240,34 @@
 	let progress = $derived(task ? computeProgress(task) : { done: 0, total: 0 });
 	let statusCfg = $derived(task ? getStatusConfig(task.status) : getStatusConfig('open'));
 	let station = $derived(task ? getStationName(task.stationId) : null);
+
+	// --- Time formula editing (recipe mode) ---
+	let formulaInput = $state('');
+	let formulaSaving = $state(false);
+
+	// Sync formula input when task changes.
+	$effect(() => {
+		if (task) {
+			formulaInput = task.estimatedTimeFormula ?? '';
+		}
+	});
+
+	async function saveFormula(): Promise<void> {
+		if (!task || formulaSaving) return;
+		const newValue = formulaInput.trim();
+		const oldValue = task.estimatedTimeFormula ?? '';
+		if (newValue === oldValue) return;
+
+		formulaSaving = true;
+		try {
+			await taskApi.updateTask(spaceId, task.id, {
+				estimatedTimeFormula: newValue || '',
+			});
+			onmutate?.();
+		} finally {
+			formulaSaving = false;
+		}
+	}
 </script>
 
 {#snippet statusIcon(status: string, sizeClass: string)}
@@ -452,17 +485,48 @@
 		<div class="space-y-3">
 			<h4 class="text-sm font-medium text-foreground">Time</h4>
 
-			{#if task.estimatedTimeSeconds}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Estimated</span>
-					<span class="text-sm text-foreground flex items-center gap-1">
-						<Clock class="w-3 h-3 text-muted-foreground" />
-						{formatDuration(task.estimatedTimeSeconds)}
-					</span>
+			{#if mode === 'recipe'}
+				<!-- Recipe mode: editable formula input -->
+				<div class="space-y-1.5">
+					<label for="estimated-time-formula" class="text-sm text-muted-foreground">Estimated Time</label>
+					<Input
+						id="estimated-time-formula"
+						data-testid="estimated-time-formula"
+						type="text"
+						placeholder={'e.g. 30m, 5m * {{batch_size}}'}
+						bind:value={formulaInput}
+						onblur={saveFormula}
+						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+						disabled={formulaSaving}
+						class="h-8 text-sm"
+					/>
+					<p class="text-xs text-muted-foreground">
+						Flat: <code class="bg-muted px-1 rounded">30m</code>, <code class="bg-muted px-1 rounded">1h</code> &middot;
+						Formula: <code class="bg-muted px-1 rounded">5m * {'{{'}batch_size{'}}'}</code>
+					</p>
 				</div>
-			{/if}
+			{:else}
+				<!-- Job/task mode: show recipe estimate (read-only) + user override -->
+				{#if task.estimatedTimeFromRecipeSeconds}
+					<div class="flex items-center justify-between" data-testid="recipe-estimate">
+						<span class="text-sm text-muted-foreground">Recipe Estimate</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Clock class="w-3 h-3 text-muted-foreground" />
+							{formatDuration(task.estimatedTimeFromRecipeSeconds)}
+						</span>
+					</div>
+				{/if}
 
-			{#if mode !== 'recipe'}
+				{#if task.estimatedTimeSeconds}
+					<div class="flex items-center justify-between" data-testid="estimated-time-override">
+						<span class="text-sm text-muted-foreground">Estimated Time</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Clock class="w-3 h-3 text-muted-foreground" />
+							{formatDuration(task.estimatedTimeSeconds)}
+						</span>
+					</div>
+				{/if}
+
 				<div class="flex items-center justify-between">
 					<span class="text-sm text-muted-foreground">Actual Time</span>
 					<span class="text-sm text-foreground flex items-center gap-1">

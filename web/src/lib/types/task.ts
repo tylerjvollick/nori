@@ -32,6 +32,8 @@ export interface TaskResponse {
 	completedAt?: string | null;
 	actualTimeSeconds: number;
 	estimatedTimeSeconds?: number | null;
+	estimatedTimeFormula?: string | null;
+	estimatedTimeFromRecipeSeconds?: number | null;
 	deviationNotes?: string | null;
 	metadata?: Record<string, unknown> | null;
 	createdAt: string;
@@ -68,6 +70,7 @@ export interface UpdateTaskRequest {
 	priority?: number;
 	status?: TaskStatus;
 	assignedToId?: string; // UUID string to assign, empty string to unassign
+	estimatedTimeFormula?: string;
 }
 
 export interface AddChildTaskRequest {
