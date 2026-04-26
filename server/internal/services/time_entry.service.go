@@ -31,14 +31,13 @@ func NewTimeEntryService(timeEntryRepo TimeEntryRepoInterface, taskRepo TaskRepo
 }
 
 // StartTimer creates a new running time entry on a task.
-// Returns 409-style error if a timer is already running.
+// Returns 409-style error if a timer is already running (not paused).
 func (s *TimeEntryService) StartTimer(taskID string, spaceID uuid.UUID, userID uuid.UUID) (*models.TimeEntry, error) {
-	// Verify task exists.
 	if _, err := s.taskRepo.GetByID(taskID); err != nil {
 		return nil, fmt.Errorf("task %q not found: %w", taskID, err)
 	}
 
-	// Check for running timer.
+	// Check for active (non-ended) timer.
 	running, err := s.timeEntryRepo.GetRunningEntry(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("checking running timer: %w", err)
@@ -49,13 +48,16 @@ func (s *TimeEntryService) StartTimer(taskID string, spaceID uuid.UUID, userID u
 
 	now := time.Now()
 	entry := &models.TimeEntry{
-		ID:         uuid.New(),
-		TaskID:     taskID,
-		SpaceID:    spaceID,
-		LoggedByID: userID,
-		StartedAt:  now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:          uuid.New(),
+		TaskID:      taskID,
+		SpaceID:     spaceID,
+		LoggedByID:  userID,
+		StartedAt:   now,
+		ElapsedSecs: 0,
+		IsPaused:    false,
+		ResumedAt:   &now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := s.timeEntryRepo.Create(entry); err != nil {
@@ -65,7 +67,7 @@ func (s *TimeEntryService) StartTimer(taskID string, spaceID uuid.UUID, userID u
 	return entry, nil
 }
 
-// PauseTimer stops the running timer on a task.
+// PauseTimer pauses the running timer on a task, accumulating elapsed time.
 // Returns 409-style error if no timer is running.
 func (s *TimeEntryService) PauseTimer(taskID string) (*models.TimeEntry, error) {
 	running, err := s.timeEntryRepo.GetRunningEntry(taskID)
@@ -75,11 +77,19 @@ func (s *TimeEntryService) PauseTimer(taskID string) (*models.TimeEntry, error) 
 	if running == nil {
 		return nil, ErrNoTimerRunning
 	}
+	if running.IsPaused {
+		return running, nil // already paused, no-op
+	}
 
 	now := time.Now()
-	running.EndedAt = &now
-	dur := int(now.Sub(running.StartedAt).Seconds())
-	running.DurationSecs = &dur
+	// Accumulate elapsed: add time since last resume (or start).
+	activeStart := running.StartedAt
+	if running.ResumedAt != nil {
+		activeStart = *running.ResumedAt
+	}
+	running.ElapsedSecs += int(now.Sub(activeStart).Seconds())
+	running.IsPaused = true
+	running.PausedAt = &now
 	running.UpdatedAt = now
 
 	if err := s.timeEntryRepo.Update(running); err != nil {
@@ -89,7 +99,66 @@ func (s *TimeEntryService) PauseTimer(taskID string) (*models.TimeEntry, error) 
 	return running, nil
 }
 
-// StopRunningTimer pauses any running timer on a task without error if none is running.
+// ResumeTimer resumes a paused timer.
+func (s *TimeEntryService) ResumeTimer(taskID string) (*models.TimeEntry, error) {
+	running, err := s.timeEntryRepo.GetRunningEntry(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("checking running timer: %w", err)
+	}
+	if running == nil {
+		return nil, ErrNoTimerRunning
+	}
+	if !running.IsPaused {
+		return running, nil // already running, no-op
+	}
+
+	now := time.Now()
+	running.IsPaused = false
+	running.PausedAt = nil
+	running.ResumedAt = &now
+	running.UpdatedAt = now
+
+	if err := s.timeEntryRepo.Update(running); err != nil {
+		return nil, fmt.Errorf("resuming time entry: %w", err)
+	}
+
+	return running, nil
+}
+
+// StopTimer finalizes the running timer (accumulates elapsed if running, sets ended_at).
+func (s *TimeEntryService) StopTimer(taskID string) (*models.TimeEntry, error) {
+	running, err := s.timeEntryRepo.GetRunningEntry(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("checking running timer: %w", err)
+	}
+	if running == nil {
+		return nil, ErrNoTimerRunning
+	}
+
+	now := time.Now()
+
+	// If timer is actively running (not paused), accumulate remaining time.
+	if !running.IsPaused {
+		activeStart := running.StartedAt
+		if running.ResumedAt != nil {
+			activeStart = *running.ResumedAt
+		}
+		running.ElapsedSecs += int(now.Sub(activeStart).Seconds())
+	}
+
+	running.EndedAt = &now
+	running.IsPaused = false
+	running.PausedAt = nil
+	running.UpdatedAt = now
+
+	if err := s.timeEntryRepo.Update(running); err != nil {
+		return nil, fmt.Errorf("stopping time entry: %w", err)
+	}
+
+	return running, nil
+}
+
+// StopRunningTimer stops any running timer on a task without error if none is running.
 // Used by CompleteTask to auto-stop timers.
 func (s *TimeEntryService) StopRunningTimer(taskID string) error {
 	running, err := s.timeEntryRepo.GetRunningEntry(taskID)
@@ -97,16 +166,11 @@ func (s *TimeEntryService) StopRunningTimer(taskID string) error {
 		return fmt.Errorf("checking running timer: %w", err)
 	}
 	if running == nil {
-		return nil // no timer running — not an error
+		return nil
 	}
 
-	now := time.Now()
-	running.EndedAt = &now
-	dur := int(now.Sub(running.StartedAt).Seconds())
-	running.DurationSecs = &dur
-	running.UpdatedAt = now
-
-	return s.timeEntryRepo.Update(running)
+	_, err = s.StopTimer(taskID)
+	return err
 }
 
 // CreateManualEntry creates a time entry with explicit start/end times.
@@ -128,9 +192,13 @@ func (s *TimeEntryService) CreateManualEntry(taskID string, spaceID uuid.UUID, u
 		UpdatedAt:  now,
 	}
 
+	// Calculate elapsed from start/end if both provided.
 	if dto.EndedAt != nil {
-		dur := int(dto.EndedAt.Sub(dto.StartedAt).Seconds())
-		entry.DurationSecs = &dur
+		entry.ElapsedSecs = int(dto.EndedAt.Sub(dto.StartedAt).Seconds())
+	}
+	// Allow explicit override.
+	if dto.ElapsedSecs != nil {
+		entry.ElapsedSecs = *dto.ElapsedSecs
 	}
 
 	if err := s.timeEntryRepo.Create(entry); err != nil {
@@ -153,8 +221,8 @@ func (s *TimeEntryService) UpdateEntry(id uuid.UUID, dto *dtos.UpdateTimeEntryRe
 	if dto.EndedAt != nil {
 		entry.EndedAt = dto.EndedAt
 	}
-	if dto.DurationSecs != nil {
-		entry.DurationSecs = dto.DurationSecs
+	if dto.ElapsedSecs != nil {
+		entry.ElapsedSecs = *dto.ElapsedSecs
 	}
 	if dto.Notes != nil {
 		entry.Notes = dto.Notes
@@ -173,7 +241,7 @@ func (s *TimeEntryService) DeleteEntry(id uuid.UUID) error {
 	return s.timeEntryRepo.Delete(id)
 }
 
-// ListEntries returns all time entries for a task with a total duration.
+// ListEntries returns all time entries for a task with a total elapsed duration.
 func (s *TimeEntryService) ListEntries(taskID string) ([]models.TimeEntry, int, error) {
 	entries, err := s.timeEntryRepo.GetByTaskID(taskID)
 	if err != nil {
@@ -181,9 +249,16 @@ func (s *TimeEntryService) ListEntries(taskID string) ([]models.TimeEntry, int, 
 	}
 
 	total := 0
+	now := time.Now()
 	for _, e := range entries {
-		if e.DurationSecs != nil {
-			total += *e.DurationSecs
+		total += e.ElapsedSecs
+		// If entry is still running (not ended, not paused), add live delta.
+		if e.EndedAt == nil && !e.IsPaused {
+			activeStart := e.StartedAt
+			if e.ResumedAt != nil {
+				activeStart = *e.ResumedAt
+			}
+			total += int(now.Sub(activeStart).Seconds())
 		}
 	}
 

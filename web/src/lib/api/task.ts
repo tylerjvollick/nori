@@ -79,20 +79,16 @@ class TaskApi {
 		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${id}`);
 	}
 
+	async setStatus(spaceId: string, id: string, status: import('$lib/types/task').TaskStatus): Promise<TaskResponse> {
+		return apiClient.put<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/status`, { status });
+	}
+
 	async startTask(spaceId: string, id: string): Promise<TaskResponse> {
 		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/start`);
 	}
 
 	async completeTask(spaceId: string, id: string, data?: CompleteTaskRequest): Promise<CompleteTaskResponse> {
 		return apiClient.post<CompleteTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/complete`, data);
-	}
-
-	async pauseTask(spaceId: string, id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/pause`);
-	}
-
-	async resumeTask(spaceId: string, id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/resume`);
 	}
 
 	async skipTask(spaceId: string, id: string): Promise<TaskResponse> {

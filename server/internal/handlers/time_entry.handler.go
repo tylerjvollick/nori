@@ -16,6 +16,8 @@ import (
 type TimeEntryServiceInterface interface {
 	StartTimer(taskID string, spaceID uuid.UUID, userID uuid.UUID) (*models.TimeEntry, error)
 	PauseTimer(taskID string) (*models.TimeEntry, error)
+	ResumeTimer(taskID string) (*models.TimeEntry, error)
+	StopTimer(taskID string) (*models.TimeEntry, error)
 	CreateManualEntry(taskID string, spaceID uuid.UUID, userID uuid.UUID, dto *dtos.CreateTimeEntryRequest) (*models.TimeEntry, error)
 	UpdateEntry(id uuid.UUID, dto *dtos.UpdateTimeEntryRequest) (*models.TimeEntry, error)
 	DeleteEntry(id uuid.UUID) error
@@ -39,6 +41,8 @@ func (h *TimeEntryHandler) RegisterTimeEntryRoutes(router fiber.Router, middlewa
 
 	group.Post("/start", h.StartTimer)
 	group.Post("/pause", h.PauseTimer)
+	group.Post("/resume", h.ResumeTimer)
+	group.Post("/stop", h.StopTimer)
 	group.Post("", h.CreateManualEntry)
 	group.Get("", h.ListEntries)
 	group.Put("/:entryId", h.UpdateEntry)
@@ -80,6 +84,42 @@ func (h *TimeEntryHandler) PauseTimer(c *fiber.Ctx) error {
 	taskID := c.Params("taskId")
 
 	entry, err := h.timeEntryService.PauseTimer(taskID)
+	if err != nil {
+		if errors.Is(err, services.ErrNoTimerRunning) {
+			return c.Status(http.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TimeEntryResponseFromModel(entry))
+}
+
+func (h *TimeEntryHandler) ResumeTimer(c *fiber.Ctx) error {
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	taskID := c.Params("taskId")
+
+	entry, err := h.timeEntryService.ResumeTimer(taskID)
+	if err != nil {
+		if errors.Is(err, services.ErrNoTimerRunning) {
+			return c.Status(http.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(http.StatusOK).JSON(dtos.TimeEntryResponseFromModel(entry))
+}
+
+func (h *TimeEntryHandler) StopTimer(c *fiber.Ctx) error {
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	taskID := c.Params("taskId")
+
+	entry, err := h.timeEntryService.StopTimer(taskID)
 	if err != nil {
 		if errors.Is(err, services.ErrNoTimerRunning) {
 			return c.Status(http.StatusConflict).JSON(fiber.Map{"error": err.Error()})

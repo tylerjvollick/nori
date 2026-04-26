@@ -12,12 +12,6 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import {
-		Circle,
-		CircleDot,
-		CircleCheck,
-		CirclePause,
-		CircleX,
-		CircleMinus,
 		Clock,
 		User,
 		Calendar,
@@ -34,6 +28,8 @@
 	import { timeEntryApi, type TimeEntryResponse } from '$lib/api/timeEntry';
 	import { Input } from '$lib/components/ui/input';
 	import TaskActions from './TaskActions.svelte';
+	import StatusDropdown from './StatusDropdown.svelte';
+	import TimerControls from './TimerControls.svelte';
 	import SubTaskList from './SubTaskList.svelte';
 
 	interface Props {
@@ -86,28 +82,6 @@
 
 	// --- Helpers ---
 
-	type StatusConfig = {
-		label: string;
-		colorClass: string;
-		bgClass: string;
-	};
-
-	function getStatusConfig(status: string): StatusConfig {
-		switch (status) {
-			case 'active':
-				return { label: 'Active', colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10' };
-			case 'done':
-				return { label: 'Done', colorClass: 'text-green-500', bgClass: 'bg-green-500/10' };
-			case 'paused':
-				return { label: 'Paused', colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10' };
-			case 'skipped':
-				return { label: 'Skipped', colorClass: 'text-muted-foreground', bgClass: 'bg-muted' };
-			case 'cancelled':
-				return { label: 'Cancelled', colorClass: 'text-red-500', bgClass: 'bg-red-500/10' };
-			default:
-				return { label: 'Open', colorClass: 'text-muted-foreground', bgClass: 'bg-muted' };
-		}
-	}
 
 	function priorityLabel(priority: number): string {
 		switch (priority) {
@@ -239,7 +213,6 @@
 	// --- Derived state (safe when task is undefined during loading) ---
 
 	let progress = $derived(task ? computeProgress(task) : { done: 0, total: 0 });
-	let statusCfg = $derived(task ? getStatusConfig(task.status) : getStatusConfig('open'));
 	let station = $derived(task ? getStationName(task.stationId) : null);
 
 	// --- Time formula editing (recipe mode) ---
@@ -316,10 +289,6 @@
 
 	// --- Time entry tracking (job/task mode) ---
 	let timeEntries = $state<TimeEntryResponse[]>([]);
-	let totalLoggedSecs = $state(0);
-	let runningEntry = $state<TimeEntryResponse | null>(null);
-	let now = $state(new Date());
-	let timerInterval = $state<ReturnType<typeof setInterval> | null>(null);
 
 	// Fetch time entries when task changes (only in job/task mode).
 	$effect(() => {
@@ -328,8 +297,6 @@
 			loadTimeEntries(currentTask.id);
 		} else {
 			timeEntries = [];
-			totalLoggedSecs = 0;
-			runningEntry = null;
 		}
 	});
 
@@ -337,37 +304,10 @@
 		try {
 			const result = await timeEntryApi.list(spaceId, taskId);
 			timeEntries = result.items;
-			totalLoggedSecs = result.totalDurationSecs;
-			runningEntry = result.items.find((e) => !e.endedAt) ?? null;
 		} catch {
 			timeEntries = [];
-			totalLoggedSecs = 0;
-			runningEntry = null;
 		}
 	}
-
-	// Tick the live timer every second when a timer is running.
-	$effect(() => {
-		if (runningEntry) {
-			now = new Date();
-			const id = setInterval(() => { now = new Date(); }, 1000);
-			timerInterval = id;
-			return () => clearInterval(id);
-		} else if (timerInterval) {
-			clearInterval(timerInterval);
-			timerInterval = null;
-		}
-	});
-
-	/** Elapsed seconds on the currently running entry. */
-	let runningElapsedSecs = $derived(
-		runningEntry
-			? Math.max(0, Math.floor((now.getTime() - new Date(runningEntry.startedAt).getTime()) / 1000))
-			: 0,
-	);
-
-	/** Total time including the live running entry. */
-	let totalWithRunning = $derived(totalLoggedSecs + runningElapsedSecs);
 
 	/** Wrap onaction to also refresh time entries after start/pause/resume. */
 	function handleAction(updated: TaskResponse): void {
@@ -384,24 +324,25 @@
 			loadTimeEntries(task.id);
 		}
 	}
+
+	/** Called after the StatusDropdown changes status. */
+	function handleStatusChange(newStatus: import('$lib/types/task').TaskStatus): void {
+		if (task) {
+			// Optimistically update local task and notify parent
+			const updated = { ...task, status: newStatus } as TaskResponse;
+			onaction?.(updated);
+			loadTimeEntries(task.id);
+		}
+	}
+
+	/** Called after a timer action (start/pause/resume/stop). */
+	function handleTimerUpdate(): void {
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
 </script>
 
-{#snippet statusIcon(status: string, sizeClass: string)}
-	{@const cfg = getStatusConfig(status)}
-	{#if status === 'active'}
-		<CircleDot class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'done'}
-		<CircleCheck class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'paused'}
-		<CirclePause class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'cancelled'}
-		<CircleX class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'skipped'}
-		<CircleMinus class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else}
-		<Circle class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{/if}
-{/snippet}
 
 <div class="p-6 space-y-5">
 	{#if isLoading || !task}
@@ -528,10 +469,13 @@
 			{#if mode !== 'recipe'}
 				<div class="flex items-center justify-between">
 					<span class="text-sm text-muted-foreground">Status</span>
-					<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
-						{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
-						{statusCfg.label}
-					</Badge>
+					<StatusDropdown
+						status={task.status}
+						{spaceId}
+						taskId={task.id}
+						isBlocked={deps !== null && deps.blockers.length > 0}
+						onchange={handleStatusChange}
+					/>
 				</div>
 			{/if}
 
@@ -673,22 +617,14 @@
 				{/if}
 
 				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground flex items-center gap-1.5">
-						Logged Time
-						{#if runningEntry}
-							<span class="relative flex size-2">
-								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
-							</span>
-						{/if}
-					</span>
-					<span class="text-sm text-foreground flex items-center gap-1" data-testid="logged-time">
-						<Clock class="w-3 h-3 text-muted-foreground" />
-						{formatDuration(totalWithRunning)}
-						{#if runningEntry}
-							<span class="text-xs text-green-600 dark:text-green-400 font-medium">Recording</span>
-						{/if}
-					</span>
+					<span class="text-sm text-muted-foreground">Time</span>
+					<TimerControls
+						{spaceId}
+						taskId={task.id}
+						taskStatus={task.status}
+						entries={timeEntries}
+						onupdate={handleTimerUpdate}
+					/>
 				</div>
 
 				{#if task.startedAt}

@@ -695,10 +695,10 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 
 					switch actionName {
 					case "complete":
-						if task.Status != "active" && task.Status != "open" {
+						if task.Status == "done" || task.Status == "skipped" || task.Status == "cancelled" {
 							w.WriteHeader(http.StatusConflict)
 							json.NewEncoder(w).Encode(map[string]string{
-								"error": fmt.Sprintf("task %q cannot be completed: status is %q, must be \"active\" or \"open\"", taskID, task.Status),
+								"error": fmt.Sprintf("task %q cannot be completed: already in terminal status %q", taskID, task.Status),
 							})
 							return
 						}

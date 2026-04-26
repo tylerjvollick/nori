@@ -6,7 +6,6 @@
 		Circle,
 		CircleDot,
 		CircleCheck,
-		CirclePause,
 		CircleMinus,
 		CircleX,
 		Ban,
@@ -113,17 +112,11 @@
 			text: 'text-gray-500',
 			icon: Circle,
 		},
-		active: {
+		in_progress: {
 			bg: 'bg-blue-50 dark:bg-blue-950/50',
 			border: 'border-blue-200 dark:border-blue-900',
 			text: 'text-blue-500',
 			icon: CircleDot,
-		},
-		paused: {
-			bg: 'bg-yellow-50 dark:bg-yellow-950/50',
-			border: 'border-yellow-200 dark:border-yellow-900',
-			text: 'text-yellow-500',
-			icon: CirclePause,
 		},
 		done: {
 			bg: 'bg-green-50 dark:bg-green-950/50',

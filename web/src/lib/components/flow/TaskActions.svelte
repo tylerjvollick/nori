@@ -6,14 +6,13 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		CircleCheck,
-		Pause,
 		Play,
 		SkipForward,
 		Loader2,
 	} from '@lucide/svelte';
 	import CompletionModal from './CompletionModal.svelte';
 
-	type ActionType = 'start' | 'complete' | 'pause' | 'resume' | 'skip';
+	type ActionType = 'start' | 'complete' | 'skip';
 
 	interface Props {
 		task: TaskResponse;
@@ -32,24 +31,20 @@
 	let showSkipDialog = $state(false);
 	let showCompletionModal = $state(false);
 
-	/** Determine available actions for the current task status.
-	 *  Always shown regardless of assignment. Anyone can perform any action. */
+	/** Determine available actions for the current task status. */
 	function getActions(status: TaskStatus): ActionType[] {
 		switch (status) {
 			case 'open':
 				return ['start', 'skip'];
-			case 'active':
-				return ['pause', 'complete', 'skip'];
-			case 'paused':
-				return ['resume', 'complete', 'skip'];
+			case 'in_progress':
+				return ['complete', 'skip'];
 			default:
 				return [];
 		}
 	}
 
-	/** Actions excluded from compact layout (board cards) to prevent accidental taps.
-	 *  Users should open the task detail to start/resume/skip. */
-	const compactExcluded: ActionType[] = ['start', 'resume', 'skip'];
+	/** Actions excluded from compact layout (board cards) to prevent accidental taps. */
+	const compactExcluded: ActionType[] = ['start', 'skip'];
 
 	let actions = $derived(
 		layout === 'compact'
@@ -64,8 +59,6 @@
 	}> = {
 		start: { label: 'Start', variant: 'default' },
 		complete: { label: 'Complete', variant: 'default', class: 'bg-green-600 hover:bg-green-700 text-white' },
-		pause: { label: 'Pause', variant: 'secondary' },
-		resume: { label: 'Resume', variant: 'default' },
 		skip: { label: 'Skip', variant: 'outline' },
 	};
 
@@ -107,19 +100,7 @@
 			switch (action) {
 				case 'start':
 					updated = await taskApi.startTask(spaceId, task.id);
-					// Also start a time entry for tracking.
-					await timeEntryApi.start(spaceId, task.id).catch((e) =>
-						console.warn('Time entry start failed (non-blocking):', e));
-					break;
-				case 'pause':
-					updated = await taskApi.pauseTask(spaceId, task.id);
-					// Also pause the running time entry.
-					await timeEntryApi.pause(spaceId, task.id).catch((e) =>
-						console.warn('Time entry pause failed (non-blocking):', e));
-					break;
-				case 'resume':
-					updated = await taskApi.resumeTask(spaceId, task.id);
-					// Resume creates a new time entry (discrete log).
+					// Also start a timer for tracking.
 					await timeEntryApi.start(spaceId, task.id).catch((e) =>
 						console.warn('Time entry start failed (non-blocking):', e));
 					break;
@@ -158,10 +139,6 @@
 						<Play class="size-4" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-4" />
-					{:else if action === 'pause'}
-						<Pause class="size-4" />
-					{:else if action === 'resume'}
-						<Play class="size-4" />
 					{:else if action === 'skip'}
 						<SkipForward class="size-4" />
 					{/if}
@@ -188,10 +165,6 @@
 						<Play class="size-3.5" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-3.5" />
-					{:else if action === 'pause'}
-						<Pause class="size-3.5" />
-					{:else if action === 'resume'}
-						<Play class="size-3.5" />
 					{:else if action === 'skip'}
 						<SkipForward class="size-3.5" />
 					{/if}

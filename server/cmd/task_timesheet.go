@@ -17,13 +17,14 @@ import (
 
 type timeEntryResponse struct {
 	ID           string  `json:"id"`
-	TaskID       string  `json:"taskId"`
-	SpaceID      string  `json:"spaceId"`
-	LoggedByID   string  `json:"loggedById"`
-	StartedAt    string  `json:"startedAt"`
-	EndedAt      *string `json:"endedAt,omitempty"`
-	DurationSecs *int    `json:"durationSecs,omitempty"`
-	Notes        *string `json:"notes,omitempty"`
+	TaskID      string  `json:"taskId"`
+	SpaceID     string  `json:"spaceId"`
+	LoggedByID  string  `json:"loggedById"`
+	StartedAt   string  `json:"startedAt"`
+	EndedAt     *string `json:"endedAt,omitempty"`
+	ElapsedSecs int     `json:"elapsedSecs"`
+	IsPaused    bool    `json:"isPaused"`
+	Notes       *string `json:"notes,omitempty"`
 }
 
 type timeEntryListResponse struct {
@@ -166,16 +167,16 @@ func runTimesheetList(cmd *cobra.Command, args []string) error {
 		} else {
 			end = "(running)"
 		}
-		dur := "--"
-		if entry.DurationSecs != nil {
-			dur = formatDurationCLI(*entry.DurationSecs)
-		} else if entry.EndedAt == nil {
-			// Running entry — compute live elapsed.
+		dur := formatDurationCLI(entry.ElapsedSecs)
+		if entry.EndedAt == nil && !entry.IsPaused {
+			// Running entry — add live delta.
 			t, parseErr := time.Parse(time.RFC3339, entry.StartedAt)
 			if parseErr == nil {
-				elapsed := int(time.Since(t).Seconds())
-				dur = formatDurationCLI(elapsed) + " (live)"
+				live := entry.ElapsedSecs + int(time.Since(t).Seconds())
+				dur = formatDurationCLI(live) + " (live)"
 			}
+		} else if entry.IsPaused {
+			dur += " (paused)"
 		}
 		notes := ""
 		if entry.Notes != nil {
@@ -242,10 +243,7 @@ func runTimesheetAdd(cmd *cobra.Command, args []string) error {
 		return enc.Encode(entry)
 	}
 
-	dur := "--"
-	if entry.DurationSecs != nil {
-		dur = formatDurationCLI(*entry.DurationSecs)
-	}
+	dur := formatDurationCLI(entry.ElapsedSecs)
 	fmt.Printf("Added time entry: %s – %s (%s)\n", formatEntryTime(entry.StartedAt), formatEntryTime(*entry.EndedAt), dur)
 	return nil
 }

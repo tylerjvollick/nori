@@ -96,7 +96,7 @@
 	// ---- Job aggregate type ----
 
 	interface JobWithAggregate extends TaskResponse {
-		aggregateStatus: 'done' | 'active' | 'open';
+		aggregateStatus: 'done' | 'in_progress' | 'open';
 		totalTimeSeconds: number;
 		childCount: number;
 		doneChildCount: number;
@@ -167,16 +167,16 @@
 
 	// ---- Helpers ----
 
-	function computeAggregateStatus(children: TaskResponse[]): 'done' | 'active' | 'open' {
+	function computeAggregateStatus(children: TaskResponse[]): 'done' | 'in_progress' | 'open' {
 		if (children.length === 0) return 'open';
 		const allDone = children.every(
 			(c) => c.status === 'done' || c.status === 'skipped' || c.status === 'cancelled',
 		);
 		if (allDone) return 'done';
 		const anyActive = children.some(
-			(c) => c.status === 'active' || c.status === 'paused',
+			(c) => c.status === 'in_progress',
 		);
-		if (anyActive) return 'active';
+		if (anyActive) return 'in_progress';
 		return 'open';
 	}
 
@@ -192,9 +192,9 @@
 		return tree.children.map(({ children: _, ...rest }) => rest as TaskResponse);
 	}
 
-	function statusToAggregate(status: string): 'done' | 'active' | 'open' {
+	function statusToAggregate(status: string): 'done' | 'in_progress' | 'open' {
 		if (status === 'done' || status === 'skipped' || status === 'cancelled') return 'done';
-		if (status === 'active' || status === 'paused') return 'active';
+		if (status === 'in_progress') return 'in_progress';
 		return 'open';
 	}
 
@@ -352,7 +352,7 @@
 
 			allJobs = jobsWithAggregates;
 			readyJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'open');
-			inProgressJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'active');
+			inProgressJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'in_progress');
 			const allDoneJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'done');
 			allDoneJobs.sort(
 				(a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),

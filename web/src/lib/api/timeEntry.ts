@@ -1,6 +1,6 @@
 import { apiClient } from './client';
 
-/** A single time entry record. */
+/** A single time entry (work session) record. */
 export interface TimeEntryResponse {
 	id: string;
 	taskId: string;
@@ -8,7 +8,10 @@ export interface TimeEntryResponse {
 	loggedById: string;
 	startedAt: string;
 	endedAt?: string | null;
-	durationSecs?: number | null;
+	elapsedSecs: number;
+	isPaused: boolean;
+	pausedAt?: string | null;
+	resumedAt?: string | null;
 	notes?: string | null;
 	createdAt: string;
 	updatedAt: string;
@@ -24,6 +27,7 @@ export interface TimeEntryListResponse {
 export interface CreateTimeEntryRequest {
 	startedAt: string;
 	endedAt?: string;
+	elapsedSecs?: number;
 	notes?: string;
 }
 
@@ -31,7 +35,7 @@ export interface CreateTimeEntryRequest {
 export interface UpdateTimeEntryRequest {
 	startedAt?: string;
 	endedAt?: string;
-	durationSecs?: number;
+	elapsedSecs?: number;
 	notes?: string;
 }
 
@@ -51,6 +55,20 @@ class TimeEntryApi {
 	async pause(spaceId: string, taskId: string): Promise<TimeEntryResponse> {
 		return apiClient.post<TimeEntryResponse>(
 			`${this.basePath(spaceId, taskId)}/pause`,
+		);
+	}
+
+	/** Resume the paused timer on a task. */
+	async resume(spaceId: string, taskId: string): Promise<TimeEntryResponse> {
+		return apiClient.post<TimeEntryResponse>(
+			`${this.basePath(spaceId, taskId)}/resume`,
+		);
+	}
+
+	/** Stop the timer on a task (finalizes the session). */
+	async stop(spaceId: string, taskId: string): Promise<TimeEntryResponse> {
+		return apiClient.post<TimeEntryResponse>(
+			`${this.basePath(spaceId, taskId)}/stop`,
 		);
 	}
 

@@ -512,7 +512,6 @@ func (s *RecipeService) DeepCloneTaskTree(
 			if opts.ResetStatus {
 				clone.Status = models.TaskStatusOpen
 				clone.StartedAt = nil
-				clone.PausedAt = nil
 				clone.CompletedAt = nil
 				clone.ActualTimeSecs = 0
 			}

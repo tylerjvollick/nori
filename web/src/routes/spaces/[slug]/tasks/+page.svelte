@@ -34,8 +34,7 @@
 
 	const STATUS_OPTIONS = [
 		{ value: 'open', label: 'Open' },
-		{ value: 'active', label: 'Active' },
-		{ value: 'paused', label: 'Paused' },
+		{ value: 'in_progress', label: 'In Progress' },
 		{ value: 'done', label: 'Done' },
 		{ value: 'skipped', label: 'Skipped' },
 	];

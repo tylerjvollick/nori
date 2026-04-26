@@ -38,12 +38,15 @@
 
 	// --- Submission state ---
 
-	type ModalPhase = 'confirm-time' | 'submitting' | 'completed';
+	type ModalPhase = 'confirm-time' | 'submitting' | 'cascade' | 'completed';
 
 	let phase = $state<ModalPhase>('confirm-time');
 	let completionResponse = $state<CompleteTaskResponse | null>(null);
 	let errorMessage = $state<string | null>(null);
 	let addingEntry = $state(false);
+
+	// --- Cascade state ---
+	let cascadeSelected = $state<Set<string>>(new Set());
 
 	// Load time entries when modal opens
 	$effect(() => {
@@ -76,11 +79,11 @@
 	let computedTotal = $derived.by(() => {
 		let total = 0;
 		for (const entry of entries) {
-			if (entry.durationSecs != null) {
-				total += entry.durationSecs;
-			} else if (entry.startedAt && !entry.endedAt) {
-				// Running entry — compute live elapsed
-				total += Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1000));
+			total += entry.elapsedSecs;
+			if (!entry.endedAt && !entry.isPaused) {
+				// Running entry — add live delta
+				const activeStart = entry.resumedAt || entry.startedAt;
+				total += Math.max(0, Math.floor((Date.now() - new Date(activeStart).getTime()) / 1000));
 			}
 		}
 		return total;
@@ -104,16 +107,12 @@
 	}
 
 	function entryDuration(entry: TimeEntryResponse): number {
-		if (entry.durationSecs != null) return entry.durationSecs;
-		if (entry.startedAt && entry.endedAt) {
-			return Math.max(0, Math.floor(
-				(new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime()) / 1000
-			));
+		let elapsed = entry.elapsedSecs;
+		if (!entry.endedAt && !entry.isPaused) {
+			const activeStart = entry.resumedAt || entry.startedAt;
+			elapsed += Math.max(0, Math.floor((Date.now() - new Date(activeStart).getTime()) / 1000));
 		}
-		if (entry.startedAt && !entry.endedAt) {
-			return Math.max(0, Math.floor((Date.now() - new Date(entry.startedAt).getTime()) / 1000));
-		}
-		return 0;
+		return elapsed;
 	}
 
 	function isRunning(entry: TimeEntryResponse): boolean {
@@ -196,7 +195,7 @@
 			editingEntry = null;
 			return;
 		}
-		await updateEntry(entry.id, { durationSecs: secs });
+		await updateEntry(entry.id, { elapsedSecs: secs });
 	}
 
 	// --- Completion flow ---
@@ -205,21 +204,58 @@
 		phase = 'submitting';
 		errorMessage = null;
 		try {
-			// Auto-pause running timer if one exists
+			// Auto-stop running timer if one exists
 			const running = entries.find((e) => !e.endedAt);
 			if (running) {
-				await timeEntryApi.pause(spaceId, task.id).catch(() => {});
+				await timeEntryApi.stop(spaceId, task.id).catch(() => {});
 			}
 
 			const response = await taskApi.completeTask(spaceId, task.id, {
 				actualTimeSeconds: computedTotal,
 			});
 			completionResponse = response;
-			phase = 'completed';
+
+			// If there are unresolved blockers, show cascade prompt
+			if (response.unresolvedBlockers && response.unresolvedBlockers.length > 0) {
+				cascadeSelected = new Set(response.unresolvedBlockers.map((b) => b.id));
+				phase = 'cascade';
+			} else {
+				phase = 'completed';
+			}
 		} catch (e) {
 			errorMessage = e instanceof Error ? e.message : 'Failed to complete task';
 			phase = 'confirm-time';
 		}
+	}
+
+	/** Complete selected blockers in cascade, then show completed phase. */
+	async function completeCascade(): Promise<void> {
+		if (!completionResponse) return;
+		phase = 'submitting';
+		try {
+			const promises = Array.from(cascadeSelected).map((blockerId) =>
+				taskApi.completeTask(spaceId, blockerId, {}).catch(() => {}),
+			);
+			await Promise.all(promises);
+		} catch {
+			// Best-effort — don't block the flow
+		}
+		phase = 'completed';
+	}
+
+	/** Skip cascade and go straight to completed. */
+	function skipCascade(): void {
+		phase = 'completed';
+	}
+
+	function toggleCascadeItem(id: string): void {
+		const next = new Set(cascadeSelected);
+		if (next.has(id)) {
+			next.delete(id);
+		} else {
+			next.add(id);
+		}
+		cascadeSelected = next;
 	}
 
 	function handleSaveAndNext(): void {
@@ -379,8 +415,53 @@
 				</Button>
 			</Dialog.Footer>
 
+		{:else if phase === 'cascade' && completionResponse?.unresolvedBlockers}
+			<!-- Phase 2: Cascade — unresolved blockers -->
+			<Dialog.Header>
+				<Dialog.Title class="flex items-center gap-2">
+					<CircleCheck class="size-5 text-green-600" />
+					Task Completed — Blockers Remaining
+				</Dialog.Title>
+				<Dialog.Description>
+					"{task.title}" is done, but these blocking tasks are still unresolved.
+					Complete them now or handle later.
+				</Dialog.Description>
+			</Dialog.Header>
+
+			<div class="py-4 space-y-2">
+				<div class="max-h-60 overflow-y-auto space-y-1">
+					{#each completionResponse.unresolvedBlockers as blocker (blocker.id)}
+						<label class="flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
+							<input
+								type="checkbox"
+								checked={cascadeSelected.has(blocker.id)}
+								onchange={() => toggleCascadeItem(blocker.id)}
+								class="size-4 rounded border-border"
+							/>
+							<div class="flex-1 min-w-0">
+								<span class="text-sm font-medium text-foreground truncate block">{blocker.title}</span>
+								<span class="text-xs text-muted-foreground">{blocker.id} &middot; {blocker.status}</span>
+							</div>
+						</label>
+					{/each}
+				</div>
+			</div>
+
+			<Dialog.Footer>
+				<Button variant="outline" onclick={skipCascade}>
+					Later
+				</Button>
+				<Button
+					class="bg-green-600 hover:bg-green-700 text-white"
+					onclick={completeCascade}
+					disabled={cascadeSelected.size === 0}
+				>
+					Complete Selected ({cascadeSelected.size})
+				</Button>
+			</Dialog.Footer>
+
 		{:else if phase === 'completed' && completionResponse}
-			<!-- Phase 2: Completed — show next task navigation -->
+			<!-- Phase 3: Completed — show next task navigation -->
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
 					<CircleCheck class="size-5 text-green-600" />

@@ -168,6 +168,11 @@ record of what happened — they are the plan for what will happen.
   namespace (e.g., `nori-abc.1`, `nori-abc.2` for epic `nori-abc`). This
   makes `bv` search, filtering, and graph traversal work correctly
 - Every bead MUST have acceptance criteria at creation time (see VI above)
+- **A bead should be a reasonable amount of work to fit into a single
+  commit.** If a bead covers multiple distinct UI surfaces, API endpoints,
+  or layers that could each be independently tested and shipped, split it
+  into smaller beads. A good bead is one feature, one fix, or one
+  coherent change — not an entire user story with four moving parts
 - **A bead MUST NOT be closed until all tests in its acceptance criteria are
   passing.** Run the relevant test suite, confirm green output, THEN close.
   This applies universally — not just frontend beads

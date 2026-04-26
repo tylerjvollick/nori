@@ -104,8 +104,7 @@
 	// ---- Status → edge color (matches TaskNode) ----
 	const STATUS_EDGE_COLORS: Record<TaskStatus, string> = {
 		open: '#9ca3af', // gray-400
-		active: '#3b82f6', // blue-500
-		paused: '#eab308', // yellow-500
+		in_progress: '#3b82f6', // blue-500
 		done: '#22c55e', // green-500
 		skipped: '#9ca3af', // gray-400
 		cancelled: '#ef4444', // red-500
@@ -1315,8 +1314,7 @@
 						if (nodeData.isBlocked && status === 'open') return '#ef4444';
 						const colors: Record<string, string> = {
 							open: '#9ca3af',
-							active: '#3b82f6',
-							paused: '#eab308',
+							in_progress: '#3b82f6',
 							done: '#22c55e',
 							skipped: '#9ca3af',
 							cancelled: '#ef4444',

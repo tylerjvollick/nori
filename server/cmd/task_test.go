@@ -140,62 +140,24 @@ func TestRunTaskComplete_Conflict(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot be completed")
 }
 
-// --- Pause Tests ---
+// --- Pause Tests (timer-only, non-fatal) ---
 
 func TestRunTaskPause_Success(t *testing.T) {
-	resp := taskActionResponse{
-		ID:     "shop-a1.1",
-		Title:  "Cut mortises",
-		Status: "paused",
-	}
-	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/pause", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/time-entries/pause", http.MethodPost, nil, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskPause(taskPauseCmd, []string{"shop-a1.1"})
 	require.NoError(t, err)
 }
 
-func TestRunTaskPause_Conflict(t *testing.T) {
-	server := setupTestServer(t,
-		"/api/v1/spaces/test-space/tasks/shop-a1.1/pause",
-		http.MethodPost,
-		errorResponse{Error: `task "shop-a1.1" cannot be paused: status is "open", must be "active"`},
-		http.StatusConflict,
-	)
-	setupCredentials(t, server.URL)
-
-	err := runTaskPause(taskPauseCmd, []string{"shop-a1.1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be paused")
-}
-
-// --- Resume Tests ---
+// --- Resume Tests (timer-only, non-fatal) ---
 
 func TestRunTaskResume_Success(t *testing.T) {
-	resp := taskActionResponse{
-		ID:     "shop-a1.1",
-		Title:  "Cut mortises",
-		Status: "active",
-	}
-	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/resume", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/time-entries/resume", http.MethodPost, nil, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
 	require.NoError(t, err)
-}
-
-func TestRunTaskResume_Conflict(t *testing.T) {
-	server := setupTestServer(t,
-		"/api/v1/spaces/test-space/tasks/shop-a1.1/resume",
-		http.MethodPost,
-		errorResponse{Error: `task "shop-a1.1" cannot be resumed: status is "active", must be "paused"`},
-		http.StatusConflict,
-	)
-	setupCredentials(t, server.URL)
-
-	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be resumed")
 }
 
 // --- Skip Tests ---
@@ -318,7 +280,7 @@ func TestRunTaskAdd_Success_InfersParentFromActiveTask(t *testing.T) {
 
 		// Active task lookup
 		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet {
-			assert.Contains(t, r.URL.RawQuery, "status=active")
+			assert.Contains(t, r.URL.RawQuery, "status=in_progress")
 			assert.Contains(t, r.URL.RawQuery, "assigneeId=user-123")
 			json.NewEncoder(w).Encode(activeTaskListResponse{
 				Items: []activeTaskResponse{

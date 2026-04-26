@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { onDestroy } from 'svelte';
 	import type { TaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
@@ -10,7 +9,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Clock, User, UserPlus, UserX, Check, Loader2 } from '@lucide/svelte';
-	import { formatTimeSpent } from '$lib/utils/time';
+	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
@@ -29,37 +28,8 @@
 
 	let slug = $derived($page.params.slug);
 
-	// --- Running timer for active tasks ---
-
-	let now = $state(new Date());
-	let tickTimer: ReturnType<typeof setInterval> | null = null;
-
-	$effect(() => {
-		// Read task.status in the effect body for Svelte 5 dependency tracking
-		const status = task.status;
-		if (status === 'active') {
-			tickTimer = setInterval(() => {
-				now = new Date();
-			}, 1_000);
-		}
-
-		return () => {
-			if (tickTimer) {
-				clearInterval(tickTimer);
-				tickTimer = null;
-			}
-		};
-	});
-
-	onDestroy(() => {
-		if (tickTimer) {
-			clearInterval(tickTimer);
-			tickTimer = null;
-		}
-	});
-
-	let timeDisplay = $derived(formatTimeSpent(task.actualTimeSeconds, task.status, task.startedAt, now));
-	let isActive = $derived(task.status === 'active');
+	let timeDisplay = $derived(formatDuration(task.actualTimeSeconds));
+	let isInProgress = $derived(task.status === 'in_progress');
 
 	// --- Space members for assignment picker ---
 
@@ -299,8 +269,8 @@
 				</div>
 				<div class="flex items-center gap-1.5">
 					<TaskActions {task} {spaceId} layout="compact" {onaction} />
-					<span class="flex items-center gap-1 {isActive ? 'text-blue-500 dark:text-blue-400' : ''}">
-						{#if isActive}
+					<span class="flex items-center gap-1 {isInProgress ? 'text-blue-500 dark:text-blue-400' : ''}">
+						{#if isInProgress}
 							<span class="relative flex size-2">
 								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
 								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>

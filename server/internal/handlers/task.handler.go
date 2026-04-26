@@ -21,10 +21,9 @@ type TaskServiceInterface interface {
 	ListTasks(filter repositories.TaskFilter) ([]models.Task, int64, error)
 	UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*models.Task, error)
 	DeleteTask(id string) error
+	SetTaskStatus(taskID string, userID uuid.UUID, newStatus models.TaskStatus) (*models.Task, error)
 	StartTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	CompleteTask(taskID string, userID uuid.UUID, actualTimeSecs *int) (*services.CompleteTaskResult, error)
-	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
-	ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	SkipTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	AddChildTask(parentID string, dto *dtos.AddChildTaskRequest, userID uuid.UUID) (*models.Task, error)
 	AddNote(taskID string, text string) (*models.Task, error)
@@ -57,10 +56,9 @@ func (h *TaskHandler) RegisterTaskRoutes(router fiber.Router, middlewares ...fib
 	group.Get("/:id/tree", h.GetTaskTree)
 	group.Put("/:id", h.UpdateTask)
 	group.Delete("/:id", h.DeleteTask)
+	group.Put("/:id/status", h.SetStatus)
 	group.Post("/:id/start", h.StartTask)
 	group.Post("/:id/complete", h.CompleteTask)
-	group.Post("/:id/pause", h.PauseTask)
-	group.Post("/:id/resume", h.ResumeTask)
 	group.Post("/:id/skip", h.SkipTask)
 	group.Post("/:id/children", h.AddChildTask)
 	group.Post("/:id/notes", h.AddNote)
@@ -394,11 +392,20 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 		NextTaskTitle: result.NextTaskTitle,
 	}
 
+	// Include unresolved blockers if any.
+	for _, b := range result.UnresolvedBlockers {
+		resp.UnresolvedBlockers = append(resp.UnresolvedBlockers, dtos.UnresolvedBlockerResponse{
+			ID:     b.ID,
+			Title:  b.Title,
+			Status: string(b.Status),
+		})
+	}
+
 	return c.Status(http.StatusOK).JSON(resp)
 }
 
-// PauseTask pauses an active task.
-func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
+// SetStatus changes the task status via PUT /tasks/:id/status.
+func (h *TaskHandler) SetStatus(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
 		return err
@@ -411,41 +418,17 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify task belongs to the requester's space before pausing.
 	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
-	task, err := h.taskService.PauseTask(id, authDTO.User.ID)
-	if err != nil {
-		return c.Status(http.StatusConflict).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+	var dto dtos.SetStatusRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
-}
-
-// ResumeTask resumes a paused task.
-func (h *TaskHandler) ResumeTask(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
-	id := c.Params("id")
-	if id == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "task ID is required",
-		})
-	}
-
-	// Verify task belongs to the requester's space before resuming.
-	if _, err := h.getTaskInSpace(c, id); err != nil {
-		return err
-	}
-
-	task, err := h.taskService.ResumeTask(id, authDTO.User.ID)
+	newStatus := models.TaskStatus(dto.Status)
+	task, err := h.taskService.SetTaskStatus(id, authDTO.User.ID, newStatus)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),

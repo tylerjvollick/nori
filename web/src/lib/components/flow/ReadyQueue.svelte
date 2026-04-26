@@ -2,7 +2,7 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Clock, User, Inbox } from '@lucide/svelte';
-	import { formatTimeSpent } from '$lib/utils/time';
+	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
@@ -149,7 +149,7 @@
 
 					<span class="flex items-center gap-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
 						<Clock class="size-3" />
-						{formatTimeSpent(task.actualTimeSeconds, task.status, task.startedAt)}
+						{formatDuration(task.actualTimeSeconds)}
 					</span>
 				</div>
 			</div>

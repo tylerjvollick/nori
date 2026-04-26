@@ -61,13 +61,13 @@ var (
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks",
-	Long:  "Task lifecycle commands: start, complete, pause, resume, skip, add, and note.",
+	Long:  "Task lifecycle and timer commands: start, complete, pause, resume, skip, add, and note.",
 }
 
 var taskStartCmd = &cobra.Command{
 	Use:   "start <id>",
 	Short: "Start a task",
-	Long:  "Start an open task, transitioning it to active status.",
+	Long:  "Start an open task, transitioning it to in_progress status and starting a timer.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskStart,
 }
@@ -75,23 +75,23 @@ var taskStartCmd = &cobra.Command{
 var taskCompleteCmd = &cobra.Command{
 	Use:   "complete <id>",
 	Short: "Complete a task",
-	Long:  "Mark a task as done. The task must be in active status.",
+	Long:  "Mark a task as done. Works from any non-terminal status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskComplete,
 }
 
 var taskPauseCmd = &cobra.Command{
 	Use:   "pause <id>",
-	Short: "Pause a task",
-	Long:  "Pause an active task.",
+	Short: "Pause timer on a task",
+	Long:  "Pause the running timer on a task. Does not change task status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskPause,
 }
 
 var taskResumeCmd = &cobra.Command{
 	Use:   "resume <id>",
-	Short: "Resume a paused task",
-	Long:  "Resume a paused task back to active status.",
+	Short: "Resume timer on a task",
+	Long:  "Resume the paused timer on a task. Does not change task status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskResume,
 }
@@ -115,7 +115,7 @@ var taskAddCmd = &cobra.Command{
 var taskNoteCmd = &cobra.Command{
 	Use:   "note <text>",
 	Short: "Add deviation note to current task",
-	Long:  "Add a deviation note to your current active task. Notes are appended if the task already has notes.",
+	Long:  "Add a deviation note to your current in-progress task. Notes are appended if the task already has notes.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskNote,
 }
@@ -148,26 +148,21 @@ func runTaskStart(cmd *cobra.Command, args []string) error {
 }
 
 func runTaskComplete(cmd *cobra.Command, args []string) error {
-	// Auto-pause running timer before completing.
-	timeEntryPause(args[0])
+	// Timer is auto-stopped by the server on complete.
 	return runTaskAction(args[0], "complete")
 }
 
 func runTaskPause(cmd *cobra.Command, args []string) error {
-	if err := runTaskAction(args[0], "pause"); err != nil {
-		return err
-	}
-	// Also pause the running time entry.
+	// Pause only controls the timer now, not task status.
 	timeEntryPause(args[0])
+	fmt.Printf("Timer paused for task %s\n", args[0])
 	return nil
 }
 
 func runTaskResume(cmd *cobra.Command, args []string) error {
-	if err := runTaskAction(args[0], "resume"); err != nil {
-		return err
-	}
-	// Resume creates a new time entry (discrete log).
-	timeEntryStart(args[0])
+	// Resume only controls the timer now, not task status.
+	timeEntryResume(args[0])
+	fmt.Printf("Timer resumed for task %s\n", args[0])
 	return nil
 }
 
@@ -194,6 +189,21 @@ func timeEntryPause(taskID string) {
 	}
 	client := newClientWithSpace(creds)
 	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/pause", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+}
+
+// timeEntryResume resumes a paused time entry. Non-fatal.
+func timeEntryResume(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/resume", taskID))
 	resp, err := client.Post(path, nil)
 	if err != nil {
 		return
@@ -248,9 +258,9 @@ func runTaskAction(taskID, action string) error {
 	return nil
 }
 
-// findActiveTask finds the user's current active task.
+// findActiveTask finds the user's current in-progress task.
 func findActiveTask(client *cli.Client, creds *cli.Credentials) (*activeTaskResponse, error) {
-	path := client.SpacePath(fmt.Sprintf("/tasks?status=active&assigneeId=%s&limit=1", creds.UserID))
+	path := client.SpacePath(fmt.Sprintf("/tasks?status=in_progress&assigneeId=%s&limit=1", creds.UserID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)

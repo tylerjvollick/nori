@@ -193,44 +193,99 @@ func (s *TaskService) DeleteTask(id string) error {
 	return s.taskRepo.Delete(id)
 }
 
-// StartTask transitions a task from open to active status.
-// Sets StartedAt timestamp if not already set.
-func (s *TaskService) StartTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+// SetTaskStatus transitions a task to the given status.
+// Valid transitions: open -> in_progress; any non-terminal -> done/skipped/cancelled.
+// Sets StartedAt on first transition to in_progress.
+func (s *TaskService) SetTaskStatus(taskID string, userID uuid.UUID, newStatus models.TaskStatus) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
 	if err != nil {
 		return nil, err
 	}
 
-	if task.Status != models.TaskStatusOpen {
-		return nil, fmt.Errorf("task %q cannot be started: status is %q, must be %q", taskID, task.Status, models.TaskStatusOpen)
+	if err := validateStatusTransition(task.Status, newStatus); err != nil {
+		return nil, fmt.Errorf("task %q: %w", taskID, err)
 	}
 
 	now := time.Now()
-	task.Status = models.TaskStatusActive
-	if task.StartedAt == nil {
+	task.Status = newStatus
+	task.UpdatedAt = now
+
+	if newStatus == models.TaskStatusInProgress && task.StartedAt == nil {
 		task.StartedAt = &now
 	}
-	task.UpdatedAt = now
+	if isTerminalStatus(newStatus) {
+		task.CompletedAt = &now
+	}
 
 	if err := s.taskRepo.Update(task); err != nil {
 		return nil, err
 	}
 
-	s.emitTimeEvent(task, userID, models.TimeEventTypeCheckIn, now)
+	// Emit time events for status changes.
+	switch newStatus {
+	case models.TaskStatusInProgress:
+		s.emitTimeEvent(task, userID, models.TimeEventTypeCheckIn, now)
+	case models.TaskStatusDone, models.TaskStatusSkipped, models.TaskStatusCancelled:
+		s.emitTimeEvent(task, userID, models.TimeEventTypeCheckOut, now)
+		// Auto-complete parent if all siblings are terminal.
+		if task.ParentID != nil {
+			_ = s.maybeCompleteParent(*task.ParentID)
+		}
+	}
 
 	return task, nil
 }
 
+// validateStatusTransition checks if transitioning from current to next is valid.
+func validateStatusTransition(current, next models.TaskStatus) error {
+	if isTerminalStatus(current) {
+		return fmt.Errorf("cannot change status: already in terminal status %q", current)
+	}
+	if current == next {
+		return nil // no-op is fine
+	}
+	switch next {
+	case models.TaskStatusOpen:
+		// Can revert to open from in_progress only.
+		if current != models.TaskStatusInProgress {
+			return fmt.Errorf("cannot change from %q to %q", current, next)
+		}
+	case models.TaskStatusInProgress:
+		if current != models.TaskStatusOpen {
+			return fmt.Errorf("cannot change from %q to %q", current, next)
+		}
+	case models.TaskStatusDone, models.TaskStatusSkipped, models.TaskStatusCancelled:
+		// Terminal transitions are allowed from any non-terminal status.
+	default:
+		return fmt.Errorf("unknown status %q", next)
+	}
+	return nil
+}
+
+// StartTask is a convenience that sets status to in_progress.
+// Kept for backward compatibility with CLI and existing callers.
+func (s *TaskService) StartTask(taskID string, userID uuid.UUID) (*models.Task, error) {
+	return s.SetTaskStatus(taskID, userID, models.TaskStatusInProgress)
+}
+
+// UnresolvedBlocker describes a blocker that is not yet in a terminal status.
+type UnresolvedBlocker struct {
+	ID     string
+	Title  string
+	Status models.TaskStatus
+}
+
 // CompleteTaskResult holds the completed task and optional navigation hint.
 type CompleteTaskResult struct {
-	Task          *models.Task
-	NextTaskID    *string
-	NextTaskTitle *string
+	Task               *models.Task
+	NextTaskID         *string
+	NextTaskTitle      *string
+	UnresolvedBlockers []UnresolvedBlocker
 }
 
 // CompleteTask marks a task as done.
-// The task must be in "active" status. All blocking dependencies must be
-// resolved (in a terminal status: done, skipped, or cancelled).
+// The task must be in a non-terminal status. Unresolved blockers are returned
+// in the result (not as an error) so the frontend can prompt cascade completion.
 // If actualTimeSecs is non-nil, the task's ActualTimeSecs is overridden.
 // If all sibling tasks under the same parent are now done, the parent is
 // auto-completed as well.
@@ -241,19 +296,17 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSe
 		return nil, err
 	}
 
-	// Validate status: must be active (in_progress).
-	if task.Status != models.TaskStatusActive {
-		return nil, fmt.Errorf("task %q cannot be completed: status is %q, must be %q", taskID, task.Status, models.TaskStatusActive)
+	// Validate status: must not already be terminal.
+	if isTerminalStatus(task.Status) {
+		return nil, fmt.Errorf("task %q cannot be completed: already in terminal status %q", taskID, task.Status)
 	}
 
-	// Check blocking dependencies are resolved.
-	// GetBlockers returns deps where from_task_id = taskID (i.e., deps where this task is blocked).
-	// We filter for type "blocks" and check each blocker's status (ToTaskID = the blocker).
+	// Collect unresolved blockers (informational, not blocking).
+	var unresolvedBlockers []UnresolvedBlocker
 	deps, err := s.taskDepRepo.GetBlockers(taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check dependencies for task %q: %w", taskID, err)
 	}
-
 	for _, dep := range deps {
 		if dep.Type != models.DepTypeBlocks {
 			continue
@@ -263,7 +316,11 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSe
 			return nil, fmt.Errorf("failed to look up blocking task %q: %w", dep.ToTaskID, err)
 		}
 		if !isTerminalStatus(blocker.Status) {
-			return nil, fmt.Errorf("task %q cannot be completed: blocked by task %q (status %q)", taskID, blocker.ID, blocker.Status)
+			unresolvedBlockers = append(unresolvedBlockers, UnresolvedBlocker{
+				ID:     blocker.ID,
+				Title:  blocker.Title,
+				Status: blocker.Status,
+			})
 		}
 	}
 
@@ -294,14 +351,15 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSe
 	// Auto-complete parent if all siblings are done.
 	if task.ParentID != nil {
 		if err := s.maybeCompleteParent(*task.ParentID); err != nil {
-			// Log but don't fail the completion — the task itself is done.
-			// In a production system we'd log this; for now we silently ignore.
 			_ = err
 		}
 	}
 
 	// Find the next downstream task (first task blocked by this one).
-	result := &CompleteTaskResult{Task: task}
+	result := &CompleteTaskResult{
+		Task:               task,
+		UnresolvedBlockers: unresolvedBlockers,
+	}
 	nextID, nextTitle := s.findNextTask(taskID)
 	result.NextTaskID = nextID
 	result.NextTaskTitle = nextTitle
@@ -529,93 +587,7 @@ func (s *TaskService) AddNote(taskID string, text string) (*models.Task, error) 
 	return task, nil
 }
 
-// ResumeTask resumes a paused task back to active status.
-// Clears the PausedAt timestamp on resume.
-func (s *TaskService) ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error) {
-	task, err := s.taskRepo.GetByID(taskID)
-	if err != nil {
-		return nil, err
-	}
-
-	if task.Status != models.TaskStatusPaused {
-		return nil, fmt.Errorf("task %q cannot be resumed: status is %q, must be %q", taskID, task.Status, models.TaskStatusPaused)
-	}
-
-	now := time.Now()
-	task.Status = models.TaskStatusActive
-	task.PausedAt = nil
-	task.UpdatedAt = now
-
-	if err := s.taskRepo.Update(task); err != nil {
-		return nil, err
-	}
-
-	s.emitTimeEvent(task, userID, models.TimeEventTypeResume, now)
-
-	return task, nil
-}
-
-// SkipTask marks a task as skipped.
-// Skipping a task triggers downstream readiness checks via maybeCompleteParent.
-// The task must not already be in a terminal status (done, skipped, or cancelled).
+// SkipTask marks a task as skipped. Convenience wrapper for SetTaskStatus.
 func (s *TaskService) SkipTask(taskID string, userID uuid.UUID) (*models.Task, error) {
-	task, err := s.taskRepo.GetByID(taskID)
-	if err != nil {
-		return nil, err
-	}
-
-	if isTerminalStatus(task.Status) {
-		return nil, fmt.Errorf("task %q cannot be skipped: status is %q (already terminal)", taskID, task.Status)
-	}
-
-	// Remember previous status so we know whether to emit a check_out event.
-	wasTracking := task.Status == models.TaskStatusActive || task.Status == models.TaskStatusPaused
-
-	now := time.Now()
-	task.Status = models.TaskStatusSkipped
-	task.CompletedAt = &now
-	task.UpdatedAt = now
-
-	if err := s.taskRepo.Update(task); err != nil {
-		return nil, err
-	}
-
-	if wasTracking {
-		s.emitTimeEvent(task, userID, models.TimeEventTypeCheckOut, now)
-	}
-
-	// Skipped is a terminal status — check if parent can be auto-completed.
-	if task.ParentID != nil {
-		if err := s.maybeCompleteParent(*task.ParentID); err != nil {
-			_ = err
-		}
-	}
-
-	return task, nil
-}
-
-// PauseTask pauses an active task.
-// Returns an error if the task is not in "active" status.
-func (s *TaskService) PauseTask(taskID string, userID uuid.UUID) (*models.Task, error) {
-	task, err := s.taskRepo.GetByID(taskID)
-	if err != nil {
-		return nil, err
-	}
-
-	if task.Status != models.TaskStatusActive {
-		return nil, fmt.Errorf("task %q cannot be paused: status is %q, must be %q", taskID, task.Status, models.TaskStatusActive)
-	}
-
-	now := time.Now()
-	task.Status = models.TaskStatusPaused
-	task.PausedAt = &now
-	task.UpdatedAt = now
-
-	if err := s.taskRepo.Update(task); err != nil {
-		return nil, err
-	}
-
-	s.emitTimeEvent(task, userID, models.TimeEventTypePause, now)
-
-	return task, nil
+	return s.SetTaskStatus(taskID, userID, models.TaskStatusSkipped)
 }

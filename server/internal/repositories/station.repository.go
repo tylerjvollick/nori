@@ -75,7 +75,7 @@ func (r *StationRepository) GetWIPCounts(spaceID uuid.UUID) (map[uuid.UUID]int, 
 	var rows []WIPCount
 	err := r.db.Model(&models.Task{}).
 		Select("station_id, COUNT(*) as count").
-		Where("space_id = ? AND station_id IS NOT NULL AND status IN ?", spaceID, []string{"active", "paused"}).
+		Where("space_id = ? AND station_id IS NOT NULL AND status IN ?", spaceID, []string{"in_progress"}).
 		Group("station_id").
 		Scan(&rows).Error
 	if err != nil {

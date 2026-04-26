@@ -20,7 +20,7 @@
     ChevronDown,
   } from "@lucide/svelte";
   import { isEditableTarget, showToast } from "$lib/utils/keyboard.svelte";
-  import { formatTimeSpent } from "$lib/utils/time";
+  import { formatDuration } from "$lib/utils/time";
 
   /** Optional pre-loaded tasks. When provided, the list uses these instead of fetching. */
   interface Props {
@@ -663,7 +663,7 @@
       }
       case "d": {
         const task = selectedTask;
-        if (task && (task.status === "active" || task.status === "paused")) {
+        if (task && task.status === "in_progress") {
           e.preventDefault();
           completeSelectedTask(task);
         }
@@ -1046,22 +1046,18 @@
                 <!-- Time Spent -->
                 <td
                   class="px-3 py-2.5 text-xs text-muted-foreground {task.status ===
-                  'active'
+                  'in_progress'
                     ? 'text-blue-500 dark:text-blue-400'
                     : ''}"
                 >
                   <span class="inline-flex items-center gap-1">
-                    {#if task.status === 'active'}
+                    {#if task.status === 'in_progress'}
                       <span class="relative flex size-2 shrink-0">
                         <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                         <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
                       </span>
                     {/if}
-                    {formatTimeSpent(
-                      task.actualTimeSeconds,
-                      task.status,
-                      task.startedAt,
-                    )}
+                    {formatDuration(task.actualTimeSeconds)}
                   </span>
                 </td>
 

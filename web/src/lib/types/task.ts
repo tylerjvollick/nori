@@ -2,7 +2,7 @@ import type { PaginatedResponse } from './common';
 
 // --- Enums ---
 
-export type TaskStatus = 'open' | 'active' | 'paused' | 'done' | 'skipped' | 'cancelled';
+export type TaskStatus = 'open' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
 
 export type TaskType = 'job' | 'task' | 'milestone' | 'gate';
 
@@ -28,7 +28,6 @@ export interface TaskResponse {
 	displayOrder: number;
 	dueDate?: string | null;
 	startedAt?: string | null;
-	pausedAt?: string | null;
 	completedAt?: string | null;
 	actualTimeSeconds: number;
 	estimatedTimeSeconds?: number | null;
@@ -139,8 +138,16 @@ export interface CompleteTaskRequest {
 	actualTimeSeconds?: number;
 }
 
+/** A blocker that was not resolved at completion time. */
+export interface UnresolvedBlocker {
+	id: string;
+	title: string;
+	status: string;
+}
+
 /** Response from POST /tasks/:id/complete. Extends TaskResponse with navigation hints. */
 export interface CompleteTaskResponse extends TaskResponse {
 	nextTaskId?: string | null;
 	nextTaskTitle?: string | null;
+	unresolvedBlockers?: UnresolvedBlocker[];
 }

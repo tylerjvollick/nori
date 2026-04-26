@@ -23,12 +23,11 @@ const (
 type TaskStatus string
 
 const (
-	TaskStatusOpen      TaskStatus = "open"
-	TaskStatusActive    TaskStatus = "active"
-	TaskStatusPaused    TaskStatus = "paused"
-	TaskStatusDone      TaskStatus = "done"
-	TaskStatusSkipped   TaskStatus = "skipped"
-	TaskStatusCancelled TaskStatus = "cancelled"
+	TaskStatusOpen       TaskStatus = "open"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusDone       TaskStatus = "done"
+	TaskStatusSkipped    TaskStatus = "skipped"
+	TaskStatusCancelled  TaskStatus = "cancelled"
 )
 
 // JSONB is a helper type for storing arbitrary JSON data in PostgreSQL jsonb columns.
@@ -76,7 +75,6 @@ type Task struct {
 	DisplayOrder    int        `gorm:"not null;default:0" json:"displayOrder"`
 	DueDate         *time.Time `json:"dueDate,omitempty"`
 	StartedAt       *time.Time `json:"startedAt,omitempty"`
-	PausedAt        *time.Time `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time `json:"completedAt,omitempty"`
 	ActualTimeSecs    int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
 	BatchSize                  *int    `json:"batchSize,omitempty"`

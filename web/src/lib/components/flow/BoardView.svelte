@@ -157,7 +157,7 @@
     readyTasks = filterByPriority(filtered.filter((t) => t.status === "open"));
     blockedTasks = []; // Not determinable without deps API in scoped mode
     inProgressTasks = filterByPriority(
-      filtered.filter((t) => t.status === "active" || t.status === "paused"),
+      filtered.filter((t) => t.status === "in_progress"),
     );
 
     const allDone = filtered.filter(
@@ -194,8 +194,7 @@
       const [
         readyResult,
         openResult,
-        activeResult,
-        pausedResult,
+        inProgressResult,
         doneResult,
         skippedResult,
       ] = await Promise.all([
@@ -209,15 +208,9 @@
           stationId: filters.stationId,
           limit: 200,
         }),
-        // Active tasks
+        // In-progress tasks
         taskApi.listTasks(spaceId, {
-          status: "active",
-          stationId: filters.stationId,
-          limit: 200,
-        }),
-        // Paused tasks
-        taskApi.listTasks(spaceId, {
-          status: "paused",
+          status: "in_progress",
           stationId: filters.stationId,
           limit: 200,
         }),
@@ -237,8 +230,7 @@
 
       const readyItems = readyResult;
       const openItems = openResult.items;
-      const activeItems = activeResult.items;
-      const pausedItems = pausedResult.items;
+      const inProgressItems = inProgressResult.items;
       const doneItems = doneResult.items;
       const skippedItems = skippedResult.items;
 
@@ -256,7 +248,7 @@
       blockedTasks = filterByPriority(
         openItems.filter((t) => !readyIds.has(t.id)),
       );
-      inProgressTasks = filterByPriority([...activeItems, ...pausedItems]);
+      inProgressTasks = filterByPriority(inProgressItems);
 
       // Merge done + skipped, sort by updatedAt desc, cap at DONE_LIMIT
       const allDone = [...doneItems, ...skippedItems];
@@ -485,7 +477,7 @@
       case "d": {
         // Complete selected task (mark done)
         const task = selectedTask;
-        if (task && (task.status === "active" || task.status === "paused")) {
+        if (task && task.status === "in_progress") {
           e.preventDefault();
           completeSelectedTask(task);
         }
@@ -667,19 +659,19 @@
         };
       } else if (
         targetColumn === "done" &&
-        (prevStatus === "active" || prevStatus === "paused")
+        prevStatus === "in_progress"
       ) {
         // In Progress -> Done: complete
         apiCall = taskApi.completeTask(spaceId, task.id);
         description = `Completed: ${task.title}`;
         revertCall = async () => {
-          // Revert: resume the task (done -> active isn't a direct API, use update)
-          await taskApi.updateTask(spaceId, task.id, { status: "active" });
+          // Revert: set status back to in_progress
+          await taskApi.updateTask(spaceId, task.id, { status: "in_progress" });
           fetchAllColumns({ silent: true });
         };
       } else if (
         targetColumn === "ready" &&
-        (prevStatus === "active" || prevStatus === "paused")
+        prevStatus === "in_progress"
       ) {
         // In Progress -> Ready: revert to open
         apiCall = taskApi.updateTask(spaceId, task.id, { status: "open" });

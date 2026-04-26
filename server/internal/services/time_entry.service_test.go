@@ -117,7 +117,7 @@ func setupTimeEntryService(t *testing.T) (*TimeEntryService, *mockTimeEntryRepo,
 	taskRepo.tasks["task-1"] = &models.Task{
 		ID:      "task-1",
 		SpaceID: uuid.New(),
-		Status:  models.TaskStatusActive,
+		Status:  models.TaskStatusInProgress,
 	}
 
 	return svc, teRepo, taskRepo
@@ -164,8 +164,9 @@ func TestPauseTimer_SetsEndedAtAndDuration(t *testing.T) {
 
 	entry, err := svc.PauseTimer("task-1")
 	require.NoError(t, err)
-	assert.NotNil(t, entry.EndedAt)
-	assert.NotNil(t, entry.DurationSecs)
+	assert.True(t, entry.IsPaused)
+	assert.NotNil(t, entry.PausedAt)
+	assert.Nil(t, entry.EndedAt) // pausing does not end the session
 }
 
 func TestPauseTimer_ConflictIfNoTimerRunning(t *testing.T) {
@@ -176,21 +177,21 @@ func TestPauseTimer_ConflictIfNoTimerRunning(t *testing.T) {
 }
 
 // AC#12: start → pause → start → pause creates 2 separate time entries.
-func TestStartPauseStartPause_CreatesTwoEntries(t *testing.T) {
+func TestStartStopStartStop_CreatesTwoEntries(t *testing.T) {
 	svc, repo, taskRepo := setupTimeEntryService(t)
 	task := taskRepo.tasks["task-1"]
 	userID := uuid.New()
 
-	// First cycle.
+	// First session: start → stop.
 	_, err := svc.StartTimer("task-1", task.SpaceID, userID)
 	require.NoError(t, err)
-	_, err = svc.PauseTimer("task-1")
+	_, err = svc.StopTimer("task-1")
 	require.NoError(t, err)
 
-	// Second cycle.
+	// Second session: start → stop.
 	_, err = svc.StartTimer("task-1", task.SpaceID, userID)
 	require.NoError(t, err)
-	_, err = svc.PauseTimer("task-1")
+	_, err = svc.StopTimer("task-1")
 	require.NoError(t, err)
 
 	// Should have 2 entries, both with ended_at set.
@@ -198,6 +199,28 @@ func TestStartPauseStartPause_CreatesTwoEntries(t *testing.T) {
 	for _, e := range repo.entries {
 		assert.NotNil(t, e.EndedAt)
 	}
+}
+
+func TestPauseResume_AccumulatesElapsed(t *testing.T) {
+	svc, _, taskRepo := setupTimeEntryService(t)
+	task := taskRepo.tasks["task-1"]
+	userID := uuid.New()
+
+	_, err := svc.StartTimer("task-1", task.SpaceID, userID)
+	require.NoError(t, err)
+
+	// Pause — should accumulate some small elapsed.
+	paused, err := svc.PauseTimer("task-1")
+	require.NoError(t, err)
+	assert.True(t, paused.IsPaused)
+	assert.GreaterOrEqual(t, paused.ElapsedSecs, 0)
+
+	// Resume.
+	resumed, err := svc.ResumeTimer("task-1")
+	require.NoError(t, err)
+	assert.False(t, resumed.IsPaused)
+	assert.Nil(t, resumed.PausedAt)
+	assert.NotNil(t, resumed.ResumedAt)
 }
 
 // AC#13: complete while timer running auto-pauses and completes.
@@ -252,8 +275,7 @@ func TestCreateManualEntry_CustomTimes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, start.Unix(), entry.StartedAt.Unix())
 	assert.NotNil(t, entry.EndedAt)
-	assert.NotNil(t, entry.DurationSecs)
-	assert.InDelta(t, 3600, *entry.DurationSecs, 2) // ~1 hour
+	assert.InDelta(t, 3600, entry.ElapsedSecs, 2) // ~1 hour
 	assert.Equal(t, &notes, entry.Notes)
 }
 

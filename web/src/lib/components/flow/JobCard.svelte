@@ -7,7 +7,7 @@
 
 	/** A job with aggregate status/time computed from its children. */
 	interface JobWithAggregate extends TaskResponse {
-		aggregateStatus: 'done' | 'active' | 'open';
+		aggregateStatus: 'done' | 'in_progress' | 'open';
 		totalTimeSeconds: number;
 		childCount: number;
 		doneChildCount: number;
@@ -48,11 +48,11 @@
 		return stationMap.get(stationId) ?? stationId.slice(0, 8);
 	}
 
-	function aggregateStatusLabel(status: 'done' | 'active' | 'open'): { label: string; class: string } {
+	function aggregateStatusLabel(status: 'done' | 'in_progress' | 'open'): { label: string; class: string } {
 		switch (status) {
 			case 'done':
 				return { label: 'Done', class: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' };
-			case 'active':
+			case 'in_progress':
 				return { label: 'In Progress', class: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' };
 			case 'open':
 				return { label: 'Ready', class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };

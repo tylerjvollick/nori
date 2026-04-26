@@ -142,6 +142,11 @@ func (m *MockTimeEventRepository) Create(event *models.TimeEvent) error {
 	return nil
 }
 
+// MockTimeEntryStopper is a mock that always succeeds.
+type MockTimeEntryStopper struct{}
+
+func (m *MockTimeEntryStopper) StopRunningTimer(taskID string) error { return nil }
+
 // newTestTaskService creates a TaskService with the given mocks.
 func newTestTaskService(taskRepo *MockTaskRepository, taskDepRepo *MockTaskDepRepository) *TaskService {
 	return NewTaskService(taskRepo, taskDepRepo, &MockTimeEventRepository{})
@@ -182,14 +187,14 @@ func TestStartTask_Success(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, models.TaskStatusActive, result.Status)
+	assert.Equal(t, models.TaskStatusInProgress, result.Status)
 	assert.NotNil(t, result.StartedAt)
 	assert.WithinDuration(t, time.Now(), *result.StartedAt, 2*time.Second)
 	assert.WithinDuration(t, time.Now(), result.UpdatedAt, 2*time.Second)
 
 	// Verify update was called
 	assert.NotNil(t, updatedTask)
-	assert.Equal(t, models.TaskStatusActive, updatedTask.Status)
+	assert.Equal(t, models.TaskStatusInProgress, updatedTask.Status)
 }
 
 func TestStartTask_TaskNotFound(t *testing.T) {
@@ -216,16 +221,14 @@ func TestStartTask_NotOpenStatus(t *testing.T) {
 	taskID := "job-abc.1"
 	userID := uuid.New()
 
-	// Test each non-open status
-	statuses := []models.TaskStatus{
-		models.TaskStatusActive,
-		models.TaskStatusPaused,
+	// Terminal statuses should reject transition to in_progress.
+	terminalStatuses := []models.TaskStatus{
 		models.TaskStatusDone,
 		models.TaskStatusSkipped,
 		models.TaskStatusCancelled,
 	}
 
-	for _, status := range statuses {
+	for _, status := range terminalStatuses {
 		t.Run(string(status), func(t *testing.T) {
 			task := &models.Task{
 				ID:     taskID,
@@ -241,16 +244,35 @@ func TestStartTask_NotOpenStatus(t *testing.T) {
 
 			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
-			// Act
 			result, err := svc.StartTask(taskID, userID)
-
-			// Assert
 			assert.Error(t, err)
 			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), "cannot be started")
-			assert.Contains(t, err.Error(), string(status))
+			assert.Contains(t, err.Error(), "terminal status")
 		})
 	}
+
+	// in_progress -> in_progress is a no-op (not an error).
+	t.Run("in_progress_noop", func(t *testing.T) {
+		task := &models.Task{
+			ID:     taskID,
+			Status: models.TaskStatusInProgress,
+			Title:  "Some task",
+		}
+
+		mockRepo := &MockTaskRepository{
+			getByIDFunc: func(id string) (*models.Task, error) {
+				return task, nil
+			},
+			updateFunc: func(t *models.Task) error { return nil },
+		}
+
+		svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+		result, err := svc.StartTask(taskID, userID)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, models.TaskStatusInProgress, result.Status)
+	})
 }
 
 func TestStartTask_UpdateFails(t *testing.T) {
@@ -314,33 +336,27 @@ func TestStartTask_PreservesExistingStartedAt(t *testing.T) {
 	// Assert
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, models.TaskStatusActive, result.Status)
+	assert.Equal(t, models.TaskStatusInProgress, result.Status)
 	// StartedAt should NOT be overwritten
 	assert.Equal(t, originalStartedAt, *result.StartedAt)
 }
 
-// --- PauseTask Tests ---
+// --- SetTaskStatus Tests ---
 
-func TestPauseTask_Success(t *testing.T) {
-	// Arrange
+func TestSetTaskStatus_OpenToInProgress(t *testing.T) {
 	taskID := "job-abc.3"
 	userID := uuid.New()
-	startedAt := time.Now().Add(-10 * time.Minute)
 
 	task := &models.Task{
-		ID:        taskID,
-		Status:    models.TaskStatusActive,
-		StartedAt: &startedAt,
-		Title:     "Cut mortises",
+		ID:     taskID,
+		Status: models.TaskStatusOpen,
+		Title:  "Cut mortises",
 	}
 
 	var updatedTask *models.Task
 	mockRepo := &MockTaskRepository{
 		getByIDFunc: func(id string) (*models.Task, error) {
-			if id == taskID {
-				return task, nil
-			}
-			return nil, errors.New("task not found")
+			return task, nil
 		},
 		updateFunc: func(t *models.Task) error {
 			updatedTask = t
@@ -350,225 +366,62 @@ func TestPauseTask_Success(t *testing.T) {
 
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
-	// Act
-	result, err := svc.PauseTask(taskID, userID)
-
-	// Assert
+	result, err := svc.SetTaskStatus(taskID, userID, models.TaskStatusInProgress)
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
-	assert.Equal(t, models.TaskStatusPaused, result.Status)
-	assert.NotNil(t, result.PausedAt)
-	assert.WithinDuration(t, time.Now(), *result.PausedAt, 2*time.Second)
-	assert.WithinDuration(t, time.Now(), result.UpdatedAt, 2*time.Second)
-
-	// Verify update was called
+	assert.Equal(t, models.TaskStatusInProgress, result.Status)
+	assert.NotNil(t, result.StartedAt)
 	assert.NotNil(t, updatedTask)
-	assert.Equal(t, models.TaskStatusPaused, updatedTask.Status)
 }
 
-func TestPauseTask_TaskNotFound(t *testing.T) {
-	// Arrange
-	mockRepo := &MockTaskRepository{
-		getByIDFunc: func(id string) (*models.Task, error) {
-			return nil, errors.New("task not found")
-		},
-	}
-
-	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-	// Act
-	result, err := svc.PauseTask("nonexistent", uuid.New())
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "task not found")
-}
-
-func TestPauseTask_NotActiveStatus(t *testing.T) {
-	// Arrange
+func TestSetTaskStatus_InvalidTransition(t *testing.T) {
 	taskID := "job-abc.3"
 	userID := uuid.New()
 
-	// Test each non-active status
-	statuses := []models.TaskStatus{
-		models.TaskStatusOpen,
-		models.TaskStatusPaused,
-		models.TaskStatusDone,
-		models.TaskStatusSkipped,
-		models.TaskStatusCancelled,
-	}
-
-	for _, status := range statuses {
-		t.Run(string(status), func(t *testing.T) {
-			task := &models.Task{
-				ID:     taskID,
-				Status: status,
-				Title:  "Some task",
-			}
-
-			mockRepo := &MockTaskRepository{
-				getByIDFunc: func(id string) (*models.Task, error) {
-					return task, nil
-				},
-			}
-
-			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-			// Act
-			result, err := svc.PauseTask(taskID, userID)
-
-			// Assert
-			assert.Error(t, err)
-			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), "cannot be paused")
-			assert.Contains(t, err.Error(), string(status))
-		})
-	}
-}
-
-// --- ResumeTask Tests ---
-
-func TestResumeTask_Success(t *testing.T) {
-	// Arrange
-	taskID := "job-abc.3"
-	userID := uuid.New()
-	pausedAt := time.Now().Add(-5 * time.Minute)
-	startedAt := time.Now().Add(-15 * time.Minute)
-
+	// Can't go from open to open (no-op is fine, but done->open should fail)
 	task := &models.Task{
-		ID:        taskID,
-		Status:    models.TaskStatusPaused,
-		StartedAt: &startedAt,
-		PausedAt:  &pausedAt,
-		Title:     "Cut mortises",
-	}
-
-	var updatedTask *models.Task
-	mockRepo := &MockTaskRepository{
-		getByIDFunc: func(id string) (*models.Task, error) {
-			if id == taskID {
-				return task, nil
-			}
-			return nil, errors.New("task not found")
-		},
-		updateFunc: func(t *models.Task) error {
-			updatedTask = t
-			return nil
-		},
-	}
-
-	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-	// Act
-	result, err := svc.ResumeTask(taskID, userID)
-
-	// Assert
-	assert.NoError(t, err)
-	assert.NotNil(t, result)
-	assert.Equal(t, models.TaskStatusActive, result.Status)
-	assert.Nil(t, result.PausedAt, "PausedAt should be cleared on resume")
-	assert.NotNil(t, result.StartedAt, "StartedAt should be preserved")
-	assert.WithinDuration(t, time.Now(), result.UpdatedAt, 2*time.Second)
-
-	// Verify update was called
-	assert.NotNil(t, updatedTask)
-	assert.Equal(t, models.TaskStatusActive, updatedTask.Status)
-	assert.Nil(t, updatedTask.PausedAt)
-}
-
-func TestResumeTask_TaskNotFound(t *testing.T) {
-	// Arrange
-	mockRepo := &MockTaskRepository{
-		getByIDFunc: func(id string) (*models.Task, error) {
-			return nil, errors.New("task not found")
-		},
-	}
-
-	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-	// Act
-	result, err := svc.ResumeTask("nonexistent", uuid.New())
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "task not found")
-}
-
-func TestResumeTask_NotPausedStatus(t *testing.T) {
-	// Arrange
-	taskID := "job-abc.3"
-	userID := uuid.New()
-
-	// Test each non-paused status
-	statuses := []models.TaskStatus{
-		models.TaskStatusOpen,
-		models.TaskStatusActive,
-		models.TaskStatusDone,
-		models.TaskStatusSkipped,
-		models.TaskStatusCancelled,
-	}
-
-	for _, status := range statuses {
-		t.Run(string(status), func(t *testing.T) {
-			task := &models.Task{
-				ID:     taskID,
-				Status: status,
-				Title:  "Some task",
-			}
-
-			mockRepo := &MockTaskRepository{
-				getByIDFunc: func(id string) (*models.Task, error) {
-					return task, nil
-				},
-			}
-
-			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-			// Act
-			result, err := svc.ResumeTask(taskID, userID)
-
-			// Assert
-			assert.Error(t, err)
-			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), "cannot be resumed")
-			assert.Contains(t, err.Error(), string(status))
-		})
-	}
-}
-
-func TestResumeTask_UpdateFails(t *testing.T) {
-	// Arrange
-	taskID := "job-abc.3"
-	userID := uuid.New()
-	pausedAt := time.Now().Add(-5 * time.Minute)
-
-	task := &models.Task{
-		ID:       taskID,
-		Status:   models.TaskStatusPaused,
-		PausedAt: &pausedAt,
-		Title:    "Some task",
+		ID:     taskID,
+		Status: models.TaskStatusDone,
+		Title:  "Done task",
 	}
 
 	mockRepo := &MockTaskRepository{
 		getByIDFunc: func(id string) (*models.Task, error) {
 			return task, nil
 		},
-		updateFunc: func(t *models.Task) error {
-			return errors.New("database error")
-		},
 	}
 
 	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
-	// Act
-	result, err := svc.ResumeTask(taskID, userID)
-
-	// Assert
+	result, err := svc.SetTaskStatus(taskID, userID, models.TaskStatusOpen)
 	assert.Error(t, err)
 	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "database error")
+	assert.Contains(t, err.Error(), "terminal status")
+}
+
+func TestSetTaskStatus_TerminalSetsCompletedAt(t *testing.T) {
+	taskID := "job-abc.3"
+	userID := uuid.New()
+
+	task := &models.Task{
+		ID:     taskID,
+		Status: models.TaskStatusInProgress,
+		Title:  "Some task",
+	}
+
+	mockRepo := &MockTaskRepository{
+		getByIDFunc: func(id string) (*models.Task, error) {
+			return task, nil
+		},
+		updateFunc: func(t *models.Task) error { return nil },
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	result, err := svc.SetTaskStatus(taskID, userID, models.TaskStatusCancelled)
+	assert.NoError(t, err)
+	assert.Equal(t, models.TaskStatusCancelled, result.Status)
+	assert.NotNil(t, result.CompletedAt)
 }
 
 // --- SkipTask Tests ---
@@ -623,7 +476,7 @@ func TestSkipTask_Success_ActiveTask(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		StartedAt:    &startedAt,
 		Title:        "Cut mortises",
@@ -653,17 +506,15 @@ func TestSkipTask_Success_ActiveTask(t *testing.T) {
 	assert.NotNil(t, result.CompletedAt)
 }
 
-func TestSkipTask_Success_PausedTask(t *testing.T) {
-	// Arrange — skip a paused task assigned to the user
+func TestSkipTask_Success_InProgressTask(t *testing.T) {
+	// Arrange — skip an in-progress task assigned to the user
 	taskID := "job-abc.3"
 	userID := uuid.New()
-	pausedAt := time.Now().Add(-5 * time.Minute)
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusPaused,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
-		PausedAt:     &pausedAt,
 		Title:        "Cut mortises",
 	}
 
@@ -742,8 +593,7 @@ func TestSkipTask_AlreadyTerminal(t *testing.T) {
 			// Assert
 			assert.Error(t, err)
 			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), "cannot be skipped")
-			assert.Contains(t, err.Error(), "already terminal")
+			assert.Contains(t, err.Error(), "terminal status")
 		})
 	}
 }
@@ -756,7 +606,7 @@ func TestSkipTask_TriggersParentAutoComplete(t *testing.T) {
 
 	parent := &models.Task{
 		ID:     parentID,
-		Status: models.TaskStatusActive,
+		Status: models.TaskStatusInProgress,
 		Title:  "Parent job",
 	}
 
@@ -854,7 +704,7 @@ func TestCompleteTask_Success(t *testing.T) {
 	startedAt := time.Now().Add(-10 * time.Minute)
 	task := &models.Task{
 		ID:        taskID,
-		Status:    models.TaskStatusActive,
+		Status:    models.TaskStatusInProgress,
 		StartedAt: &startedAt,
 		Title:     "Cut mortises",
 	}
@@ -916,20 +766,18 @@ func TestCompleteTask_TaskNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "task not found")
 }
 
-func TestCompleteTask_NotActiveStatus(t *testing.T) {
-	// Arrange
+func TestCompleteTask_TerminalStatusRejects(t *testing.T) {
+	// Only terminal statuses should reject completion.
 	taskID := "job-abc.3"
 	userID := uuid.New()
 
-	statuses := []models.TaskStatus{
-		models.TaskStatusOpen,
-		models.TaskStatusPaused,
+	terminalStatuses := []models.TaskStatus{
 		models.TaskStatusDone,
 		models.TaskStatusSkipped,
 		models.TaskStatusCancelled,
 	}
 
-	for _, status := range statuses {
+	for _, status := range terminalStatuses {
 		t.Run(string(status), func(t *testing.T) {
 			task := &models.Task{
 				ID:     taskID,
@@ -945,14 +793,10 @@ func TestCompleteTask_NotActiveStatus(t *testing.T) {
 
 			svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
 
-			// Act
 			result, err := svc.CompleteTask(taskID, userID, nil)
-
-			// Assert
 			assert.Error(t, err)
 			assert.Nil(t, result)
-			assert.Contains(t, err.Error(), "cannot be completed")
-			assert.Contains(t, err.Error(), string(status))
+			assert.Contains(t, err.Error(), "terminal status")
 		})
 	}
 }
@@ -965,7 +809,7 @@ func TestCompleteTask_UnresolvedBlockingDep(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Cut mortises",
 	}
@@ -986,6 +830,7 @@ func TestCompleteTask_UnresolvedBlockingDep(t *testing.T) {
 			}
 			return nil, errors.New("task not found")
 		},
+		updateFunc: func(t *models.Task) error { return nil },
 	}
 
 	mockDepRepo := &MockTaskDepRepository{
@@ -1004,15 +849,17 @@ func TestCompleteTask_UnresolvedBlockingDep(t *testing.T) {
 	}
 
 	svc := newTestTaskService(mockRepo, mockDepRepo)
+	svc.timeEntryStopper = &MockTimeEntryStopper{}
 
-	// Act
+	// Act — completing a blocked task now succeeds but returns unresolved blockers.
 	result, err := svc.CompleteTask(taskID, userID, nil)
 
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "blocked by task")
-	assert.Contains(t, err.Error(), blockerID)
+	// Assert — no error, but unresolved blockers are reported.
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, models.TaskStatusDone, result.Task.Status)
+	assert.Len(t, result.UnresolvedBlockers, 1)
+	assert.Equal(t, blockerID, result.UnresolvedBlockers[0].ID)
 }
 
 func TestCompleteTask_ResolvedBlockingDeps(t *testing.T) {
@@ -1032,7 +879,7 @@ func TestCompleteTask_ResolvedBlockingDeps(t *testing.T) {
 
 			task := &models.Task{
 				ID:           taskID,
-				Status:       models.TaskStatusActive,
+				Status:       models.TaskStatusInProgress,
 				AssignedToID: &userID,
 				Title:        "Cut mortises",
 			}
@@ -1094,7 +941,7 @@ func TestCompleteTask_NonBlockingDepsIgnored(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Cut mortises",
 	}
@@ -1151,14 +998,14 @@ func TestCompleteTask_AutoCompletesParent(t *testing.T) {
 	task := &models.Task{
 		ID:           taskID,
 		ParentID:     &parentID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Last child task",
 	}
 
 	parentTask := &models.Task{
 		ID:     parentID,
-		Status: models.TaskStatusActive,
+		Status: models.TaskStatusInProgress,
 		Title:  "Parent job",
 	}
 
@@ -1241,14 +1088,14 @@ func TestCompleteTask_ParentNotCompletedWhenChildrenRemain(t *testing.T) {
 	task := &models.Task{
 		ID:           taskID,
 		ParentID:     &parentID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "A child task",
 	}
 
 	parentTask := &models.Task{
 		ID:     parentID,
-		Status: models.TaskStatusActive,
+		Status: models.TaskStatusInProgress,
 		Title:  "Parent job",
 	}
 
@@ -1317,7 +1164,7 @@ func TestCompleteTask_UpdateFails(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Some task",
 	}
@@ -1355,7 +1202,7 @@ func TestCompleteTask_GetBlockersFails(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Some task",
 	}
@@ -1390,7 +1237,7 @@ func TestCompleteTask_BlockerLookupFails(t *testing.T) {
 
 	task := &models.Task{
 		ID:           taskID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Some task",
 	}
@@ -1435,7 +1282,7 @@ func TestCompleteTask_NoParent(t *testing.T) {
 	task := &models.Task{
 		ID:           taskID,
 		ParentID:     nil,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "Root task",
 	}
@@ -1481,7 +1328,7 @@ func TestCompleteTask_ParentAlreadyDone(t *testing.T) {
 	task := &models.Task{
 		ID:           taskID,
 		ParentID:     &parentID,
-		Status:       models.TaskStatusActive,
+		Status:       models.TaskStatusInProgress,
 		AssignedToID: &userID,
 		Title:        "A child task",
 	}
@@ -1528,37 +1375,6 @@ func TestCompleteTask_ParentAlreadyDone(t *testing.T) {
 	assert.Equal(t, 1, updateCount)
 }
 
-func TestPauseTask_UpdateFails(t *testing.T) {
-	// Arrange
-	taskID := "job-abc.3"
-	userID := uuid.New()
-
-	task := &models.Task{
-		ID:           taskID,
-		Status:       models.TaskStatusActive,
-		AssignedToID: &userID,
-		Title:        "Some task",
-	}
-
-	mockRepo := &MockTaskRepository{
-		getByIDFunc: func(id string) (*models.Task, error) {
-			return task, nil
-		},
-		updateFunc: func(t *models.Task) error {
-			return errors.New("database error")
-		},
-	}
-
-	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
-
-	// Act
-	result, err := svc.PauseTask(taskID, userID)
-
-	// Assert
-	assert.Error(t, err)
-	assert.Nil(t, result)
-	assert.Contains(t, err.Error(), "database error")
-}
 
 // --- AddChildTask Tests ---
 
@@ -1572,7 +1388,7 @@ func TestAddChildTask_Success_FirstChild(t *testing.T) {
 	parentTask := &models.Task{
 		ID:       parentID,
 		SpaceID:  spaceID,
-		Status:   models.TaskStatusActive,
+		Status:   models.TaskStatusInProgress,
 		Title:    "Build dining table",
 		Priority: 2,
 	}
@@ -1631,7 +1447,7 @@ func TestAddChildTask_Success_SequentialIDs(t *testing.T) {
 	parentTask := &models.Task{
 		ID:      parentID,
 		SpaceID: spaceID,
-		Status:  models.TaskStatusActive,
+		Status:  models.TaskStatusInProgress,
 		Title:   "Build dining table",
 	}
 
@@ -1681,7 +1497,7 @@ func TestAddChildTask_RejectsNestedHierarchy(t *testing.T) {
 		ID:       parentID,
 		SpaceID:  spaceID,
 		ParentID: &rootID, // parent is itself a child
-		Status:   models.TaskStatusActive,
+		Status:   models.TaskStatusInProgress,
 		Title:    "Assemble frame",
 	}
 
@@ -1853,7 +1669,7 @@ func TestAddChildTask_ChildOfRootTask_Succeeds(t *testing.T) {
 		ID:       rootID,
 		SpaceID:  spaceID,
 		ParentID: nil, // root task
-		Status:   models.TaskStatusActive,
+		Status:   models.TaskStatusInProgress,
 		Title:    "Build dining table",
 	}
 
@@ -1895,7 +1711,7 @@ func TestAddChildTask_ChildOfChildTask_Fails(t *testing.T) {
 		ID:       childID,
 		SpaceID:  spaceID,
 		ParentID: &rootID, // already a child
-		Status:   models.TaskStatusActive,
+		Status:   models.TaskStatusInProgress,
 		Title:    "Cut mortises",
 	}
 
@@ -1967,7 +1783,7 @@ func TestCreateTask_WithParentPointingToRoot_Succeeds(t *testing.T) {
 		ID:       rootID,
 		SpaceID:  spaceID,
 		ParentID: nil, // root task
-		Status:   models.TaskStatusActive,
+		Status:   models.TaskStatusInProgress,
 		Title:    "Build dining table",
 	}
 
