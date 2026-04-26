@@ -44,14 +44,26 @@ type TimeEventRepositoryInterface interface {
 	Create(event *models.TimeEvent) error
 }
 
+// TimeEntryStopperInterface allows CompleteTask to auto-stop running timers.
+type TimeEntryStopperInterface interface {
+	StopRunningTimer(taskID string) error
+}
+
 type TaskService struct {
-	taskRepo      TaskRepositoryInterface
-	taskDepRepo   TaskDepRepositoryInterface
-	timeEventRepo TimeEventRepositoryInterface
+	taskRepo         TaskRepositoryInterface
+	taskDepRepo      TaskDepRepositoryInterface
+	timeEventRepo    TimeEventRepositoryInterface
+	timeEntryStopper TimeEntryStopperInterface
 }
 
 func NewTaskService(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface, timeEventRepo TimeEventRepositoryInterface) *TaskService {
 	return &TaskService{taskRepo: taskRepo, taskDepRepo: taskDepRepo, timeEventRepo: timeEventRepo}
+}
+
+// SetTimeEntryStopper injects the time entry stopper after construction to
+// avoid circular dependencies between TaskService and TimeEntryService.
+func (s *TaskService) SetTimeEntryStopper(stopper TimeEntryStopperInterface) {
+	s.timeEntryStopper = stopper
 }
 
 // CreateTask creates a new task in the given space.
@@ -247,6 +259,13 @@ func (s *TaskService) CompleteTask(taskID string, userID uuid.UUID, actualTimeSe
 		}
 		if !isTerminalStatus(blocker.Status) {
 			return nil, fmt.Errorf("task %q cannot be completed: blocked by task %q (status %q)", taskID, blocker.ID, blocker.Status)
+		}
+	}
+
+	// Auto-stop any running timer before completing.
+	if s.timeEntryStopper != nil {
+		if err := s.timeEntryStopper.StopRunningTimer(taskID); err != nil {
+			return nil, fmt.Errorf("stopping running timer: %w", err)
 		}
 	}
 
