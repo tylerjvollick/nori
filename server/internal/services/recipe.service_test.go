@@ -3695,6 +3695,138 @@ func TestRollRecipe_BatchExpansion_ErrorNotDivisible(t *testing.T) {
 	}
 }
 
+// setupPublishedRecipeNilBatchSizes creates a recipe with 3 steps:
+// step1 and step2 have nil batchSize (should inherit orderQty),
+// step3 has explicit batchSize=1 (per-piece).
+func setupPublishedRecipeNilBatchSizes(t *testing.T) (*RecipeService, *mockTaskRepo, uuid.UUID) {
+	t.Helper()
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "Nil Batch Test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+	rootTaskID := *version.RootTaskID
+
+	// Step 1: nil batchSize (inherit orderQty).
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Rough cut", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	// Step 2: nil batchSize (inherit orderQty).
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Assemble", AddStepOptions{})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	// Step 3: explicit batchSize=1 (per-piece).
+	bs1 := 1
+	_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, "Finish piece {{n}}", AddStepOptions{
+		BatchSize: &bs1,
+	})
+	if err != nil {
+		t.Fatalf("AddRecipeStep: %v", err)
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	return svc, taskRepo, recipe.ID
+}
+
+func TestRollRecipe_NilBatchSize_InheritsOrderQty(t *testing.T) {
+	svc, taskRepo, recipeID := setupPublishedRecipeNilBatchSizes(t)
+
+	orderQty := 6
+	job, err := svc.RollRecipe(recipeID, uuid.New(), uuid.New(), RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// Steps 1 and 2 have nil batchSize → inherit orderQty → 1 task each with Quantity=6.
+	// Step 3 has batchSize=1 → 6 tasks with Quantity=1.
+	// Total: 1 + 1 + 6 = 8 children.
+	if len(children) != 8 {
+		var titles []string
+		for _, c := range children {
+			titles = append(titles, fmt.Sprintf("%s (qty=%d)", c.Title, c.Quantity))
+		}
+		t.Fatalf("expected 8 children (1 rough cut + 1 assemble + 6 finish), got %d: %v",
+			len(children), titles)
+	}
+
+	// Verify nil-batchSize steps produce 1 task each with Quantity=orderQty.
+	for _, c := range children {
+		if c.Title == "Rough cut" || c.Title == "Assemble" {
+			if c.Quantity != 6 {
+				t.Errorf("task %q: Quantity = %d, want 6", c.Title, c.Quantity)
+			}
+		}
+	}
+}
+
+func TestRollRecipe_AllNilBatchSize_OneTaskPerStep(t *testing.T) {
+	// Recipe where NO steps have explicit batchSize.
+	recipeRepo := newMockRecipeRepo()
+	taskRepo := newMockTaskRepo()
+	depRepo := newMockTaskDepRepo()
+	svc := NewRecipeService(nil, recipeRepo, taskRepo, depRepo)
+
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	recipe, version, err := svc.CreateRecipeWithTaskTree(spaceID, userID, "All Nil Test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateRecipeWithTaskTree: %v", err)
+	}
+	rootTaskID := *version.RootTaskID
+
+	for _, name := range []string{"Step A", "Step B", "Step C"} {
+		_, err = svc.AddRecipeStep(recipe.ID, rootTaskID, name, AddStepOptions{})
+		if err != nil {
+			t.Fatalf("AddRecipeStep %s: %v", name, err)
+		}
+	}
+
+	_, err = svc.PublishVersion(recipe.ID)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+
+	orderQty := 10
+	job, err := svc.RollRecipe(recipe.ID, spaceID, userID, RollRecipeOptions{
+		OrderQty: &orderQty,
+	})
+	if err != nil {
+		t.Fatalf("RollRecipe: %v", err)
+	}
+
+	children, _ := taskRepo.GetChildren(job.ID)
+
+	// All steps nil batchSize → 1 task per step, each with Quantity=10.
+	if len(children) != 3 {
+		t.Fatalf("expected 3 children, got %d", len(children))
+	}
+	for _, c := range children {
+		if c.Quantity != 10 {
+			t.Errorf("task %q: Quantity = %d, want 10", c.Title, c.Quantity)
+		}
+	}
+}
+
 func TestRollRecipe_BatchExpansion_PreservesStationID(t *testing.T) {
 	svc, _, taskRepo, _, recipeID := setupPublishedRecipeWithBatchSizes(t)
 
@@ -4636,7 +4768,7 @@ func TestRollRecipe_Formula_5mTimesBatchSize_OrderQty6(t *testing.T) {
 	f := "5m * {{batch_size}}"
 	_, err = svc.AddRecipeStep(recipe.ID, *version.RootTaskID, "Step", AddStepOptions{
 		EstimatedTimeFormula: &f,
-		// nil BatchSize — defaults to 1, so orderQty=6 → 6 tickets each with batchSize=1.
+		// nil BatchSize — inherits orderQty, so orderQty=6 → 1 ticket with Quantity=6.
 	})
 	if err != nil {
 		t.Fatalf("AddRecipeStep: %v", err)
@@ -4658,14 +4790,17 @@ func TestRollRecipe_Formula_5mTimesBatchSize_OrderQty6(t *testing.T) {
 		t.Fatalf("GetChildren: %v", err)
 	}
 
-	// nil batchSize defaults to 1 for ticket count (6 tickets), but {{batch_size}}
-	// resolves to orderQty (6) per AC#5. Each task gets "5m * 6" = 1800.
-	if len(children) != 6 {
-		t.Fatalf("expected 6 children (6/1), got %d", len(children))
+	// nil batchSize inherits orderQty → 1 ticket with Quantity=6.
+	// {{batch_size}} resolves to orderQty (6) per AC#5. Task gets "5m * 6" = 1800.
+	if len(children) != 1 {
+		t.Fatalf("expected 1 child (nil batchSize inherits orderQty), got %d", len(children))
 	}
 	for _, child := range children {
 		if child.EstimatedTimeFromRecipeSecs == nil || *child.EstimatedTimeFromRecipeSecs != 1800 {
 			t.Errorf("child %q: EstimatedTimeFromRecipeSecs = %v, want 1800", child.ID, child.EstimatedTimeFromRecipeSecs)
+		}
+		if child.Quantity != 6 {
+			t.Errorf("child %q: Quantity = %d, want 6", child.ID, child.Quantity)
 		}
 	}
 }

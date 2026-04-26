@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,14 @@ func TestTaskCommandHasJSONFlag(t *testing.T) {
 func setupTestServer(t *testing.T, expectedPath string, expectedMethod string, responseBody interface{}, statusCode int) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Time entry side-effect calls (start/pause) are non-blocking best-effort.
+		// Return 200 empty JSON for them without asserting.
+		if strings.Contains(r.URL.Path, "/time-entries/") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{})
+			return
+		}
+
 		assert.Equal(t, expectedPath, r.URL.Path)
 		assert.Equal(t, expectedMethod, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))

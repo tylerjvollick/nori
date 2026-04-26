@@ -241,7 +241,9 @@ func createChildTasks(
 	childSeq := 1
 
 	for _, step := range steps {
-		batchSize := 1
+		// nil BatchSize means "inherit orderQty" — produce 1 task with Quantity=orderQty.
+		// Explicit BatchSize means per-piece expansion: ticketCount = orderQty / batchSize.
+		batchSize := orderQty
 		if step.BatchSize != nil {
 			batchSize = *step.BatchSize
 		}
@@ -290,6 +292,7 @@ func createChildTasks(
 				Title:           title,
 				Description:     description,
 				Quantity:        batchSize,
+				BatchSize:       step.BatchSize,
 				Priority:        priority,
 				DisplayOrder:    childSeq - 1, // use the sequence number we just used
 				CreatedAt:       now,
@@ -1616,7 +1619,9 @@ func expandTaskTree(
 	childSeq := 1
 
 	for _, src := range sourceChildren {
-		batchSize := 1
+		// nil BatchSize means "inherit orderQty" — produce 1 task with Quantity=orderQty.
+		// Explicit BatchSize means per-piece expansion: ticketCount = orderQty / batchSize.
+		batchSize := orderQty
 		if src.BatchSize != nil {
 			batchSize = *src.BatchSize
 		}
