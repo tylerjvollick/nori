@@ -45,7 +45,7 @@ func (h *TimeEntryHandler) RegisterTimeEntryRoutes(router fiber.Router, middlewa
 	group.Delete("/:entryId", h.DeleteEntry)
 
 	// Unlogged tasks query (not task-scoped, but space-scoped).
-	router.Get("/tasks/unlogged", middlewares[0], h.GetUnloggedTasks)
+	router.Get("/tasks/unlogged", h.GetUnloggedTasks)
 }
 
 func (h *TimeEntryHandler) StartTimer(c *fiber.Ctx) error {
