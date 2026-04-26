@@ -31,6 +31,7 @@
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
 	import { taskApi } from '$lib/api/task';
+	import { timeEntryApi, type TimeEntryResponse } from '$lib/api/timeEntry';
 	import { Input } from '$lib/components/ui/input';
 	import TaskActions from './TaskActions.svelte';
 	import SubTaskList from './SubTaskList.svelte';
@@ -268,6 +269,77 @@
 			formulaSaving = false;
 		}
 	}
+
+	// --- Time entry tracking (job/task mode) ---
+	let timeEntries = $state<TimeEntryResponse[]>([]);
+	let totalLoggedSecs = $state(0);
+	let runningEntry = $state<TimeEntryResponse | null>(null);
+	let now = $state(new Date());
+	let timerInterval = $state<ReturnType<typeof setInterval> | null>(null);
+
+	// Fetch time entries when task changes (only in job/task mode).
+	$effect(() => {
+		const currentTask = task;
+		if (currentTask && mode !== 'recipe') {
+			loadTimeEntries(currentTask.id);
+		} else {
+			timeEntries = [];
+			totalLoggedSecs = 0;
+			runningEntry = null;
+		}
+	});
+
+	async function loadTimeEntries(taskId: string): Promise<void> {
+		try {
+			const result = await timeEntryApi.list(spaceId, taskId);
+			timeEntries = result.items;
+			totalLoggedSecs = result.totalDurationSecs;
+			runningEntry = result.items.find((e) => !e.endedAt) ?? null;
+		} catch {
+			timeEntries = [];
+			totalLoggedSecs = 0;
+			runningEntry = null;
+		}
+	}
+
+	// Tick the live timer every second when a timer is running.
+	$effect(() => {
+		if (runningEntry) {
+			now = new Date();
+			const id = setInterval(() => { now = new Date(); }, 1000);
+			timerInterval = id;
+			return () => clearInterval(id);
+		} else if (timerInterval) {
+			clearInterval(timerInterval);
+			timerInterval = null;
+		}
+	});
+
+	/** Elapsed seconds on the currently running entry. */
+	let runningElapsedSecs = $derived(
+		runningEntry
+			? Math.max(0, Math.floor((now.getTime() - new Date(runningEntry.startedAt).getTime()) / 1000))
+			: 0,
+	);
+
+	/** Total time including the live running entry. */
+	let totalWithRunning = $derived(totalLoggedSecs + runningElapsedSecs);
+
+	/** Wrap onaction to also refresh time entries after start/pause/resume. */
+	function handleAction(updated: TaskResponse): void {
+		onaction?.(updated);
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
+
+	/** Wrap oncomplete to also refresh time entries after completion. */
+	function handleComplete(response: CompleteTaskResponse): void {
+		oncomplete?.(response);
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
 </script>
 
 {#snippet statusIcon(status: string, sizeClass: string)}
@@ -388,7 +460,7 @@
 
 		<!-- Action buttons (hidden in recipe mode — no status transitions) -->
 		{#if mode !== 'recipe'}
-			<TaskActions {task} {spaceId} layout="bar" {onaction} {oncomplete} />
+			<TaskActions {task} {spaceId} layout="bar" onaction={handleAction} oncomplete={handleComplete} />
 
 			<!-- Forward navigation: go to next task in dependency chain -->
 			{#if nextTaskId}
@@ -528,10 +600,21 @@
 				{/if}
 
 				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Actual Time</span>
-					<span class="text-sm text-foreground flex items-center gap-1">
+					<span class="text-sm text-muted-foreground flex items-center gap-1.5">
+						Logged Time
+						{#if runningEntry}
+							<span class="relative flex size-2">
+								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+							</span>
+						{/if}
+					</span>
+					<span class="text-sm text-foreground flex items-center gap-1" data-testid="logged-time">
 						<Clock class="w-3 h-3 text-muted-foreground" />
-						{formatDuration(task.actualTimeSeconds)}
+						{formatDuration(totalWithRunning)}
+						{#if runningEntry}
+							<span class="text-xs text-green-600 dark:text-green-400 font-medium">Recording</span>
+						{/if}
 					</span>
 				</div>
 
