@@ -139,19 +139,66 @@ func init() {
 }
 
 func runTaskStart(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "start")
+	if err := runTaskAction(args[0], "start"); err != nil {
+		return err
+	}
+	// Also start a time entry (non-blocking — don't fail the task transition).
+	timeEntryStart(args[0])
+	return nil
 }
 
 func runTaskComplete(cmd *cobra.Command, args []string) error {
+	// Auto-pause running timer before completing.
+	timeEntryPause(args[0])
 	return runTaskAction(args[0], "complete")
 }
 
 func runTaskPause(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "pause")
+	if err := runTaskAction(args[0], "pause"); err != nil {
+		return err
+	}
+	// Also pause the running time entry.
+	timeEntryPause(args[0])
+	return nil
 }
 
 func runTaskResume(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "resume")
+	if err := runTaskAction(args[0], "resume"); err != nil {
+		return err
+	}
+	// Resume creates a new time entry (discrete log).
+	timeEntryStart(args[0])
+	return nil
+}
+
+// timeEntryStart starts a time entry for a task. Non-fatal — just warns on error.
+func timeEntryStart(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/start", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+}
+
+// timeEntryPause pauses a running time entry for a task. Non-fatal — just silently ignores errors.
+func timeEntryPause(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/pause", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
 }
 
 func runTaskSkip(cmd *cobra.Command, args []string) error {
