@@ -162,6 +162,11 @@ func (s *TaskService) UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*model
 	if dto.EstimatedTimeFormula != nil {
 		task.EstimatedTimeFormula = dto.EstimatedTimeFormula
 	}
+	if dto.ClearBatchSize {
+		task.BatchSize = nil
+	} else if dto.BatchSize != nil {
+		task.BatchSize = dto.BatchSize
+	}
 	if dto.AssignedToID != nil {
 		if *dto.AssignedToID == "" {
 			task.AssignedToID = nil // unassign

@@ -34,6 +34,7 @@ export interface TaskResponse {
 	estimatedTimeSeconds?: number | null;
 	estimatedTimeFormula?: string | null;
 	estimatedTimeFromRecipeSeconds?: number | null;
+	batchSize?: number | null;
 	deviationNotes?: string | null;
 	metadata?: Record<string, unknown> | null;
 	createdAt: string;
@@ -71,6 +72,8 @@ export interface UpdateTaskRequest {
 	status?: TaskStatus;
 	assignedToId?: string; // UUID string to assign, empty string to unassign
 	estimatedTimeFormula?: string;
+	batchSize?: number;
+	clearBatchSize?: boolean;
 }
 
 export interface AddChildTaskRequest {

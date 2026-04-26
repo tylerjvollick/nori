@@ -26,6 +26,8 @@ type UpdateTaskRequest struct {
 	Status               *models.TaskStatus `json:"status,omitempty"`
 	AssignedToID         *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
 	EstimatedTimeFormula *string            `json:"estimatedTimeFormula,omitempty"`
+	BatchSize            *int               `json:"batchSize,omitempty"`     // explicit nil means "inherit"
+	ClearBatchSize       bool               `json:"clearBatchSize,omitempty"` // set true to reset to inherit (nil)
 }
 
 // AddChildTaskRequest represents the request body for adding a child task.
@@ -81,6 +83,7 @@ type TaskResponse struct {
 	EstimatedTimeSecs           *int    `json:"estimatedTimeSeconds,omitempty"`
 	EstimatedTimeFormula        *string `json:"estimatedTimeFormula,omitempty"`
 	EstimatedTimeFromRecipeSecs *int    `json:"estimatedTimeFromRecipeSeconds,omitempty"`
+	BatchSize                   *int    `json:"batchSize,omitempty"`
 	DeviationNotes              *string `json:"deviationNotes,omitempty"`
 	Metadata        models.JSONB      `json:"metadata,omitempty"`
 	CreatedAt       string            `json:"createdAt"`
@@ -162,6 +165,7 @@ func TaskResponseFromModel(t *models.Task) TaskResponse {
 		EstimatedTimeSecs:           t.EstimatedTimeSecs,
 		EstimatedTimeFormula:        t.EstimatedTimeFormula,
 		EstimatedTimeFromRecipeSecs: t.EstimatedTimeFromRecipeSecs,
+		BatchSize:                   t.BatchSize,
 		DeviationNotes:              t.DeviationNotes,
 		Metadata:        t.Metadata,
 		CreatedAt:       t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),

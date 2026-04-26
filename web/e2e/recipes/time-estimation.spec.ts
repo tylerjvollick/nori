@@ -95,6 +95,73 @@ test.describe('Recipe Time Estimation', () => {
     await expect(page.getByText('Formula:')).toBeVisible();
   });
 
+  test('recipe task shows Inherit for nil batchSize', async ({ page }) => {
+    await createRecipeWithTask(page, 'Batch Inherit Test', 'Assembly Step');
+    await selectTask(page, 'Assembly Step');
+
+    // Batch size should default to "Inherit" for new steps
+    const batchSizeValue = page.getByTestId('batch-size-value');
+    await expect(batchSizeValue).toBeVisible({ timeout: 5000 });
+    await expect(batchSizeValue).toHaveText('Inherit');
+  });
+
+  test('set explicit batch size, reload, assert persists', async ({ page }) => {
+    await createRecipeWithTask(page, 'Batch Set Test', 'Cut Parts');
+    await selectTask(page, 'Cut Parts');
+
+    // Click to edit batch size
+    const batchSizeValue = page.getByTestId('batch-size-value');
+    await expect(batchSizeValue).toBeVisible({ timeout: 5000 });
+    await batchSizeValue.click();
+
+    // Enter batch size 3
+    const input = page.getByTestId('batch-size-input');
+    await expect(input).toBeVisible({ timeout: 5000 });
+    await input.fill('3');
+    await input.blur();
+    await page.waitForTimeout(500);
+
+    // Reload
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({ timeout: 10000 });
+
+    // Re-select and verify
+    await selectTask(page, 'Cut Parts');
+    const reloadedValue = page.getByTestId('batch-size-value');
+    await expect(reloadedValue).toHaveText('3', { timeout: 5000 });
+  });
+
+  test('change batch size back to Inherit, reload, assert Inherit', async ({ page }) => {
+    await createRecipeWithTask(page, 'Batch Reset Test', 'Sand Edges');
+    await selectTask(page, 'Sand Edges');
+
+    // Set to 5 first
+    const batchSizeValue = page.getByTestId('batch-size-value');
+    await batchSizeValue.click();
+    const input = page.getByTestId('batch-size-input');
+    await input.fill('5');
+    await input.blur();
+    await page.waitForTimeout(500);
+
+    // Verify it's 5
+    await expect(page.getByTestId('batch-size-value')).toHaveText('5', { timeout: 5000 });
+
+    // Now reset to inherit
+    await page.getByTestId('batch-size-value').click();
+    const input2 = page.getByTestId('batch-size-input');
+    await input2.fill('');
+    await input2.blur();
+    await page.waitForTimeout(500);
+
+    // Reload and verify inherit
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({ timeout: 10000 });
+    await selectTask(page, 'Sand Edges');
+    await expect(page.getByTestId('batch-size-value')).toHaveText('Inherit', { timeout: 5000 });
+  });
+
   test('completion modal shows time entries and total', async ({ page }) => {
     // Create recipe, publish, roll to get a job task
     await createRecipeWithTask(page, 'Completion Modal Test', 'Finishing Step');

@@ -270,6 +270,50 @@
 		}
 	}
 
+	// --- Batch size editing (recipe mode) ---
+	let batchSizeEditing = $state(false);
+	let batchSizeInput = $state('');
+	let batchSizeSaving = $state(false);
+
+	let batchSizeDisplay = $derived(
+		task?.batchSize != null ? String(task.batchSize) : 'Inherit',
+	);
+
+	function startBatchSizeEdit(): void {
+		batchSizeEditing = true;
+		batchSizeInput = task?.batchSize != null ? String(task.batchSize) : '';
+	}
+
+	async function saveBatchSize(): Promise<void> {
+		if (!task || batchSizeSaving) return;
+		batchSizeEditing = false;
+
+		const trimmed = batchSizeInput.trim().toLowerCase();
+
+		if (trimmed === '' || trimmed === 'inherit') {
+			// Clear to inherit.
+			if (task.batchSize == null) return; // already inherit
+			batchSizeSaving = true;
+			try {
+				await taskApi.updateTask(spaceId, task.id, { clearBatchSize: true });
+				onmutate?.();
+			} finally {
+				batchSizeSaving = false;
+			}
+		} else {
+			const num = parseInt(trimmed, 10);
+			if (isNaN(num) || num < 1) return;
+			if (task.batchSize === num) return; // unchanged
+			batchSizeSaving = true;
+			try {
+				await taskApi.updateTask(spaceId, task.id, { batchSize: num });
+				onmutate?.();
+			} finally {
+				batchSizeSaving = false;
+			}
+		}
+	}
+
 	// --- Time entry tracking (job/task mode) ---
 	let timeEntries = $state<TimeEntryResponse[]>([]);
 	let totalLoggedSecs = $state(0);
@@ -576,6 +620,35 @@
 						Flat: <code class="bg-muted px-1 rounded">30m</code>, <code class="bg-muted px-1 rounded">1h</code> &middot;
 						Formula: <code class="bg-muted px-1 rounded">5m * {'{{'}batch_size{'}}'}</code>
 					</p>
+				</div>
+
+				<!-- Batch size -->
+				<div class="flex items-center justify-between" data-testid="batch-size-field">
+					<span class="text-sm text-muted-foreground">Batch Size</span>
+					{#if batchSizeEditing}
+						<Input
+							type="text"
+							bind:value={batchSizeInput}
+							placeholder="Inherit"
+							class="w-24 h-7 text-sm text-right"
+							autofocus
+							data-testid="batch-size-input"
+							onblur={saveBatchSize}
+							onkeydown={(e: KeyboardEvent) => {
+								if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+								if (e.key === 'Escape') { batchSizeEditing = false; }
+							}}
+							disabled={batchSizeSaving}
+						/>
+					{:else}
+						<button
+							class="text-sm text-foreground hover:text-primary cursor-pointer transition-colors"
+							onclick={startBatchSizeEdit}
+							data-testid="batch-size-value"
+						>
+							{batchSizeDisplay}
+						</button>
+					{/if}
 				</div>
 			{:else}
 				<!-- Job/task mode: show recipe estimate (read-only) + user override -->
