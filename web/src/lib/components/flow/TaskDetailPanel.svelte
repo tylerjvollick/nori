@@ -30,6 +30,7 @@
 	import TaskActions from './TaskActions.svelte';
 	import StatusDropdown from './StatusDropdown.svelte';
 	import TimerControls from './TimerControls.svelte';
+	import TimeEntryEditor from './TimeEntryEditor.svelte';
 	import SubTaskList from './SubTaskList.svelte';
 
 	interface Props {
@@ -300,6 +301,8 @@
 		}
 	});
 
+	let timeEditorOpen = $state(false);
+
 	async function loadTimeEntries(taskId: string): Promise<void> {
 		try {
 			const result = await timeEntryApi.list(spaceId, taskId);
@@ -437,7 +440,18 @@
 					<Badge variant="secondary" class="text-xs" data-testid="recipe-version-tag">v{recipeVersion}</Badge>
 				{/if}
 			</div>
-			<h2 class="text-lg font-semibold text-foreground">{task.title}</h2>
+			<div class="flex items-center gap-2">
+				<h2 class="text-lg font-semibold text-foreground flex-1 min-w-0 truncate">{task.title}</h2>
+				{#if mode !== 'recipe'}
+					<StatusDropdown
+						status={task.status}
+						{spaceId}
+						taskId={task.id}
+						isBlocked={deps !== null && deps.blockers.length > 0}
+						onchange={handleStatusChange}
+					/>
+				{/if}
+			</div>
 			{#if task.description}
 				<p class="text-sm text-muted-foreground mt-1">{task.description}</p>
 			{/if}
@@ -465,20 +479,6 @@
 
 		<!-- Core metadata -->
 		<div class="space-y-3">
-			<!-- Status (hidden in recipe mode) -->
-			{#if mode !== 'recipe'}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Status</span>
-					<StatusDropdown
-						status={task.status}
-						{spaceId}
-						taskId={task.id}
-						isBlocked={deps !== null && deps.blockers.length > 0}
-						onchange={handleStatusChange}
-					/>
-				</div>
-			{/if}
-
 			<!-- Priority -->
 			<div class="flex items-center justify-between">
 				<span class="text-sm text-muted-foreground">Priority</span>
@@ -617,7 +617,7 @@
 				{/if}
 
 				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Time</span>
+					<span class="text-sm text-muted-foreground">Timer</span>
 					<TimerControls
 						{spaceId}
 						taskId={task.id}
@@ -626,6 +626,32 @@
 						onupdate={handleTimerUpdate}
 					/>
 				</div>
+
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Total Recorded</span>
+					<span class="flex items-center gap-1.5">
+						<span class="text-sm font-mono text-foreground" data-testid="logged-time">
+							{formatDuration(task.actualTimeSeconds)}
+						</span>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+							onclick={() => { timeEditorOpen = true; }}
+						>
+							Edit
+						</Button>
+					</span>
+				</div>
+
+				{#if task}
+					<TimeEntryEditor
+						{spaceId}
+						taskId={task.id}
+						bind:open={timeEditorOpen}
+						onchange={() => { if (task) { loadTimeEntries(task.id); } }}
+					/>
+				{/if}
 
 				{#if task.startedAt}
 					<div class="flex items-center justify-between">

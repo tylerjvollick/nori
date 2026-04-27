@@ -135,80 +135,77 @@
 	<!-- Controls -->
 	{#if !isTerminal}
 		{#if isStopped}
-			<!-- No active session → Start -->
 			<Button
 				variant="outline"
-				size="icon-sm"
-				class="size-7 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+				size="sm"
+				class="gap-1.5 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
 				onclick={startTimer}
 				disabled={actionInProgress !== null}
-				title="Start timer"
 			>
 				{#if actionInProgress === 'start'}
-					<Loader2 class="size-3.5 animate-spin" />
+					<Loader2 class="size-4 animate-spin" />
 				{:else}
-					<Play class="size-3.5" />
+					<Play class="size-4" />
 				{/if}
+				Start
 			</Button>
 		{:else if isRunning}
-			<!-- Running → Pause or Stop -->
 			<Button
 				variant="outline"
-				size="icon-sm"
-				class="size-7"
+				size="sm"
+				class="gap-1.5"
 				onclick={pauseTimer}
 				disabled={actionInProgress !== null}
-				title="Pause timer"
 			>
 				{#if actionInProgress === 'pause'}
-					<Loader2 class="size-3.5 animate-spin" />
+					<Loader2 class="size-4 animate-spin" />
 				{:else}
-					<Pause class="size-3.5" />
+					<Pause class="size-4" />
 				{/if}
+				Pause
 			</Button>
 			<Button
 				variant="outline"
-				size="icon-sm"
-				class="size-7 text-red-500 hover:text-red-600"
+				size="sm"
+				class="gap-1.5 text-red-500 hover:text-red-600"
 				onclick={stopTimer}
 				disabled={actionInProgress !== null}
-				title="Stop timer"
 			>
 				{#if actionInProgress === 'stop'}
-					<Loader2 class="size-3.5 animate-spin" />
+					<Loader2 class="size-4 animate-spin" />
 				{:else}
-					<Square class="size-3" />
+					<Square class="size-3.5" />
 				{/if}
+				Stop
 			</Button>
 		{:else if isPaused}
-			<!-- Paused → Resume or Stop -->
 			<Button
 				variant="outline"
-				size="icon-sm"
-				class="size-7 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+				size="sm"
+				class="gap-1.5 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
 				onclick={resumeTimer}
 				disabled={actionInProgress !== null}
-				title="Resume timer"
 			>
 				{#if actionInProgress === 'resume'}
-					<Loader2 class="size-3.5 animate-spin" />
+					<Loader2 class="size-4 animate-spin" />
 				{:else}
-					<Play class="size-3.5" />
+					<Play class="size-4" />
 				{/if}
+				Resume
 			</Button>
 			<Button
 				variant="outline"
-				size="icon-sm"
-				class="size-7 text-red-500 hover:text-red-600"
+				size="sm"
+				class="gap-1.5 text-red-500 hover:text-red-600"
 				onclick={stopTimer}
 				disabled={actionInProgress !== null}
-				title="Stop timer"
 			>
 				{#if actionInProgress === 'stop'}
-					<Loader2 class="size-3.5 animate-spin" />
+					<Loader2 class="size-4 animate-spin" />
 				{:else}
-					<Square class="size-3" />
+					<Square class="size-3.5" />
 				{/if}
+				Stop
 			</Button>
 		{/if}
 	{/if}
