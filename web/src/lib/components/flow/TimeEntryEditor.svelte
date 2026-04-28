@@ -3,13 +3,20 @@
 		timeEntryApi,
 		type TimeEntryResponse,
 		type CreateTimeEntryRequest,
-		type UpdateTimeEntryRequest,
 	} from '$lib/api/timeEntry';
 	import { formatDuration } from '$lib/utils/time';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Loader2, Plus, Trash2, Clock, Pencil } from '@lucide/svelte';
+	import * as Sheet from '$lib/components/ui/sheet';
+	import * as Popover from '$lib/components/ui/popover';
+	import { Calendar } from '$lib/components/ui/calendar';
+	import { Loader2, Plus, Trash2, Clock, CalendarIcon } from '@lucide/svelte';
+	import {
+		CalendarDate,
+		today,
+		getLocalTimeZone,
+		type DateValue,
+	} from '@internationalized/date';
 
 	interface Props {
 		spaceId: string;
@@ -27,14 +34,21 @@
 	let addingEntry = $state(false);
 	let deletingId = $state<string | null>(null);
 
+	// --- Add entry form ---
+	let newDuration = $state('30m');
+	let newDate = $state<DateValue>(today(getLocalTimeZone()));
+	let datePickerOpen = $state(false);
+
 	// --- Duration editing ---
 	let editingEntryId = $state<string | null>(null);
 	let durationEditValue = $state('');
 
-	// Load entries when modal opens
+	// Load entries when sheet opens
 	$effect(() => {
 		if (open) {
 			editingEntryId = null;
+			newDuration = '30m';
+			newDate = today(getLocalTimeZone());
 			loadEntries();
 		}
 	});
@@ -63,10 +77,19 @@
 		});
 	}
 
-	function formatDate(dateStr: string): string {
+	function formatDateStr(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString(undefined, {
 			month: 'short',
 			day: 'numeric',
+		});
+	}
+
+	function formatDateValue(dv: DateValue): string {
+		const d = new Date(dv.year, dv.month - 1, dv.day);
+		return d.toLocaleDateString(undefined, {
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric',
 		});
 	}
 
@@ -79,49 +102,7 @@
 		return elapsed;
 	}
 
-	// --- Actions ---
-
-	async function addManualEntry(): Promise<void> {
-		addingEntry = true;
-		try {
-			const now = new Date();
-			const thirtyMinAgo = new Date(now.getTime() - 30 * 60 * 1000);
-			const data: CreateTimeEntryRequest = {
-				startedAt: thirtyMinAgo.toISOString(),
-				endedAt: now.toISOString(),
-			};
-			await timeEntryApi.create(spaceId, taskId, data);
-			await loadEntries();
-			onchange?.();
-		} catch (e) {
-			console.error('Failed to add time entry:', e);
-		} finally {
-			addingEntry = false;
-		}
-	}
-
-	async function deleteEntry(entryId: string): Promise<void> {
-		deletingId = entryId;
-		try {
-			await timeEntryApi.remove(spaceId, taskId, entryId);
-			await loadEntries();
-			onchange?.();
-		} catch (e) {
-			console.error('Failed to delete time entry:', e);
-		} finally {
-			deletingId = null;
-		}
-	}
-
-	// --- Duration editing ---
-
-	function startDurationEdit(entry: TimeEntryResponse): void {
-		editingEntryId = entry.id;
-		const dur = entryDuration(entry);
-		const h = Math.floor(dur / 3600);
-		const m = Math.floor((dur % 3600) / 60);
-		durationEditValue = h > 0 ? `${h}h ${m}m` : `${m}m`;
-	}
+	// --- Duration parsing ---
 
 	function parseDurationInput(input: string): number | null {
 		const trimmed = input.trim().toLowerCase();
@@ -140,6 +121,65 @@
 		return totalSecs;
 	}
 
+	// --- Add entry ---
+
+	async function addManualEntry(): Promise<void> {
+		const secs = parseDurationInput(newDuration);
+		if (secs == null || secs <= 0) return;
+
+		addingEntry = true;
+		try {
+			// Build start/end from selected date + duration
+			const endDate = new Date(newDate.year, newDate.month - 1, newDate.day);
+			// Default to "now" time on the selected date, or noon if it's a past date
+			const todayVal = today(getLocalTimeZone());
+			if (newDate.compare(todayVal) === 0) {
+				const now = new Date();
+				endDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+			} else {
+				endDate.setHours(17, 0, 0); // Default to 5pm for past dates
+			}
+			const startDate = new Date(endDate.getTime() - secs * 1000);
+
+			const data: CreateTimeEntryRequest = {
+				startedAt: startDate.toISOString(),
+				endedAt: endDate.toISOString(),
+			};
+			await timeEntryApi.create(spaceId, taskId, data);
+			await loadEntries();
+			onchange?.();
+		} catch (e) {
+			console.error('Failed to add time entry:', e);
+		} finally {
+			addingEntry = false;
+		}
+	}
+
+	// --- Delete entry ---
+
+	async function deleteEntry(entryId: string): Promise<void> {
+		deletingId = entryId;
+		try {
+			await timeEntryApi.remove(spaceId, taskId, entryId);
+			await loadEntries();
+			onchange?.();
+		} catch (e) {
+			console.error('Failed to delete time entry:', e);
+		} finally {
+			deletingId = null;
+		}
+	}
+
+	// --- Edit duration ---
+
+	function startDurationEdit(entry: TimeEntryResponse): void {
+		editingEntryId = entry.id;
+		const dur = entryDuration(entry);
+		const h = Math.floor(dur / 3600);
+		const m = Math.floor((dur % 3600) / 60);
+		durationEditValue = h > 0 ? `${h}h ${m}m` : `${m}m`;
+	}
+
 	async function saveDurationEdit(entry: TimeEntryResponse): Promise<void> {
 		const secs = parseDurationInput(durationEditValue);
 		if (secs == null || secs <= 0) {
@@ -156,6 +196,47 @@
 		editingEntryId = null;
 	}
 
+	// --- Edit date ---
+
+	let editingDateEntryId = $state<string | null>(null);
+	let editDateValue = $state<DateValue>(today(getLocalTimeZone()));
+	let editDatePickerOpen = $state(false);
+
+	function startDateEdit(entry: TimeEntryResponse): void {
+		editingDateEntryId = entry.id;
+		const d = new Date(entry.startedAt);
+		editDateValue = new CalendarDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+		editDatePickerOpen = true;
+	}
+
+	async function saveDateEdit(entry: TimeEntryResponse, newDateVal: DateValue): Promise<void> {
+		editDatePickerOpen = false;
+		editingDateEntryId = null;
+
+		const oldStart = new Date(entry.startedAt);
+		const newStart = new Date(newDateVal.year, newDateVal.month - 1, newDateVal.day,
+			oldStart.getHours(), oldStart.getMinutes(), oldStart.getSeconds());
+
+		const updateData: Record<string, string> = {
+			startedAt: newStart.toISOString(),
+		};
+
+		if (entry.endedAt) {
+			const oldEnd = new Date(entry.endedAt);
+			const diff = oldEnd.getTime() - oldStart.getTime();
+			const newEnd = new Date(newStart.getTime() + diff);
+			updateData.endedAt = newEnd.toISOString();
+		}
+
+		try {
+			await timeEntryApi.update(spaceId, taskId, entry.id, updateData);
+			await loadEntries();
+			onchange?.();
+		} catch (e) {
+			console.error('Failed to update time entry date:', e);
+		}
+	}
+
 	/** Computed total including live running entries. */
 	let computedTotal = $derived.by(() => {
 		let total = 0;
@@ -166,19 +247,75 @@
 	});
 </script>
 
-<Dialog.Root bind:open>
-	<Dialog.Content class="sm:max-w-lg">
-		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2">
+<Sheet.Root bind:open>
+	<Sheet.Content side="right" class="w-full sm:max-w-md">
+		<Sheet.Header>
+			<Sheet.Title class="flex items-center gap-2">
 				<Clock class="size-5 text-muted-foreground" />
 				Time Entries
-			</Dialog.Title>
-			<Dialog.Description>
+			</Sheet.Title>
+			<Sheet.Description>
 				Add, edit, or remove time records for this task.
-			</Dialog.Description>
-		</Dialog.Header>
+			</Sheet.Description>
+		</Sheet.Header>
 
-		<div class="space-y-3 py-4">
+		<div class="space-y-4 py-4 px-1">
+			<!-- Add new entry form -->
+			<div class="flex items-end gap-2" data-testid="add-entry-form">
+				<div class="flex-1 space-y-1">
+					<label for="new-duration" class="text-xs text-muted-foreground">Duration</label>
+					<Input
+						id="new-duration"
+						type="text"
+						bind:value={newDuration}
+						placeholder="e.g. 1h 30m"
+						class="h-8 text-sm"
+						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') addManualEntry(); }}
+						data-testid="new-duration-input"
+					/>
+				</div>
+				<div class="space-y-1">
+					<label class="text-xs text-muted-foreground">Date</label>
+					<Popover.Root bind:open={datePickerOpen}>
+						<Popover.Trigger>
+							{#snippet child({ props })}
+								<button
+									{...props}
+									class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer whitespace-nowrap"
+									data-testid="new-date-picker"
+								>
+									<CalendarIcon class="size-3.5" />
+									{formatDateValue(newDate)}
+								</button>
+							{/snippet}
+						</Popover.Trigger>
+						<Popover.Content class="w-auto p-0" align="end">
+							<Calendar
+								type="single"
+								bind:value={newDate}
+								onValueChange={() => { datePickerOpen = false; }}
+							/>
+						</Popover.Content>
+					</Popover.Root>
+				</div>
+				<Button
+					variant="outline"
+					size="sm"
+					class="gap-1 h-8 shrink-0"
+					onclick={addManualEntry}
+					disabled={addingEntry}
+					data-testid="add-time-entry-btn"
+				>
+					{#if addingEntry}
+						<Loader2 class="size-3.5 animate-spin" />
+					{:else}
+						<Plus class="size-3.5" />
+					{/if}
+					Add
+				</Button>
+			</div>
+
+			<!-- Entry list -->
 			{#if loading}
 				<div class="flex items-center justify-center py-6 text-muted-foreground">
 					<Loader2 class="size-4 animate-spin mr-2" />
@@ -189,16 +326,45 @@
 					No time entries yet.
 				</p>
 			{:else}
-				<div class="max-h-72 overflow-y-auto space-y-1" data-testid="time-entry-list">
+				<div class="space-y-1" data-testid="time-entry-list">
 					{#each entries as entry (entry.id)}
 						<div
 							class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm {!entry.endedAt ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30' : ''}"
 							data-testid="time-entry-row"
 						>
-							<!-- Date + time range -->
+							<!-- Date (editable) -->
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
-									<span>{formatDate(entry.startedAt)}</span>
+									{#if editingDateEntryId === entry.id}
+										<Popover.Root bind:open={editDatePickerOpen}>
+											<Popover.Trigger>
+												{#snippet child({ props })}
+													<button
+														{...props}
+														class="inline-flex items-center gap-1 text-xs text-foreground hover:text-primary cursor-pointer"
+													>
+														<CalendarIcon class="size-3" />
+														{formatDateValue(editDateValue)}
+													</button>
+												{/snippet}
+											</Popover.Trigger>
+											<Popover.Content class="w-auto p-0" align="start">
+												<Calendar
+													type="single"
+													bind:value={editDateValue}
+													onValueChange={(v) => { if (v) saveDateEdit(entry, v); }}
+												/>
+											</Popover.Content>
+										</Popover.Root>
+									{:else}
+										<button
+											class="hover:text-foreground cursor-pointer transition-colors"
+											onclick={() => startDateEdit(entry)}
+											title="Click to edit date"
+										>
+											{formatDateStr(entry.startedAt)}
+										</button>
+									{/if}
 									<span>{formatTime(entry.startedAt)}</span>
 									<span>&ndash;</span>
 									{#if !entry.endedAt}
@@ -228,13 +394,12 @@
 								/>
 							{:else}
 								<button
-									class="flex items-center gap-1 text-xs font-mono text-right min-w-[4rem] hover:text-foreground text-muted-foreground cursor-pointer"
+									class="text-xs font-mono text-right min-w-[4rem] hover:text-foreground text-muted-foreground cursor-pointer transition-colors"
 									onclick={() => startDurationEdit(entry)}
 									title="Click to edit duration"
 									data-testid="duration-display"
 								>
 									{formatDuration(entryDuration(entry))}
-									<Pencil class="size-2.5 opacity-0 group-hover:opacity-100" />
 								</button>
 							{/if}
 
@@ -259,25 +424,8 @@
 				</div>
 			{/if}
 
-			<!-- Add entry button -->
-			<Button
-				variant="outline"
-				size="sm"
-				class="w-full gap-1.5"
-				onclick={addManualEntry}
-				disabled={addingEntry}
-				data-testid="add-time-entry-btn"
-			>
-				{#if addingEntry}
-					<Loader2 class="size-3.5 animate-spin" />
-				{:else}
-					<Plus class="size-3.5" />
-				{/if}
-				Add Time Entry
-			</Button>
-
 			<!-- Total -->
-			<div class="flex items-center justify-between pt-2 border-t">
+			<div class="flex items-center justify-between pt-3 border-t">
 				<span class="text-sm font-medium flex items-center gap-1.5">
 					<Clock class="size-4 text-muted-foreground" />
 					Total
@@ -287,11 +435,5 @@
 				</span>
 			</div>
 		</div>
-
-		<Dialog.Footer>
-			<Button onclick={() => { open = false; }}>
-				Done
-			</Button>
-		</Dialog.Footer>
-	</Dialog.Content>
-</Dialog.Root>
+	</Sheet.Content>
+</Sheet.Root>
