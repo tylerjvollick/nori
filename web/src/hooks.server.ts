@@ -1,7 +1,11 @@
 import { redirect, type Handle } from '@sveltejs/kit';
 import type { User } from '$lib/api/auth';
 
-const API_BASE_URL = process.env.VITE_API_URL || 'http://localhost:8081';
+// Server-side fetches must reach the API container by service name, not the
+// host-facing URL the browser uses. INTERNAL_API_URL is set in docker-compose
+// for containerized dev; fall back to VITE_API_URL for non-docker setups.
+const API_BASE_URL =
+	process.env.INTERNAL_API_URL || process.env.VITE_API_URL || 'http://localhost:8081';
 
 /** Routes that do not require authentication. */
 const PUBLIC_ROUTES = ['/login'];

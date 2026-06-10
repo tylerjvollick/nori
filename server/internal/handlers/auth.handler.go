@@ -157,6 +157,7 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 		spacesDTOs[i] = dtos.SpaceResponseDTO{
 			ID:        s.ID,
 			Name:      s.Name,
+			Slug:      s.Slug,
 			AccountID: s.AccountID,
 			IsDefault: s.IsDefault,
 			CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),

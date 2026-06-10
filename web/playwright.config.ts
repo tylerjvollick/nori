@@ -16,7 +16,7 @@ export default defineConfig({
   expect: { timeout: 5_000 },
 
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: process.env.NORI_TEST_BASE_URL ?? 'http://localhost:5173',
     trace: 'on-first-retry',
     // Use auth state from globalSetup by default (tests that need
     // unauthenticated access override this with storageState: undefined).
