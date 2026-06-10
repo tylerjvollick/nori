@@ -311,4 +311,4 @@ project. All beads, commits, and sessions MUST comply with these principles.
 - Build/test/style: `specs/dev-guide.md`
 - Bead commands: `bd prime`
 
-**Version**: 2.0.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-24
+**Version**: 2.1.0 | **Ratified**: 2026-04-23 | **Last Amended**: 2026-04-25
