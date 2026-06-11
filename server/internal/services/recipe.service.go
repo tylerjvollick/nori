@@ -10,6 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 
 	"github.com/tylerjvollick/nori/internal/formula"
@@ -427,6 +428,9 @@ type TaskTreeCloneOptions struct {
 	ResetStatus     bool       // If true, reset all cloned tasks to "open".
 	ClearAssignedTo bool       // If true, nil out AssignedToID on all cloned tasks.
 	BackfillEstimatedFromActual bool // If true, populate EstimatedTimeSecs from ActualTimeSecs when estimated is nil.
+	// SnapshotMaterialCost, when true (recipe → job roll), freezes each cloned
+	// task material's snapshotted_unit_cost to the material's current unit cost.
+	SnapshotMaterialCost bool
 }
 
 // DeepCloneTaskTree clones an entire task tree (root + descendants) and all
@@ -585,7 +589,15 @@ func (s *RecipeService) DeepCloneTaskTree(
 		err = s.db.Transaction(func(tx *gorm.DB) error {
 			txTaskRepo := repositories.NewTaskRepository(tx)
 			txTaskDepRepo := repositories.NewTaskDepRepository(tx)
-			return cloneFn(txTaskRepo, txTaskDepRepo)
+			if cloneErr := cloneFn(txTaskRepo, txTaskDepRepo); cloneErr != nil {
+				return cloneErr
+			}
+			// Clone task materials with a 1:1 source→clone task mapping.
+			oneToOne := make(map[string][]string, len(idMap))
+			for src, dst := range idMap {
+				oneToOne[src] = []string{dst}
+			}
+			return s.cloneTaskMaterials(tx, taskIDs, oneToOne, opts.SnapshotMaterialCost)
 		})
 	} else {
 		err = cloneFn(s.taskRepo, s.taskDepRepo)
@@ -596,6 +608,50 @@ func (s *RecipeService) DeepCloneTaskTree(
 	}
 
 	return clonedRoot, nil
+}
+
+// cloneTaskMaterials copies task_material rows from a set of source tasks onto
+// their cloned counterparts. idMapping maps each source task ID to one or more
+// new task IDs (one for structural clones, many for batch expansion). When
+// snapshot is true, each clone's snapshotted_unit_cost is frozen to the
+// material's current unit cost.
+func (s *RecipeService) cloneTaskMaterials(tx *gorm.DB, sourceTaskIDs []string, idMapping map[string][]string, snapshot bool) error {
+	tmRepo := repositories.NewTaskMaterialRepository(tx)
+	sourceMaterials, err := tmRepo.ListByTaskIDs(sourceTaskIDs)
+	if err != nil {
+		return fmt.Errorf("loading source task materials: %w", err)
+	}
+	if len(sourceMaterials) == 0 {
+		return nil
+	}
+
+	matRepo := repositories.NewMaterialRepository(tx)
+	costCache := make(map[uuid.UUID]*decimal.Decimal)
+
+	for _, sm := range sourceMaterials {
+		for _, newTaskID := range idMapping[sm.TaskID] {
+			clone := &models.TaskMaterial{
+				TaskID:          newTaskID,
+				MaterialID:      sm.MaterialID,
+				QuantityPerUnit: sm.QuantityPerUnit,
+				Notes:           sm.Notes,
+			}
+			if snapshot {
+				cost, ok := costCache[sm.MaterialID]
+				if !ok {
+					if material, mErr := matRepo.GetByID(sm.MaterialID); mErr == nil {
+						cost = material.UnitCost
+					}
+					costCache[sm.MaterialID] = cost
+				}
+				clone.SnapshottedUnitCost = cost
+			}
+			if err := tmRepo.Create(clone); err != nil {
+				return fmt.Errorf("cloning task material for %q: %w", newTaskID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1479,12 +1535,13 @@ func (s *RecipeService) RollRecipe(
 	if orderQty <= 1 {
 		// Simple path: 1:1 structural clone.
 		clonedRoot, err := s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
-			NewRootID:       newRootID,
-			SpaceID:         &spaceID,
-			CreatedByID:     &createdByID,
-			RecipeID:        &recipeID,
-			RecipeVersionID: recipe.CurrentVersionID,
-			ResetStatus:     true,
+			NewRootID:            newRootID,
+			SpaceID:              &spaceID,
+			CreatedByID:          &createdByID,
+			RecipeID:             &recipeID,
+			RecipeVersionID:      recipe.CurrentVersionID,
+			ResetStatus:          true,
+			SnapshotMaterialCost: true,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("cloning recipe task tree: %w", err)
@@ -1592,6 +1649,15 @@ func (s *RecipeService) rollWithBatchExpansion(
 	// 5. Wire dependencies using source edges + expansion mapping.
 	if err := wireSourceDependencies(s.taskDepRepo, sourceDeps, sourceToTaskIDs); err != nil {
 		return nil, fmt.Errorf("wiring dependencies: %w", err)
+	}
+
+	// 6. Clone task materials onto every expanded task, snapshotting cost.
+	// The root source task also carries materials; map it to the new root.
+	if s.db != nil {
+		sourceToTaskIDs[sourceRootID] = []string{newRootID}
+		if err := s.cloneTaskMaterials(s.db, taskIDs, sourceToTaskIDs, true); err != nil {
+			return nil, fmt.Errorf("cloning task materials: %w", err)
+		}
 	}
 
 	return root, nil

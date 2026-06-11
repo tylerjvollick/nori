@@ -155,6 +155,11 @@ PUT    /api/v1/spaces/:spaceId/materials/:id       — Update material [implemen
 DELETE /api/v1/spaces/:spaceId/materials/:id       — Soft-delete material [implemented]
 POST   /api/v1/spaces/:spaceId/materials/:id/adjust — Adjust stock (manual)
 
+POST   /api/v1/spaces/:spaceId/tasks/:taskId/materials      — Attach material to task [implemented]
+GET    /api/v1/spaces/:spaceId/tasks/:taskId/materials      — List task materials [implemented]
+PUT    /api/v1/spaces/:spaceId/tasks/:taskId/materials/:id  — Update quantity/notes [implemented]
+DELETE /api/v1/spaces/:spaceId/tasks/:taskId/materials/:id  — Remove material from task [implemented]
+
 GET    /api/recipe-versions/:versionId/bom            — Get BOM for a version
 POST   /api/recipe-versions/:versionId/bom            — Add BOM item
 PUT    /api/bom-items/:id                          — Update BOM item

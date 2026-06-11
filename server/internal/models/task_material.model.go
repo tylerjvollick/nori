@@ -15,9 +15,12 @@ type TaskMaterial struct {
 	TaskID          string          `gorm:"type:varchar(255);not null;uniqueIndex:uq_task_material_task_id_material_id" json:"taskId"`
 	MaterialID      uuid.UUID       `gorm:"type:uuid;not null;uniqueIndex:uq_task_material_task_id_material_id" json:"materialId"`
 	QuantityPerUnit decimal.Decimal `gorm:"type:numeric(12,4);not null" json:"quantityPerUnit"`
-	Notes           *string         `json:"notes,omitempty"`
-	CreatedAt       time.Time       `gorm:"default:now()" json:"createdAt"`
-	UpdatedAt       time.Time       `gorm:"default:now()" json:"updatedAt"`
+	// SnapshottedUnitCost freezes the material's unit cost at roll time. Null
+	// on recipe task_materials; set when cloned onto job tasks.
+	SnapshottedUnitCost *decimal.Decimal `gorm:"type:numeric(12,4)" json:"snapshottedUnitCost,omitempty"`
+	Notes               *string          `json:"notes,omitempty"`
+	CreatedAt           time.Time        `gorm:"default:now()" json:"createdAt"`
+	UpdatedAt           time.Time        `gorm:"default:now()" json:"updatedAt"`
 
 	// Relations
 	Task     *Task     `gorm:"foreignKey:TaskID" json:"task,omitempty"`

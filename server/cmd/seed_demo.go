@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,23 +126,23 @@ func resetDemoData(db *gorm.DB) error {
 				return err
 			}
 			// Delete the space itself.
-			if err := tx.Exec("DELETE FROM space WHERE id = ?", space.ID).Error; err != nil {
+			if err := tx.Exec("DELETE FROM spaces WHERE id = ?", space.ID).Error; err != nil {
 				return err
 			}
 		}
 
 		// Delete user-account relationships.
-		if err := tx.Exec("DELETE FROM user_account WHERE account_id = ?", account.ID).Error; err != nil {
+		if err := tx.Exec("DELETE FROM user_accounts WHERE account_id = ?", account.ID).Error; err != nil {
 			return err
 		}
 
 		// Delete users whose default_account_id is this account.
-		if err := tx.Exec("DELETE FROM \"user\" WHERE default_account_id = ?", account.ID).Error; err != nil {
+		if err := tx.Exec("DELETE FROM users WHERE default_account_id = ?", account.ID).Error; err != nil {
 			return err
 		}
 
 		// Delete the account.
-		if err := tx.Exec("DELETE FROM account WHERE id = ?", account.ID).Error; err != nil {
+		if err := tx.Exec("DELETE FROM accounts WHERE id = ?", account.ID).Error; err != nil {
 			return err
 		}
 
@@ -289,6 +290,12 @@ func seedDemo(db *gorm.DB) error {
 	}
 	log.Printf("  Created %d stations", len(demoStations))
 
+	// 4b. Stock the material catalog (before recipes so they can reference it).
+	if err := seedMaterials(db, space.ID); err != nil {
+		return fmt.Errorf("seeding materials: %w", err)
+	}
+	log.Println("  Created material catalog (6 materials)")
+
 	// 5. Create "Bistro Table" recipe with task tree.
 	recipeRepo := repositories.NewRecipeRepository(db)
 	taskRepo := repositories.NewTaskRepository(db)
@@ -303,6 +310,13 @@ func seedDemo(db *gorm.DB) error {
 		return fmt.Errorf("creating Bistro Table recipe: %w", err)
 	}
 	log.Printf("  Created recipe: Bistro Table (version %d, published)", bistroVersion.VersionNumber)
+
+	// 5b. Attach materials to the published recipe tasks. Because this runs
+	// before the roll, the rolled job inherits snapshotted material costs.
+	if err := seedTaskMaterials(db, space.ID, bistroVersion); err != nil {
+		return fmt.Errorf("attaching task materials: %w", err)
+	}
+	log.Println("  Attached materials to Bistro Table recipe tasks")
 
 	// 6. Roll the Bistro Table job (qty 12).
 	bistroJob, err := recipeService.RollRecipe(
@@ -351,13 +365,72 @@ func seedDemo(db *gorm.DB) error {
 	}
 	log.Printf("  Created backlog job: %s (%s)", backlogJob.Title, backlogJob.ID)
 
-	// 11. Stock the material catalog.
-	if err := seedMaterials(db, space.ID); err != nil {
-		return fmt.Errorf("seeding materials: %w", err)
-	}
-	log.Println("  Created material catalog (6 materials)")
-
 	return nil
+}
+
+// seedTaskMaterials attaches catalog materials to the published Bistro Table
+// recipe tasks, matched by step title. Run before the recipe is rolled so the
+// job inherits snapshotted material costs.
+func seedTaskMaterials(db *gorm.DB, spaceID uuid.UUID, version *models.RecipeVersion) error {
+	if version.RootTaskID == nil {
+		return nil
+	}
+
+	// Look up materials by name.
+	materialRepo := repositories.NewMaterialRepository(db)
+	catalog, err := materialRepo.GetBySpaceID(spaceID)
+	if err != nil {
+		return fmt.Errorf("loading materials: %w", err)
+	}
+	byName := make(map[string]uuid.UUID, len(catalog))
+	for _, m := range catalog {
+		byName[m.Name] = m.ID
+	}
+
+	// Load the published recipe tasks.
+	taskRepo := repositories.NewTaskRepository(db)
+	tasks, err := taskRepo.GetDescendants(*version.RootTaskID)
+	if err != nil {
+		return fmt.Errorf("loading recipe tasks: %w", err)
+	}
+
+	// title substring → (material name, quantity per unit)
+	type assignment struct {
+		material string
+		quantity string
+	}
+	rules := map[string]assignment{
+		"Mill lumber":  {material: "8/4 Walnut", quantity: "6.5"},
+		"Glue-up":      {material: "Titebond III", quantity: "2.0"},
+		"Sand and finish": {material: "Pre-Cat Lacquer", quantity: "0.25"},
+	}
+
+	tmRepo := repositories.NewTaskMaterialRepository(db)
+	for _, task := range tasks {
+		for titleFragment, a := range rules {
+			if !strings.Contains(task.Title, titleFragment) {
+				continue
+			}
+			materialID, ok := byName[a.material]
+			if !ok {
+				continue
+			}
+			tm := &models.TaskMaterial{
+				TaskID:          task.ID,
+				MaterialID:      materialID,
+				QuantityPerUnit: demoDecPtrVal(a.quantity),
+			}
+			if err := tmRepo.Create(tm); err != nil {
+				return fmt.Errorf("attaching %s to %q: %w", a.material, task.Title, err)
+			}
+		}
+	}
+	return nil
+}
+
+// demoDecPtrVal parses a decimal literal (value, not pointer) for seed data.
+func demoDecPtrVal(s string) decimal.Decimal {
+	return decimal.RequireFromString(s)
 }
 
 // seedMaterials stocks the demo space's material catalog with realistic

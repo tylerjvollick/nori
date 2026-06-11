@@ -107,7 +107,7 @@ func DBPool() *gorm.DB {
 			setupErr = fmt.Errorf("dbtest: DBPool called before SetupTestMain or SetShared")
 			return
 		}
-		db, err := gorm.Open(postgres.Open(sharedDSN), &gorm.Config{})
+		db, err := gorm.Open(postgres.Open(sharedDSN), &gorm.Config{TranslateError: true})
 		if err != nil {
 			setupErr = fmt.Errorf("dbtest: open gorm connection: %w", err)
 			return

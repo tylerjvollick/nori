@@ -488,10 +488,17 @@ TaskMaterial
   - TaskID: string (FK → Task, cascade delete)
   - MaterialID: uuid (FK → Material, cascade delete)
   - QuantityPerUnit: decimal (not null)
+  - SnapshottedUnitCost: decimal (nullable — null on recipe task_materials;
+    set to the material's current unit cost when cloned onto a job at roll time)
   - Notes: text (nullable)
   - CreatedAt, UpdatedAt: timestamp
   - UNIQUE (TaskID, MaterialID)
 ```
+
+When a recipe is rolled into a job, each recipe task's materials are cloned
+onto the corresponding job tasks (including across batch expansion) with
+`SnapshottedUnitCost` frozen to the material's current `UnitCost`, so the
+job's material costs are stable even if the catalog price later changes.
 
 ---
 
