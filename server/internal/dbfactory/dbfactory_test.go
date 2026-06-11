@@ -189,6 +189,30 @@ func TestCostEntry(t *testing.T) {
 	}
 }
 
+func TestProduct(t *testing.T) {
+	tx := dbtest.TestTx(t)
+	p := dbfactory.Product(tx)
+
+	if p.ID == uuid.Nil {
+		t.Fatal("expected non-nil product ID")
+	}
+	if p.SpaceID == uuid.Nil {
+		t.Fatal("expected auto-created space")
+	}
+}
+
+func TestProductVariant(t *testing.T) {
+	tx := dbtest.TestTx(t)
+	v := dbfactory.ProductVariant(tx)
+
+	if v.ID == uuid.Nil {
+		t.Fatal("expected non-nil product variant ID")
+	}
+	if v.ProductID == uuid.Nil {
+		t.Fatal("expected auto-created product")
+	}
+}
+
 func TestUserAccount(t *testing.T) {
 	tx := dbtest.TestTx(t)
 	ua := dbfactory.UserAccount(tx)

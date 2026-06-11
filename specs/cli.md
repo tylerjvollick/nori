@@ -76,6 +76,19 @@ nori
   │     ├── diff <name> <v1> <v2>  — Diff two versions
   │     └── publish <name>         — Publish current draft
   │
+  ├── product
+  │     ├── create --name <name>   — Create a product
+  │     │     --description <text>
+  │     ├── list                   — List products with variant counts
+  │     └── variant
+  │           ├── create <productId> --name <name>
+  │           │     --recipe <recipeId> — Bind variant to a recipe
+  │           │     --vars '<json>'     — Recipe variable bindings (JSON object)
+  │           │     --price <amount>    — Customer-facing price
+  │           ├── update <productId> <variantId>
+  │           │     [--name] [--recipe] [--vars] [--price]
+  │           └── delete <productId> <variantId>
+  │
   ├── dep
   │     ├── add <source> <target> [--type blocks|waits_for|related]
   │     ├── rm <source> <target>   — Remove dependency

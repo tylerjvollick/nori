@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/shopspring/decimal"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -149,6 +150,8 @@ func resetDemoData(db *gorm.DB) error {
 // deleteSpaceData removes all work data within a space (same pattern as test handler reset).
 func deleteSpaceData(tx *gorm.DB, spaceID uuid.UUID) error {
 	queries := []string{
+		"DELETE FROM product_variant WHERE product_id IN (SELECT id FROM product WHERE space_id = $1)",
+		"DELETE FROM product WHERE space_id = $1",
 		"DELETE FROM cost_entry WHERE task_id IN (SELECT id FROM task WHERE space_id = $1)",
 		"DELETE FROM activity_entry WHERE task_id IN (SELECT id FROM task WHERE space_id = $1)",
 		"DELETE FROM bom_item WHERE recipe_version_id IN (SELECT id FROM recipe_version WHERE recipe_id IN (SELECT id FROM recipe WHERE space_id = $1))",
@@ -321,6 +324,75 @@ func seedDemo(db *gorm.DB) error {
 		return fmt.Errorf("creating Console Table recipe: %w", err)
 	}
 	log.Println("  Created recipe: Console Table (draft)")
+
+	// 9. Create "Dining Chair" product with sellable variants.
+	if err := seedProducts(db, recipeService, space.ID, user.ID); err != nil {
+		return fmt.Errorf("seeding products: %w", err)
+	}
+	log.Println("  Created product: Dining Chair (3 variants)")
+
+	return nil
+}
+
+// seedProducts creates the "Dining Chair" product with three sellable
+// variants (wood species / finish combinations), each bound to a Dining
+// Chair recipe with variable bindings and a customer-facing price.
+func seedProducts(
+	db *gorm.DB,
+	recipeService *services.RecipeService,
+	spaceID uuid.UUID,
+	userID uuid.UUID,
+) error {
+	// Recipe the variants point at. Created as a draft; variants bind
+	// wood_species/finish variables against it.
+	recipeDesc := "Classic hardwood dining chair with mortise & tenon joinery. " +
+		"Wood species and finish vary per product variant."
+	recipe, _, err := recipeService.CreateRecipeWithTaskTree(
+		spaceID, userID, "Dining Chair", &recipeDesc, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("creating Dining Chair recipe: %w", err)
+	}
+
+	productService := services.NewProductService(db, repositories.NewRecipeRepository(db))
+
+	productDesc := "Classic hardwood dining chair. Available in multiple wood species and finishes."
+	product, err := productService.Create(spaceID, services.CreateProductInput{
+		Name:        "Dining Chair",
+		Description: &productDesc,
+	})
+	if err != nil {
+		return fmt.Errorf("creating Dining Chair product: %w", err)
+	}
+
+	variants := []struct {
+		name   string
+		wood   string
+		finish string
+		price  string
+	}{
+		{name: "Walnut / Spray PU", wood: "Walnut", finish: "Spray PU", price: "640"},
+		{name: "Cherry / Hand Oil", wood: "Cherry", finish: "Hand-Rubbed Oil", price: "580"},
+		{name: "Oak / Spray PU", wood: "White Oak", finish: "Spray PU", price: "520"},
+	}
+	for _, v := range variants {
+		price, err := decimal.NewFromString(v.price)
+		if err != nil {
+			return fmt.Errorf("parsing price for variant %q: %w", v.name, err)
+		}
+		_, err = productService.CreateVariant(spaceID, product.ID, services.CreateVariantInput{
+			Name:     v.name,
+			RecipeID: &recipe.ID,
+			RecipeVariables: models.JSONB{
+				"wood_species": v.wood,
+				"finish":       v.finish,
+			},
+			Price: &price,
+		})
+		if err != nil {
+			return fmt.Errorf("creating variant %q: %w", v.name, err)
+		}
+	}
 
 	return nil
 }
