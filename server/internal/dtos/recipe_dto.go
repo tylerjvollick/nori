@@ -94,6 +94,12 @@ type RecipeVersionResponse struct {
 // Name and Description are derived from the current version's root task.
 // If no current version or root task exists, Name falls back to the recipe slug.
 func RecipeResponseFromModel(r *models.Recipe) RecipeResponse {
+	// A recipe can be deleted between fetch and conversion (e.g. concurrent
+	// test reset); return an empty response instead of panicking.
+	if r == nil {
+		return RecipeResponse{}
+	}
+
 	resp := RecipeResponse{
 		ID:               r.ID,
 		SpaceID:          r.SpaceID,
