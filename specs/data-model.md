@@ -128,6 +128,8 @@ Station
   - DisplayOrder: int (position on the station view)
   - WIPLimit: int (max concurrent active tasks at this station)
   - BufferSize: int (queue capacity before the station)
+  - CostsHour: decimal (nullable — hourly labor rate; falls back to
+    Space.DefaultLaborRate)
   - IsActive: bool
   - CreatedAt, UpdatedAt: timestamp
 ```
@@ -466,7 +468,91 @@ Material
   - ReorderQuantity: decimal
   - Location: string (nullable)
   - UnitCost: decimal (nullable — current cost per unit)
+  - Supplier: string (nullable)
+  - SKU: string (nullable)
   - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+  - DeletedAt: timestamp (nullable — GORM soft delete)
+```
+
+---
+
+#### TaskMaterial (new — quoting foundation, see materials-and-bom.md)
+
+Links a recipe/job task to a catalog material with the quantity consumed per
+unit produced. Scaled by batch quantity during dry-run cost computation.
+
+```
+TaskMaterial
+  - ID: uuid
+  - TaskID: string (FK → Task, cascade delete)
+  - MaterialID: uuid (FK → Material, cascade delete)
+  - QuantityPerUnit: decimal (not null)
+  - Notes: text (nullable)
+  - CreatedAt, UpdatedAt: timestamp
+  - UNIQUE (TaskID, MaterialID)
+```
+
+---
+
+#### Product & ProductVariant (new — quoting foundation)
+
+Product is what the shop sells; a variant is a sellable configuration
+(wood + finish) optionally bound to a recipe with variable bindings and a
+customer-facing price.
+
+```
+Product
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - Name: string
+  - Description: text (nullable)
+  - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+  - DeletedAt: timestamp (nullable — GORM soft delete)
+
+ProductVariant
+  - ID: uuid
+  - ProductID: uuid (FK → Product, cascade delete)
+  - Name: string
+  - RecipeID: uuid (FK → Recipe, nullable, set null on delete)
+  - RecipeVariables: jsonb (nullable — variable bindings for the recipe)
+  - Price: decimal (nullable — customer-facing price)
+  - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+```
+
+---
+
+#### Quote & QuoteLine (new — quoting foundation)
+
+A lightweight priced offer for a customer. No task tree is created until the
+quote is accepted and rolled into a job. Lines freeze a cost snapshot from
+the dry-run cost engine at quote time.
+
+```
+Quote
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - CustomerID: uuid (FK → Customer, nullable, set null on delete)
+  - Status: enum (draft, sent, accepted, declined, cancelled)
+  - Notes: text (nullable)
+  - Markup: decimal (nullable)
+  - OverrideTotal: decimal (nullable)
+  - AcceptedAt: timestamp (nullable)
+  - CreatedByID: uuid (FK → User)
+  - CreatedAt, UpdatedAt: timestamp
+
+QuoteLine
+  - ID: uuid
+  - QuoteID: uuid (FK → Quote, cascade delete)
+  - ProductVariantID: uuid (FK → ProductVariant, nullable, set null on delete)
+  - RecipeID: uuid (FK → Recipe, nullable — for non-product quotes)
+  - Quantity: int (not null)
+  - UnitPrice: decimal (nullable)
+  - CostSnapshot: jsonb (nullable — frozen dry-run cost breakdown)
+  - RecipeVariables: jsonb (nullable)
+  - Notes: text (nullable)
   - CreatedAt, UpdatedAt: timestamp
 ```
 
