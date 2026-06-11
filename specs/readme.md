@@ -73,7 +73,7 @@ Specs listed in priority order. Work top-down.
 | 8 | [inventory/spec.md](inventory/spec.md) | Materials, BOM, inventory tracking, cost computation (placeholder) | materials, BOM, inventory, lumber, hardware, replenish, stock, cost, finish, custom fields | |
 | 9 | [time-tracking.md](time-tracking.md) | Time event store, multiple input sources | time, clock, check-in, checkout, duration, events, sources, logging | |
 | 10 | [bottleneck-analytics.md](bottleneck-analytics.md) | Constraint identification, WIP reports, throughput | bottleneck, analytics, constraint, throughput, reports, TOC, metrics | |
-| 11 | [cli.md](cli.md) | The `nori` CLI, AI skill for external agents, `nori init` setup | CLI, terminal, commands, task, recipe, ready, roll, cobra, skill, init, agent | |
+| 11 | [cli.md](cli.md) | The `nori` CLI, AI skill for external agents, `nori init` setup | CLI, terminal, commands, task, recipe, product, variant, ready, roll, cobra, skill, init, agent | |
 | 12 | [mcp-server.md](mcp-server.md) | MCP protocol for embedded AI (chat, voice, photo) | MCP, LLM, AI, tools, resources, embedded, chat, voice, internal | |
 | 13 | [ai-features.md](ai-features.md) | Embedded AI: recipe suggestions, capture prompts, BYOK | AI, ollama, local, suggestions, prompts, summaries, inference, BYOK, openai, anthropic | |
 | 14 | [passive-observation.md](passive-observation.md) | Camera/sensor integration, presence detection | camera, sensors, passive, presence, frigate, vision, detection | |

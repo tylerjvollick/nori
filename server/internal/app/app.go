@@ -76,6 +76,7 @@ func New(cfg *config.Config) *App {
 	costService := services.NewCostService(costEntryRepo, timeEventRepo, taskRepo, spaceRepo, stationRepo)
 	timeEntryService := services.NewTimeEntryService(timeEntryRepo, taskRepo)
 	taskService.SetTimeEntryStopper(timeEntryService)
+	productService := services.NewProductService(database.DB, recipeRepo)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
@@ -92,6 +93,7 @@ func New(cfg *config.Config) *App {
 	customerHandler := handlers.NewCustomerHandler(customerRepo)
 	subTaskHandler := handlers.NewSubTaskHandler(subTaskRepo, taskService)
 	timeEntryHandler := handlers.NewTimeEntryHandler(timeEntryService)
+	productHandler := handlers.NewProductHandler(productService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
 	app := fiber.New(fiber.Config{
@@ -134,6 +136,7 @@ func New(cfg *config.Config) *App {
 	taskDepHandler.RegisterTaskDepRoutes(spaceScoped)
 	subTaskHandler.RegisterSubTaskRoutes(spaceScoped)
 	timeEntryHandler.RegisterTimeEntryRoutes(spaceScoped)
+	productHandler.RegisterProductRoutes(spaceScoped)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())

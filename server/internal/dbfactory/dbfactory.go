@@ -217,6 +217,46 @@ func TimeEvent(tx *gorm.DB, overrides ...func(*models.TimeEvent)) models.TimeEve
 	return m
 }
 
+// --- Product & ProductVariant ---
+
+// Product creates a Product record. If SpaceID is zero, a Space (and its
+// Account chain) is created.
+func Product(tx *gorm.DB, overrides ...func(*models.Product)) models.Product {
+	m := models.Product{
+		ID:       uuid.New(),
+		Name:     fmt.Sprintf("Test Product %s", uuid.New().String()[:8]),
+		IsActive: true,
+	}
+	for _, fn := range overrides {
+		fn(&m)
+	}
+	if m.SpaceID == uuid.Nil {
+		s := Space(tx)
+		m.SpaceID = s.ID
+	}
+	must(tx.Create(&m).Error)
+	return m
+}
+
+// ProductVariant creates a ProductVariant record. If ProductID is zero, a
+// Product (and its Space chain) is created.
+func ProductVariant(tx *gorm.DB, overrides ...func(*models.ProductVariant)) models.ProductVariant {
+	m := models.ProductVariant{
+		ID:       uuid.New(),
+		Name:     fmt.Sprintf("Test Variant %s", uuid.New().String()[:8]),
+		IsActive: true,
+	}
+	for _, fn := range overrides {
+		fn(&m)
+	}
+	if m.ProductID == uuid.Nil {
+		p := Product(tx)
+		m.ProductID = p.ID
+	}
+	must(tx.Create(&m).Error)
+	return m
+}
+
 // --- CostEntry ---
 
 // CostEntry creates a CostEntry record. If TaskID is empty, a Task is
