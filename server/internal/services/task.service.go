@@ -84,6 +84,19 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 		}
 	}
 
+	// Tasks start as open unless explicitly created in the backlog
+	// (confirmed but not yet scheduled).
+	status := models.TaskStatusOpen
+	if dto.Status != nil {
+		switch *dto.Status {
+		case models.TaskStatusOpen, models.TaskStatusBacklog:
+			status = *dto.Status
+		default:
+			return nil, fmt.Errorf("invalid initial status %q: must be %q or %q",
+				*dto.Status, models.TaskStatusOpen, models.TaskStatusBacklog)
+		}
+	}
+
 	task := &models.Task{
 		ID:          uuid.New().String(), // placeholder ID generation; real hierarchical IDs come later
 		SpaceID:     spaceID,
@@ -93,7 +106,7 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 		Type:        dto.Type,
 		ParentID:    dto.ParentID,
 		StationID:   dto.StationID,
-		Status:      models.TaskStatusOpen,
+		Status:      status,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -194,7 +207,8 @@ func (s *TaskService) DeleteTask(id string) error {
 }
 
 // SetTaskStatus transitions a task to the given status.
-// Valid transitions: open -> in_progress; any non-terminal -> done/skipped/cancelled.
+// Valid transitions: backlog -> open/in_progress; open -> in_progress;
+// any non-terminal except backlog -> done; any non-terminal -> skipped/cancelled.
 // Sets StartedAt on first transition to in_progress.
 func (s *TaskService) SetTaskStatus(taskID string, userID uuid.UUID, newStatus models.TaskStatus) (*models.Task, error) {
 	task, err := s.taskRepo.GetByID(taskID)
@@ -245,17 +259,29 @@ func validateStatusTransition(current, next models.TaskStatus) error {
 		return nil // no-op is fine
 	}
 	switch next {
-	case models.TaskStatusOpen:
-		// Can revert to open from in_progress only.
-		if current != models.TaskStatusInProgress {
-			return fmt.Errorf("cannot change from %q to %q", current, next)
-		}
-	case models.TaskStatusInProgress:
+	case models.TaskStatusBacklog:
+		// Can revert to backlog (unschedule) from open only.
 		if current != models.TaskStatusOpen {
 			return fmt.Errorf("cannot change from %q to %q", current, next)
 		}
-	case models.TaskStatusDone, models.TaskStatusSkipped, models.TaskStatusCancelled:
-		// Terminal transitions are allowed from any non-terminal status.
+	case models.TaskStatusOpen:
+		// Schedule from backlog, or revert to open from in_progress.
+		if current != models.TaskStatusBacklog && current != models.TaskStatusInProgress {
+			return fmt.Errorf("cannot change from %q to %q", current, next)
+		}
+	case models.TaskStatusInProgress:
+		// Start from open, or directly from backlog (shortcut).
+		if current != models.TaskStatusOpen && current != models.TaskStatusBacklog {
+			return fmt.Errorf("cannot change from %q to %q", current, next)
+		}
+	case models.TaskStatusDone:
+		// Done is allowed from any non-terminal status except backlog —
+		// backlog work was never scheduled, so it cannot be completed.
+		if current == models.TaskStatusBacklog {
+			return fmt.Errorf("cannot change from %q to %q: schedule (open) or start (in_progress) the task first", current, next)
+		}
+	case models.TaskStatusSkipped, models.TaskStatusCancelled:
+		// Skipped/cancelled are allowed from any non-terminal status.
 	default:
 		return fmt.Errorf("unknown status %q", next)
 	}

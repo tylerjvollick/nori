@@ -23,6 +23,9 @@ const (
 type TaskStatus string
 
 const (
+	// TaskStatusBacklog marks work that is confirmed (e.g. quote accepted)
+	// but not yet scheduled. Backlog tasks are excluded from ready work.
+	TaskStatusBacklog    TaskStatus = "backlog"
 	TaskStatusOpen       TaskStatus = "open"
 	TaskStatusInProgress TaskStatus = "in_progress"
 	TaskStatusDone       TaskStatus = "done"

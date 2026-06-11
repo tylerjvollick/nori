@@ -14,6 +14,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 	"github.com/tylerjvollick/nori/internal/services"
@@ -321,6 +322,19 @@ func seedDemo(db *gorm.DB) error {
 		return fmt.Errorf("creating Console Table recipe: %w", err)
 	}
 	log.Println("  Created recipe: Console Table (draft)")
+
+	// 9. Create a backlog job — confirmed (quote accepted) but not yet scheduled.
+	backlogStatus := models.TaskStatusBacklog
+	backlogJob, err := taskService.CreateTask(space.ID, user.ID, &dtos.CreateTaskRequest{
+		Title:       "Walnut Bookshelf - Henderson Order",
+		Description: demoStrPtr("Quote accepted; waiting on shop capacity before scheduling."),
+		Type:        models.TaskTypeJob,
+		Status:      &backlogStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("creating backlog job: %w", err)
+	}
+	log.Printf("  Created backlog job: %s (%s)", backlogJob.Title, backlogJob.ID)
 
 	return nil
 }

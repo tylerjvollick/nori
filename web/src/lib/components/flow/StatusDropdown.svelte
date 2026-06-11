@@ -5,6 +5,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		Circle,
+		CircleDashed,
 		CircleDot,
 		CircleCheck,
 		CircleX,
@@ -37,6 +38,7 @@
 	}
 
 	const STATUS_OPTIONS: StatusOption[] = [
+		{ value: 'backlog', label: 'Backlog', icon: CircleDashed, colorClass: 'text-slate-500 dark:text-slate-400', bgClass: 'bg-slate-500/10' },
 		{ value: 'open', label: 'Open', icon: Circle, colorClass: 'text-muted-foreground', bgClass: 'bg-muted' },
 		{ value: 'in_progress', label: 'In Progress', icon: CircleDot, colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10' },
 		{ value: 'done', label: 'Done', icon: CircleCheck, colorClass: 'text-green-500', bgClass: 'bg-green-500/10' },
@@ -46,8 +48,23 @@
 
 	const TERMINAL_STATUSES: TaskStatus[] = ['done', 'skipped', 'cancelled'];
 
-	let currentOption = $derived(STATUS_OPTIONS.find((o) => o.value === status) ?? STATUS_OPTIONS[0]);
+	let currentOption = $derived(
+		STATUS_OPTIONS.find((o) => o.value === status) ??
+			STATUS_OPTIONS.find((o) => o.value === 'open')!,
+	);
 	let isTerminal = $derived(TERMINAL_STATUSES.includes(status));
+
+	/**
+	 * Mirror the backend transition rules so invalid targets are not offered:
+	 * backlog -> done is invalid (must be scheduled or started first), and
+	 * only open tasks can be moved back to the backlog.
+	 */
+	function isOptionDisabled(value: TaskStatus): boolean {
+		if (value === status) return true;
+		if (status === 'backlog' && value === 'done') return true;
+		if (value === 'backlog' && status !== 'open') return true;
+		return false;
+	}
 
 	async function setStatus(newStatus: TaskStatus): Promise<void> {
 		if (newStatus === status || isUpdating) return;
@@ -89,7 +106,7 @@
 		{#each STATUS_OPTIONS as option (option.value)}
 			<DropdownMenu.Item
 				class="gap-2 {option.value === status ? 'bg-accent' : ''}"
-				disabled={option.value === status}
+				disabled={isOptionDisabled(option.value)}
 				onclick={() => setStatus(option.value)}
 			>
 				<option.icon class="size-4 {option.colorClass}" />

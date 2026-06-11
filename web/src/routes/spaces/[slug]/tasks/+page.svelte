@@ -33,6 +33,7 @@
 	let priorityFilter = $derived($page.url.searchParams.get('priority') || '');
 
 	const STATUS_OPTIONS = [
+		{ value: 'backlog', label: 'Backlog' },
 		{ value: 'open', label: 'Open' },
 		{ value: 'in_progress', label: 'In Progress' },
 		{ value: 'done', label: 'Done' },

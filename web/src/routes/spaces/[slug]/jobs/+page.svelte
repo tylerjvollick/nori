@@ -96,7 +96,7 @@
 	// ---- Job aggregate type ----
 
 	interface JobWithAggregate extends TaskResponse {
-		aggregateStatus: 'done' | 'in_progress' | 'open';
+		aggregateStatus: 'done' | 'in_progress' | 'open' | 'backlog';
 		totalTimeSeconds: number;
 		childCount: number;
 		doneChildCount: number;
@@ -105,6 +105,7 @@
 	// ---- State ----
 
 	let allJobs = $state<JobWithAggregate[]>([]);
+	let backlogJobs = $state<JobWithAggregate[]>([]);
 	let readyJobs = $state<JobWithAggregate[]>([]);
 	let inProgressJobs = $state<JobWithAggregate[]>([]);
 	let doneJobs = $state<JobWithAggregate[]>([]);
@@ -124,8 +125,14 @@
 	let newJobDescription = $state('');
 	let newJobPriority = $state('2');
 	let newJobStationId = $state('');
+	let newJobStatus = $state<'open' | 'backlog'>('open');
 	let isCreating = $state(false);
 	let createError = $state('');
+
+	const STATUS_OPTIONS: { value: 'open' | 'backlog'; label: string }[] = [
+		{ value: 'open', label: 'Ready – scheduled for the floor' },
+		{ value: 'backlog', label: 'Backlog – confirmed, not yet scheduled' },
+	];
 
 	const PRIORITY_OPTIONS = [
 		{ value: '0', label: 'P0 – Critical' },
@@ -146,6 +153,7 @@
 				type: 'job',
 				priority: parseInt(newJobPriority, 10),
 				stationId: newJobStationId || undefined,
+				status: newJobStatus,
 			});
 			showCreateDialog = false;
 			const slug = $page.params.slug;
@@ -162,6 +170,7 @@
 		newJobDescription = '';
 		newJobPriority = '2';
 		newJobStationId = '';
+		newJobStatus = 'open';
 		createError = '';
 	}
 
@@ -192,17 +201,19 @@
 		return tree.children.map(({ children: _, ...rest }) => rest as TaskResponse);
 	}
 
-	function statusToAggregate(status: string): 'done' | 'in_progress' | 'open' {
+	function statusToAggregate(status: string): 'done' | 'in_progress' | 'open' | 'backlog' {
 		if (status === 'done' || status === 'skipped' || status === 'cancelled') return 'done';
 		if (status === 'in_progress') return 'in_progress';
+		if (status === 'backlog') return 'backlog';
 		return 'open';
 	}
 
 	// ---- List view helpers ----
 
 	const AGGREGATE_STATUS_COLORS: Record<string, string> = {
+		backlog: 'bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300',
 		open: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-		active: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+		in_progress: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
 		done: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
 	};
 
@@ -335,7 +346,9 @@
 				}
 
 				const directChildren = getDirectChildren(tree);
-				const aggregateStatus = computeAggregateStatus(directChildren);
+				// A backlog job is unscheduled regardless of its children.
+				const aggregateStatus =
+					job.status === 'backlog' ? 'backlog' : computeAggregateStatus(directChildren);
 				const totalTimeSeconds = sumTreeTime(tree);
 				const doneChildCount = directChildren.filter(
 					(c) => c.status === 'done' || c.status === 'skipped' || c.status === 'cancelled',
@@ -351,6 +364,7 @@
 			});
 
 			allJobs = jobsWithAggregates;
+			backlogJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'backlog');
 			readyJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'open');
 			inProgressJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'in_progress');
 			const allDoneJobs = jobsWithAggregates.filter((j) => j.aggregateStatus === 'done');
@@ -489,6 +503,18 @@
 		{#if currentView === 'board'}
 			<!-- Kanban columns -->
 			<div class="flex min-h-0 h-full gap-4 overflow-x-auto px-4 pb-4 pt-4">
+				<KanbanColumn
+					title="Backlog"
+					count={backlogJobs.length}
+					colorClass="bg-slate-400"
+					{isLoading}
+					emptyLabel="No jobs"
+				>
+					{#each backlogJobs as job (job.id)}
+						<JobCard {job} {stationMap} />
+					{/each}
+				</KanbanColumn>
+
 				<KanbanColumn
 					title="Ready"
 					count={readyJobs.length}
@@ -710,6 +736,20 @@
 						placeholder="Brief description of this job"
 						disabled={isCreating}
 					/>
+				</div>
+				<div class="grid gap-2">
+					<Label>Status</Label>
+					<Select.Root type="single" bind:value={newJobStatus}>
+						<Select.Trigger disabled={isCreating} data-testid="job-status-select">
+							{STATUS_OPTIONS.find((s) => s.value === newJobStatus)?.label ??
+								'Ready – scheduled for the floor'}
+						</Select.Trigger>
+						<Select.Content>
+							{#each STATUS_OPTIONS as opt (opt.value)}
+								<Select.Item value={opt.value} label={opt.label}>{opt.label}</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
 				</div>
 				<div class="grid gap-2">
 					<Label>Priority</Label>

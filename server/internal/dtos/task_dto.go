@@ -15,6 +15,9 @@ type CreateTaskRequest struct {
 	ParentID    *string         `json:"parentId,omitempty"`
 	StationID   *uuid.UUID      `json:"stationId,omitempty"`
 	Priority    *int            `json:"priority,omitempty"`
+	// Status optionally sets the initial status. Only "open" (default) and
+	// "backlog" are valid at creation time.
+	Status *models.TaskStatus `json:"status,omitempty"`
 }
 
 // UpdateTaskRequest represents the request body for updating a task.
