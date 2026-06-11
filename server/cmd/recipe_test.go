@@ -391,7 +391,7 @@ func TestRunRecipeCreate_Success(t *testing.T) {
 				Status:        "draft",
 			})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/%d/publish", recipeID, versionID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{
@@ -452,7 +452,7 @@ func TestRunRecipeCreate_WithNameOverride(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
@@ -500,7 +500,7 @@ func TestRunRecipeCreate_JSONOutput(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "published"})
@@ -522,6 +522,7 @@ func TestRunRecipeCreate_JSONOutput(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	err := runRecipeCreate(recipeCreateCmd, nil)
 	require.NoError(t, err)
@@ -712,7 +713,7 @@ func TestRunRecipeCreate_PublishFails(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(createVersionResponse{ID: 1, VersionNumber: 1, Status: "draft"})
 
-		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/versions/1/publish", recipeID) && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "publish failed"})
@@ -789,7 +790,7 @@ func TestRunRecipePublish_Success(t *testing.T) {
 				Total: 3,
 			})
 
-		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/3/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(publishVersionResponse{
@@ -836,7 +837,7 @@ func TestRunRecipePublish_JSONOutput(t *testing.T) {
 				Total: 2,
 			})
 
-		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/2/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(publishVersionResponse{
@@ -858,6 +859,7 @@ func TestRunRecipePublish_JSONOutput(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	err := runRecipePublish(recipePublishCmd, []string{"walnut-dining-table"})
 	require.NoError(t, err)
@@ -985,7 +987,7 @@ func TestRunRecipePublish_PublishServerError(t *testing.T) {
 				Total: 1,
 			})
 
-		case r.URL.Path == "/api/v1/spaces/test-space/recipe-versions/2/publish" && r.Method == http.MethodPost:
+		case r.URL.Path == fmt.Sprintf("/api/v1/spaces/test-space/recipes/%s/publish", recipeID) && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
@@ -1117,6 +1119,7 @@ func TestRunRecipeList_JSONOutput(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	err := runRecipeList(recipeListCmd, nil)
 	require.NoError(t, err)
@@ -1334,6 +1337,7 @@ title = "Cut lumber"
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = oldStdout })
 
 	err := runRecipeShow(recipeShowCmd, []string{"walnut-dining-table"})
 	require.NoError(t, err)

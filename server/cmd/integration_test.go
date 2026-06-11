@@ -582,6 +582,29 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 					return
 				}
 
+				// POST /api/v1/recipes/:id/publish — publish the latest draft
+				if subpath == "/publish" && r.Method == http.MethodPost {
+					state.recordCall(fmt.Sprintf("POST /api/v1/recipes/%s/publish", recipeID))
+					draftID := 0
+					for _, v := range state.versions {
+						if v.RecipeID == recipeID && v.Status == "draft" {
+							draftID = v.ID
+						}
+					}
+					v := state.publishVersion(draftID)
+					if v == nil {
+						w.WriteHeader(http.StatusUnprocessableEntity)
+						json.NewEncoder(w).Encode(map[string]string{"error": "recipe has no draft version"})
+						return
+					}
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"id":            v.ID,
+						"versionNumber": v.VersionNumber,
+						"status":        v.Status,
+					})
+					return
+				}
+
 				// POST /api/v1/recipes/:id/versions/:vid/publish
 				if len(subpath) > len("/versions/") && r.Method == http.MethodPost {
 					// Parse version ID from: /versions/<vid>/publish
@@ -1122,7 +1145,7 @@ func TestChairWorkflowE2E(t *testing.T) {
 	// Recipe create should follow: create recipe, create version, publish version.
 	assert.Equal(t, "POST /api/v1/recipes", calls[1], "should create recipe")
 	assert.Contains(t, calls[2], "POST /api/v1/recipes/recipe-uuid-001/versions", "should create version")
-	assert.Contains(t, calls[3], "POST /api/v1/recipes/recipe-uuid-001/versions/1/publish", "should publish version")
+	assert.Contains(t, calls[3], "POST /api/v1/recipes/recipe-uuid-001/publish", "should publish version")
 
 	// Pour should follow: resolve slug, then pour.
 	assert.Equal(t, "GET /api/v1/recipes", calls[4], "should resolve slug")
@@ -1272,13 +1295,10 @@ func TestChairWorkflowE2E_PourWithoutPublish(t *testing.T) {
 func findChairTOML(t *testing.T) string {
 	t.Helper()
 
-	// Try relative paths from the test working directory.
+	// Pinned snapshot — seeds/chair.toml is a user-editable example and
+	// must not break these tests when it changes.
 	candidates := []string{
-		"../../seeds/chair.toml",    // from server/cmd/
-		"../seeds/chair.toml",       // from server/
-		"seeds/chair.toml",          // from root
-		"../../../seeds/chair.toml", // deeper nesting
-		filepath.Join("..", "..", "seeds", "chair.toml"),
+		"testdata/chair.toml",
 	}
 
 	for _, path := range candidates {
