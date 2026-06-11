@@ -158,6 +158,14 @@ func (m *mockTaskRepo) GetChildren(parentID string) ([]models.Task, error) {
 			children = append(children, *t)
 		}
 	}
+	// Match the real repository's ORDER BY display_order ASC — map
+	// iteration order is random and was causing flaky tests.
+	sort.Slice(children, func(i, j int) bool {
+		if children[i].DisplayOrder != children[j].DisplayOrder {
+			return children[i].DisplayOrder < children[j].DisplayOrder
+		}
+		return children[i].ID < children[j].ID
+	})
 	return children, nil
 }
 
