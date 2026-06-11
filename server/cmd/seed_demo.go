@@ -345,7 +345,46 @@ func seedDemo(db *gorm.DB) error {
 	}
 	log.Printf("  Created backlog job: %s (%s)", backlogJob.Title, backlogJob.ID)
 
+	// 11. Stock the material catalog.
+	if err := seedMaterials(db, space.ID); err != nil {
+		return fmt.Errorf("seeding materials: %w", err)
+	}
+	log.Println("  Created material catalog (6 materials)")
+
 	return nil
+}
+
+// seedMaterials stocks the demo space's material catalog with realistic
+// woodshop materials and unit costs.
+func seedMaterials(db *gorm.DB, spaceID uuid.UUID) error {
+	materialService := services.NewMaterialService(repositories.NewMaterialRepository(db))
+
+	materials := []dtos.CreateMaterialRequest{
+		{Name: "8/4 Walnut", Category: demoStrPtr("lumber"), Unit: "board_feet",
+			Supplier: demoStrPtr("Goby Walnut"), UnitCost: demoDecPtr("14.50")},
+		{Name: "4/4 Cherry", Category: demoStrPtr("lumber"), Unit: "board_feet",
+			Supplier: demoStrPtr("Crosscut Hardwoods"), UnitCost: demoDecPtr("8.25")},
+		{Name: "4/4 White Oak", Category: demoStrPtr("lumber"), Unit: "board_feet",
+			Supplier: demoStrPtr("Crosscut Hardwoods"), UnitCost: demoDecPtr("9.75")},
+		{Name: "Titebond III", Category: demoStrPtr("consumable"), Unit: "oz",
+			UnitCost: demoDecPtr("0.55")},
+		{Name: "Pre-Cat Lacquer", Category: demoStrPtr("finish"), Unit: "gallons",
+			Supplier: demoStrPtr("Sherwin-Williams"), UnitCost: demoDecPtr("68.00")},
+		{Name: "Brass Screws #8 x 1-1/4", Category: demoStrPtr("hardware"), Unit: "each",
+			SKU: demoStrPtr("BRS-8-114"), UnitCost: demoDecPtr("0.32")},
+	}
+	for i := range materials {
+		if _, err := materialService.Create(spaceID, &materials[i]); err != nil {
+			return fmt.Errorf("creating material %q: %w", materials[i].Name, err)
+		}
+	}
+	return nil
+}
+
+// demoDecPtr parses a decimal literal for seed data.
+func demoDecPtr(s string) *decimal.Decimal {
+	d := decimal.RequireFromString(s)
+	return &d
 }
 
 // seedProducts creates the "Dining Chair" product with three sellable

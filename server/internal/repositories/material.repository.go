@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/models"
@@ -30,6 +31,27 @@ func (r *MaterialRepository) GetByID(id uuid.UUID) (*models.Material, error) {
 		return nil, err
 	}
 	return &material, nil
+}
+
+// List returns all non-deleted materials for a space ordered by name.
+// When search is non-empty, results are filtered to names containing the
+// search string (case-insensitive).
+func (r *MaterialRepository) List(spaceID uuid.UUID, search string) ([]models.Material, error) {
+	query := r.db.Where("space_id = ?", spaceID)
+	if search != "" {
+		query = query.Where("name ILIKE ?", "%"+escapeLikePattern(search)+"%")
+	}
+
+	var materials []models.Material
+	err := query.Order("name ASC").Find(&materials).Error
+	return materials, err
+}
+
+// escapeLikePattern escapes LIKE/ILIKE wildcard characters in user input so
+// they are matched literally.
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
 }
 
 func (r *MaterialRepository) GetBySpaceID(spaceID uuid.UUID) ([]models.Material, error) {

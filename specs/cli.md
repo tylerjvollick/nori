@@ -100,6 +100,14 @@ nori
   │     ├── list                   — List stations with WIP status
   │     └── show <name>            — Show station queue
   │
+  ├── material                     — Manage the material catalog
+  │     ├── create --name <name> --unit <unit>
+  │     │          [--cost <n>] [--supplier <s>] [--sku <s>]
+  │     │          [--category <c>] [--location <l>]
+  │     ├── list [--search <text>] — List materials (filter by name)
+  │     ├── update <id> [--cost <n>] [--name <s>] [--unit <u>] [...]
+  │     └── delete <id>            — Soft-delete a material
+  │
   └── report
         ├── bottleneck             — Current constraint analysis
         ├── time [--user] [--job]  — Time summary
