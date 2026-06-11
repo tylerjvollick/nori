@@ -51,6 +51,8 @@ Station
   - WIPLimit: int (max tasks actively being worked at this station)
   - BufferSize: int (max tasks queued waiting for this station)
   - IsActive: bool (soft delete / disable without losing data)
+  - CostsHour: decimal (nullable — hourly cost rate; when null, costing
+    falls back to the space's DefaultLaborRate)
   - Color: string (nullable — hex color for board visualization)
   - CreatedAt, UpdatedAt: timestamp
 ```
@@ -98,6 +100,11 @@ PUT    /api/spaces/:spaceId/stations/:id       — Update a station
 DELETE /api/spaces/:spaceId/stations/:id       — Soft-delete (set IsActive=false)
 PUT    /api/spaces/:spaceId/stations/reorder   — Bulk update DisplayOrder
 ```
+
+Station update accepts `costsHour`. The field is tri-state: absent leaves the
+rate unchanged, an explicit `null` clears it (cost calculations then fall back
+to the space's `defaultLaborRate`, set via the space update endpoint), and a
+non-negative decimal sets it. GET responses always include `costsHour`.
 
 ## Open Questions
 

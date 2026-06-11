@@ -376,6 +376,15 @@ func (s *SpaceService) UpdateSpace(spaceID uuid.UUID, accountID uuid.UUID, dto *
 		space.Slug = newSlug
 	}
 
+	// Update default labor rate if the field was present in the payload.
+	// Explicit null clears the rate; a value sets it.
+	if dto.DefaultLaborRate.Set {
+		if dto.DefaultLaborRate.Valid && dto.DefaultLaborRate.Value.IsNegative() {
+			return nil, fmt.Errorf("defaultLaborRate must be >= 0")
+		}
+		space.DefaultLaborRate = dto.DefaultLaborRate.Ptr()
+	}
+
 	space.UpdatedAt = time.Now()
 
 	if err := s.spaceRepository.Update(space); err != nil {

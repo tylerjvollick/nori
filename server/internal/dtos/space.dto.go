@@ -1,6 +1,9 @@
 package dtos
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
 
 // CreateSpaceDTO represents the request to create a new space
 type CreateSpaceDTO struct {
@@ -9,21 +12,25 @@ type CreateSpaceDTO struct {
 	Template *string `json:"template,omitempty"` // Optional: "woodworking_shop", "sales"
 }
 
-// UpdateSpaceDTO represents the request to update a space
+// UpdateSpaceDTO represents the request to update a space.
+// DefaultLaborRate uses Nullable: absent leaves the rate unchanged,
+// explicit null clears it.
 type UpdateSpaceDTO struct {
-	Name *string `json:"name,omitempty"`
-	Slug *string `json:"slug,omitempty"`
+	Name             *string                   `json:"name,omitempty"`
+	Slug             *string                   `json:"slug,omitempty"`
+	DefaultLaborRate Nullable[decimal.Decimal] `json:"defaultLaborRate"`
 }
 
 // SpaceResponseDTO represents a space in the response
 type SpaceResponseDTO struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Slug      string    `json:"slug"`
-	AccountID uuid.UUID `json:"accountId"`
-	IsDefault bool      `json:"isDefault"`
-	CreatedAt string    `json:"createdAt"`
-	UpdatedAt string    `json:"updatedAt"`
+	ID               uuid.UUID        `json:"id"`
+	Name             string           `json:"name"`
+	Slug             string           `json:"slug"`
+	AccountID        uuid.UUID        `json:"accountId"`
+	IsDefault        bool             `json:"isDefault"`
+	DefaultLaborRate *decimal.Decimal `json:"defaultLaborRate,omitempty"`
+	CreatedAt        string           `json:"createdAt"`
+	UpdatedAt        string           `json:"updatedAt"`
 }
 
 // RecordSpaceVisitDTO represents the request to record a space visit

@@ -47,14 +47,15 @@ type demoStation struct {
 	Description string
 	WIPLimit    int
 	BufferSize  int
+	CostsHour   string // hourly labor rate; empty falls back to space default
 }
 
 var demoStations = []demoStation{
-	{Name: "Mill", Description: "Dimensioning and rough milling of lumber", WIPLimit: 2, BufferSize: 1},
-	{Name: "Joinery", Description: "Mortise & tenon, dovetails, and other joints", WIPLimit: 2, BufferSize: 1},
-	{Name: "Glue-Up", Description: "Panel glue-ups and sub-assembly bonding", WIPLimit: 3, BufferSize: 2},
-	{Name: "Finish", Description: "Sanding, staining, and topcoat application", WIPLimit: 2, BufferSize: 1},
-	{Name: "QC", Description: "Final quality check and packaging", WIPLimit: 5, BufferSize: 0},
+	{Name: "Mill", Description: "Dimensioning and rough milling of lumber", WIPLimit: 2, BufferSize: 1, CostsHour: "65.00"},
+	{Name: "Joinery", Description: "Mortise & tenon, dovetails, and other joints", WIPLimit: 2, BufferSize: 1, CostsHour: "75.00"},
+	{Name: "Glue-Up", Description: "Panel glue-ups and sub-assembly bonding", WIPLimit: 3, BufferSize: 2, CostsHour: "55.00"},
+	{Name: "Finish", Description: "Sanding, staining, and topcoat application", WIPLimit: 2, BufferSize: 1, CostsHour: "70.00"},
+	{Name: "QC", Description: "Final quality check and packaging", WIPLimit: 5, BufferSize: 0}, // no rate — falls back to space default
 }
 
 func runSeedDemo(cmd *cobra.Command, args []string) error {
@@ -235,12 +236,14 @@ func seedDemo(db *gorm.DB) error {
 	log.Printf("  Created account: %s", demoName)
 
 	// 3. Create space.
+	defaultLaborRate := decimal.RequireFromString("60.00")
 	space := &models.Space{
-		ID:        uuid.New(),
-		Name:      "Workshop",
-		Slug:      "VW",
-		AccountID: account.ID,
-		IsDefault: true,
+		ID:               uuid.New(),
+		Name:             "Workshop",
+		Slug:             "VW",
+		AccountID:        account.ID,
+		IsDefault:        true,
+		DefaultLaborRate: &defaultLaborRate,
 	}
 	if err := db.Create(space).Error; err != nil {
 		return fmt.Errorf("creating space: %w", err)
@@ -275,6 +278,9 @@ func seedDemo(db *gorm.DB) error {
 			WIPLimit:     ds.WIPLimit,
 			BufferSize:   ds.BufferSize,
 			IsActive:     true,
+		}
+		if ds.CostsHour != "" {
+			station.CostsHour = demoDecPtr(ds.CostsHour)
 		}
 		if err := db.Create(station).Error; err != nil {
 			return fmt.Errorf("creating station %s: %w", ds.Name, err)

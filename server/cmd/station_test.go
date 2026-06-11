@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -337,4 +338,128 @@ func TestStationCreateHasFlags(t *testing.T) {
 	descFlag := stationCreateCmd.Flags().Lookup("description")
 	require.NotNil(t, descFlag, "--description flag should be defined")
 	assert.Equal(t, "", descFlag.DefValue)
+}
+
+// --- Station Update Tests ---
+
+// setStationUpdateFlags sets flags on stationUpdateCmd and registers cleanup
+// to reset them so tests do not leak state.
+func setStationUpdateFlags(t *testing.T, values map[string]string) {
+	t.Helper()
+	for name, value := range values {
+		require.NoError(t, stationUpdateCmd.Flags().Set(name, value))
+	}
+	t.Cleanup(func() {
+		stationUpdateCostsHour = ""
+		stationUpdateClearCostsHour = false
+		stationUpdateCmd.Flags().VisitAll(func(f *pflag.Flag) {
+			f.Changed = false
+		})
+	})
+}
+
+func TestStationUpdateSubcommandRegistered(t *testing.T) {
+	found := false
+	for _, cmd := range stationCmd.Commands() {
+		if cmd.Name() == "update" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "update subcommand should be registered on station")
+}
+
+func TestRunStationUpdate_SetCostsHour(t *testing.T) {
+	rate := "45"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/spaces/test-space/stations/uuid-1", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		var body map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Contains(t, body, "costsHour")
+		assert.Equal(t, `"45"`, string(body["costsHour"]))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(stationItem{
+			ID: "uuid-1", Name: "CNC", WIPLimit: 1, IsActive: true, CostsHour: &rate,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	setStationUpdateFlags(t, map[string]string{"costs-hour": "45.00"})
+	stationJSONFlag = false
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.NoError(t, err)
+}
+
+func TestRunStationUpdate_ClearCostsHour(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/spaces/test-space/stations/uuid-1", r.URL.Path)
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		var body map[string]json.RawMessage
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Contains(t, body, "costsHour")
+		assert.Equal(t, "null", string(body["costsHour"]), "clearing should send explicit null")
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(stationItem{
+			ID: "uuid-1", Name: "CNC", WIPLimit: 1, IsActive: true, CostsHour: nil,
+		})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	setStationUpdateFlags(t, map[string]string{"clear-costs-hour": "true"})
+	stationJSONFlag = false
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.NoError(t, err)
+}
+
+func TestRunStationUpdate_InvalidCostsHour(t *testing.T) {
+	setupCredentials(t, "http://localhost:1") // never reached
+	setStationUpdateFlags(t, map[string]string{"costs-hour": "abc"})
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --costs-hour")
+}
+
+func TestRunStationUpdate_NegativeCostsHour(t *testing.T) {
+	setupCredentials(t, "http://localhost:1") // never reached
+	setStationUpdateFlags(t, map[string]string{"costs-hour": "-5"})
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must not be negative")
+}
+
+func TestRunStationUpdate_NoFlags(t *testing.T) {
+	setupCredentials(t, "http://localhost:1") // never reached
+	setStationUpdateFlags(t, map[string]string{})
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nothing to update")
+}
+
+func TestRunStationUpdate_ServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(errorResponse{Error: "costsHour must not be negative"})
+	}))
+	defer server.Close()
+
+	setupCredentials(t, server.URL)
+	setStationUpdateFlags(t, map[string]string{"costs-hour": "45.00"})
+
+	err := runStationUpdate(stationUpdateCmd, []string{"uuid-1"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "costsHour must not be negative")
 }

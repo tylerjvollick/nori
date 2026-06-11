@@ -246,6 +246,14 @@ func (h *StationHandler) UpdateStation(c *fiber.Ctx) error {
 	if req.BufferSize != nil {
 		station.BufferSize = *req.BufferSize
 	}
+	if req.CostsHour.Set {
+		if req.CostsHour.Valid && req.CostsHour.Value.IsNegative() {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": "costsHour must be >= 0",
+			})
+		}
+		station.CostsHour = req.CostsHour.Ptr()
+	}
 	if req.IsActive != nil {
 		station.IsActive = *req.IsActive
 	}

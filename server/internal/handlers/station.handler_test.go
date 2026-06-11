@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tylerjvollick/nori/internal/dtos"
@@ -725,4 +726,142 @@ func TestListStations_Success(t *testing.T) {
 	require.Len(t, result, 1)
 	assert.Equal(t, "Assembly", result[0].Name)
 	assert.Equal(t, 1, result[0].WIPCount)
+}
+
+// --- CostsHour tests ---
+
+func TestUpdateStation_SetCostsHour(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": "95.00"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result dtos.StationResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotNil(t, result.CostsHour)
+	assert.True(t, result.CostsHour.Equal(decimal.RequireFromString("95.00")))
+
+	require.NotNil(t, repo.updatedStation)
+	require.NotNil(t, repo.updatedStation.CostsHour)
+	assert.True(t, repo.updatedStation.CostsHour.Equal(decimal.RequireFromString("95.00")))
+}
+
+func TestUpdateStation_ClearCostsHourWithNull(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("65.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "Table Saw", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": null}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result dtos.StationResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result.CostsHour)
+
+	require.NotNil(t, repo.updatedStation)
+	assert.Nil(t, repo.updatedStation.CostsHour, "explicit null should clear costsHour")
+}
+
+func TestUpdateStation_CostsHourAbsentUnchanged(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("65.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "Table Saw", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"name": "Table Saw 2"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.NotNil(t, repo.updatedStation)
+	require.NotNil(t, repo.updatedStation.CostsHour, "absent field should not change costsHour")
+	assert.True(t, repo.updatedStation.CostsHour.Equal(rate))
+}
+
+func TestUpdateStation_NegativeCostsHourRejected(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": "-5"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Nil(t, repo.updatedStation, "negative costsHour should not be persisted")
+}
+
+func TestGetStation_IncludesCostsHour(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("95.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/"+stationID.String()), nil)
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&raw))
+	require.Contains(t, raw, "costsHour")
+	assert.Equal(t, "95", raw["costsHour"])
 }

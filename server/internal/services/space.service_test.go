@@ -1,12 +1,17 @@
 package services
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tylerjvollick/nori/internal/dbfactory"
+	"github.com/tylerjvollick/nori/internal/dbtest"
+	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
 	"github.com/tylerjvollick/nori/internal/repositories"
 	"gorm.io/gorm"
@@ -172,3 +177,69 @@ func TestValidateSlug_TooLong(t *testing.T) {
 
 // Verify that StationRepository satisfies StationSeeder interface (compile-time check)
 var _ StationSeeder = (*repositories.StationRepository)(nil)
+
+// --- UpdateSpace defaultLaborRate (real PostgreSQL) ---
+
+// TestSpaceService_UpdateSpace_DefaultLaborRate verifies set / leave-unchanged
+// / clear semantics for defaultLaborRate against a real database, going
+// through the same JSON unmarshalling the API uses.
+func TestSpaceService_UpdateSpace_DefaultLaborRate(t *testing.T) {
+	tx := dbtest.TestTx(t)
+	svc := NewSpaceService(
+		repositories.NewSpaceRepository(tx),
+		repositories.NewUserRepository(tx),
+		repositories.NewSpaceMemberRepository(tx),
+		repositories.NewStationRepository(tx),
+	)
+
+	space := dbfactory.Space(tx)
+
+	// 1. Set the rate via a payload with defaultLaborRate present.
+	var setDTO dtos.UpdateSpaceDTO
+	require.NoError(t, json.Unmarshal([]byte(`{"defaultLaborRate":"50.00"}`), &setDTO))
+	updated, err := svc.UpdateSpace(space.ID, space.AccountID, &setDTO)
+	require.NoError(t, err)
+	require.NotNil(t, updated.DefaultLaborRate)
+	assert.True(t, updated.DefaultLaborRate.Equal(decimal.RequireFromString("50.00")))
+
+	// 2. A payload without the field leaves the rate unchanged.
+	var absentDTO dtos.UpdateSpaceDTO
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"Renamed Shop"}`), &absentDTO))
+	unchanged, err := svc.UpdateSpace(space.ID, space.AccountID, &absentDTO)
+	require.NoError(t, err)
+	require.NotNil(t, unchanged.DefaultLaborRate, "absent field must not clear the rate")
+	assert.True(t, unchanged.DefaultLaborRate.Equal(decimal.RequireFromString("50.00")))
+	assert.Equal(t, "Renamed Shop", unchanged.Name)
+
+	// 3. An explicit null clears the rate.
+	var clearDTO dtos.UpdateSpaceDTO
+	require.NoError(t, json.Unmarshal([]byte(`{"defaultLaborRate":null}`), &clearDTO))
+	cleared, err := svc.UpdateSpace(space.ID, space.AccountID, &clearDTO)
+	require.NoError(t, err)
+	assert.Nil(t, cleared.DefaultLaborRate, "explicit null must clear the rate")
+
+	// Verify persistence with a fresh read.
+	reloaded, err := svc.GetSpaceByID(space.ID, space.AccountID)
+	require.NoError(t, err)
+	assert.Nil(t, reloaded.DefaultLaborRate)
+}
+
+// TestSpaceService_UpdateSpace_NegativeLaborRateRejected verifies the service
+// rejects a negative defaultLaborRate.
+func TestSpaceService_UpdateSpace_NegativeLaborRateRejected(t *testing.T) {
+	tx := dbtest.TestTx(t)
+	svc := NewSpaceService(
+		repositories.NewSpaceRepository(tx),
+		repositories.NewUserRepository(tx),
+		repositories.NewSpaceMemberRepository(tx),
+		repositories.NewStationRepository(tx),
+	)
+
+	space := dbfactory.Space(tx)
+
+	var dto dtos.UpdateSpaceDTO
+	require.NoError(t, json.Unmarshal([]byte(`{"defaultLaborRate":"-1"}`), &dto))
+	_, err := svc.UpdateSpace(space.ID, space.AccountID, &dto)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "defaultLaborRate must be >= 0")
+}

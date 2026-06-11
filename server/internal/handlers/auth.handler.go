@@ -155,13 +155,14 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	spacesDTOs := make([]dtos.SpaceResponseDTO, len(spaces))
 	for i, s := range spaces {
 		spacesDTOs[i] = dtos.SpaceResponseDTO{
-			ID:        s.ID,
-			Name:      s.Name,
-			Slug:      s.Slug,
-			AccountID: s.AccountID,
-			IsDefault: s.IsDefault,
-			CreatedAt: s.CreatedAt.Format("2006-01-02T15:04:05Z"),
-			UpdatedAt: s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:               s.ID,
+			Name:             s.Name,
+			Slug:             s.Slug,
+			AccountID:        s.AccountID,
+			IsDefault:        s.IsDefault,
+			DefaultLaborRate: s.DefaultLaborRate,
+			CreatedAt:        s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			UpdatedAt:        s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 		}
 	}
 
