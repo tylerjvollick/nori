@@ -4,6 +4,7 @@
 	import type { GraphDirection } from '$lib/stores/graph';
 	import {
 		Circle,
+		CircleDashed,
 		CircleDot,
 		CircleCheck,
 		CircleMinus,
@@ -106,6 +107,12 @@
 		TaskStatus,
 		{ bg: string; border: string; text: string; icon: typeof Circle }
 	> = {
+		backlog: {
+			bg: 'bg-slate-50 dark:bg-slate-900/50',
+			border: 'border-slate-200 border-dashed dark:border-slate-700',
+			text: 'text-slate-400',
+			icon: CircleDashed,
+		},
 		open: {
 			bg: 'bg-gray-50 dark:bg-gray-900/50',
 			border: 'border-gray-200 dark:border-gray-800',

@@ -610,7 +610,7 @@
 							rootTaskId={tree?.id}
 							onselect={handleGraphNodeSelect}
 							onmutate={handleTreeMutate}
-							viewToggle={{ current: currentView, onchange: setView }}
+							viewToggle={{ current: currentView, onchange: (mode) => setView(mode as ViewMode) }}
 						/>
 					{:else if currentView === 'board'}
 						<!-- Board toolbar with view toggle -->

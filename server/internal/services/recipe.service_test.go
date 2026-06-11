@@ -4147,7 +4147,12 @@ func setupJobFromRecipe(t *testing.T) (*RecipeService, *mockRecipeRepo, *mockTas
 	}
 
 	// Simulate work: assign and set actual times on children.
+	// Sort by DisplayOrder first — the mock's GetChildren iterates a map, so
+	// its order is nondeterministic, but assertions index by DisplayOrder.
 	children, _ := taskRepo.GetChildren(job.ID)
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].DisplayOrder < children[j].DisplayOrder
+	})
 	for i := range children {
 		child := children[i]
 		child.AssignedToID = &assigneeID

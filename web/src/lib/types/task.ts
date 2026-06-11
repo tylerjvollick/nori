@@ -2,7 +2,7 @@ import type { PaginatedResponse } from './common';
 
 // --- Enums ---
 
-export type TaskStatus = 'open' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
+export type TaskStatus = 'backlog' | 'open' | 'in_progress' | 'done' | 'skipped' | 'cancelled';
 
 export type TaskType = 'job' | 'task' | 'milestone' | 'gate';
 
@@ -61,6 +61,8 @@ export interface CreateTaskRequest {
 	parentId?: string;
 	stationId?: string;
 	priority?: number;
+	/** Initial status. Only 'open' (default) and 'backlog' are accepted. */
+	status?: 'open' | 'backlog';
 }
 
 export interface UpdateTaskRequest {

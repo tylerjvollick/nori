@@ -68,7 +68,7 @@ Specs listed in priority order. Work top-down.
 | 4 | [recipes/spec.md](recipes/spec.md) | Recipe system: authoring, rolling, versioning, cost tracking | recipe, roll, create, edit, steps, versioning, batch, cost, quoting, save-as-recipe | |
 | 4a | [recipes/architecture.md](recipes/architecture.md) | Recipe technical architecture: task-tree model, roll engine, cost pipeline | recipe, architecture, task-tree, roll, pour, batch, fan-in, fan-out, clone, cost, schema | |
 | 5 | [orders.md](orders.md) | Customer orders, line items, recipe rolling on confirm | orders, customers, quotes, due date, lead time, sales, pipeline, roll | |
-| 6 | [job-flow.md](job-flow.md) | Dependency-graph pull system, ready queue, station view | jobs, tasks, pull, drum, buffer, rope, TOC, flow, bottleneck, WIP, dependencies | |
+| 6 | [job-flow.md](job-flow.md) | Dependency-graph pull system, job lifecycle (backlog/open/in_progress/done), ready queue, station view | jobs, tasks, status, backlog, lifecycle, pull, drum, buffer, rope, TOC, flow, bottleneck, WIP, dependencies | |
 | 7 | [task-execution.md](task-execution.md) | Running live tasks, ready-work algorithm, gates, capture mode | execution, live, run, capture, deviations, notes, first-time, ready, claim, gates | |
 | 8 | [inventory/spec.md](inventory/spec.md) | Materials, BOM, inventory tracking, cost computation (placeholder) | materials, BOM, inventory, lumber, hardware, replenish, stock, cost, finish, custom fields | |
 | 9 | [time-tracking.md](time-tracking.md) | Time event store, multiple input sources | time, clock, check-in, checkout, duration, events, sources, logging | |

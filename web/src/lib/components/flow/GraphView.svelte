@@ -103,6 +103,7 @@
 
 	// ---- Status → edge color (matches TaskNode) ----
 	const STATUS_EDGE_COLORS: Record<TaskStatus, string> = {
+		backlog: '#94a3b8', // slate-400
 		open: '#9ca3af', // gray-400
 		in_progress: '#3b82f6', // blue-500
 		done: '#22c55e', // green-500
@@ -904,6 +905,8 @@
 	let flowHandle: {
 		setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void;
 		fitView: (opts?: { padding?: number; duration?: number }) => void;
+		zoomIn: (opts?: { duration?: number }) => void;
+		zoomOut: (opts?: { duration?: number }) => void;
 	} | undefined = $state(undefined);
 
 	// When fullscreen changes, wait for the container to resize then fit the graph
