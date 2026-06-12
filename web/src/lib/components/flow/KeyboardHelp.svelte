@@ -20,7 +20,7 @@
 			shortcuts: [
 				{ key: 'b', description: 'Switch to board view' },
 				{ key: 'g', description: 'Switch to graph view' },
-				{ key: 'l', description: 'Switch to list view' },
+				{ key: 's', description: 'Switch to list view' },
 				{ key: '/', description: 'Focus filter bar' },
 				{ key: 'Esc', description: 'Close panel / clear selection' },
 				{ key: '?', description: 'Toggle this help overlay' },

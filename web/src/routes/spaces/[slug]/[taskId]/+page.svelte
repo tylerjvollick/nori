@@ -246,11 +246,10 @@
 			case 'b':
 				setView('board');
 				break;
-			case 'l':
-				// Only switch if not in board view (board uses 'l' for column navigation)
-				if (currentView !== 'board') {
-					setView('list');
-				}
+			case 's':
+				// 's' switches to List view; 'l' is left free for the graph's
+				// move-right (vim) navigation so the two no longer collide.
+				setView('list');
 				break;
 			case 'c':
 				setView('cost');
