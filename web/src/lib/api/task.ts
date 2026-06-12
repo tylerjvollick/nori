@@ -8,10 +8,13 @@ import type {
 	AddNoteRequest,
 	CompleteTaskRequest,
 	CompleteTaskResponse,
+	SubTaskResponse,
+	SubTaskListResponse,
+	CreateSubTaskRequest,
+	UpdateSubTaskRequest,
+	ReorderSubTasksRequest,
 } from '$lib/types/task';
 import { apiClient } from './client';
-
-const BASE = '/api/v1/tasks';
 
 /** Params accepted by the list tasks endpoint. */
 export interface ListTasksParams {
@@ -55,69 +58,99 @@ function toQueryString(params?: Record<string, unknown>): string {
 }
 
 class TaskApi {
-	async listTasks(params?: ListTasksParams): Promise<TaskListResponse> {
-		return apiClient.get<TaskListResponse>(`${BASE}${toQueryString(params && { ...params })}`);
+	async listTasks(spaceId: string, params?: ListTasksParams): Promise<TaskListResponse> {
+		const base = `/api/v1/spaces/${spaceId}/tasks`;
+		return apiClient.get<TaskListResponse>(`${base}${toQueryString(params && { ...params })}`);
 	}
 
-	async getTask(id: string): Promise<TaskResponse> {
-		return apiClient.get<TaskResponse>(`${BASE}/${id}`);
+	async getTask(spaceId: string, id: string): Promise<TaskResponse> {
+		return apiClient.get<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}`);
 	}
 
-	async createTask(data: CreateTaskRequest): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(BASE, data);
+	async createTask(spaceId: string, data: CreateTaskRequest): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks`, data);
 	}
 
-	async updateTask(id: string, data: UpdateTaskRequest): Promise<TaskResponse> {
-		return apiClient.put<TaskResponse>(`${BASE}/${id}`, data);
+	async updateTask(spaceId: string, id: string, data: UpdateTaskRequest): Promise<TaskResponse> {
+		return apiClient.put<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}`, data);
 	}
 
-	async deleteTask(id: string): Promise<void> {
-		return apiClient.delete<void>(`${BASE}/${id}`);
+	async deleteTask(spaceId: string, id: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${id}`);
 	}
 
-	async startTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/start`);
+	async setStatus(spaceId: string, id: string, status: import('$lib/types/task').TaskStatus): Promise<TaskResponse> {
+		return apiClient.put<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/status`, { status });
 	}
 
-	async completeTask(id: string, data?: CompleteTaskRequest): Promise<CompleteTaskResponse> {
-		return apiClient.post<CompleteTaskResponse>(`${BASE}/${id}/complete`, data);
+	async startTask(spaceId: string, id: string): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/start`);
 	}
 
-	async pauseTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/pause`);
+	async completeTask(spaceId: string, id: string, data?: CompleteTaskRequest): Promise<CompleteTaskResponse> {
+		return apiClient.post<CompleteTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/complete`, data);
 	}
 
-	async resumeTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/resume`);
+	async skipTask(spaceId: string, id: string): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/skip`);
 	}
 
-	async skipTask(id: string): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/skip`);
+	async addChildTask(spaceId: string, parentId: string, data: AddChildTaskRequest): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${parentId}/children`, data);
 	}
 
-	async addChildTask(parentId: string, data: AddChildTaskRequest): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${parentId}/children`, data);
+	async addNote(spaceId: string, id: string, data: AddNoteRequest): Promise<TaskResponse> {
+		return apiClient.post<TaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/notes`, data);
 	}
 
-	async addNote(id: string, data: AddNoteRequest): Promise<TaskResponse> {
-		return apiClient.post<TaskResponse>(`${BASE}/${id}/notes`, data);
-	}
-
-	async getReadyTasks(params?: ReadyTasksParams): Promise<TaskResponse[]> {
+	async getReadyTasks(spaceId: string, params?: ReadyTasksParams): Promise<TaskResponse[]> {
 		const qs = toQueryString(params && { ...params });
 		const result = await apiClient.get<{ items: TaskResponse[]; total: number }>(
-			`${BASE}/ready${qs}`,
+			`/api/v1/spaces/${spaceId}/tasks/ready${qs}`,
 		);
 		return result.items;
 	}
 
-	async getTaskTree(id: string): Promise<TaskTreeResponse> {
-		return apiClient.get<TaskTreeResponse>(`${BASE}/${id}/tree`);
+	async getTaskTree(spaceId: string, id: string): Promise<TaskTreeResponse> {
+		return apiClient.get<TaskTreeResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/tree`);
 	}
 
-	async getTaskDeps(id: string): Promise<TaskDepsResponse> {
-		return apiClient.get<TaskDepsResponse>(`${BASE}/${id}/deps`);
+	async getTaskDeps(spaceId: string, id: string): Promise<TaskDepsResponse> {
+		return apiClient.get<TaskDepsResponse>(`/api/v1/spaces/${spaceId}/tasks/${id}/deps`);
 	}
+
+	/** Add a dependency: blockerId blocks targetTaskId. */
+	async addDep(spaceId: string, blockerId: string, targetTaskId: string, type: string = 'blocks'): Promise<TaskDep> {
+		return apiClient.post<TaskDep>(`/api/v1/spaces/${spaceId}/tasks/${blockerId}/deps`, { targetTaskId, type });
+	}
+
+	/** Remove a dependency edge by its UUID. */
+	async removeDep(spaceId: string, taskId: string, depId: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/deps/${depId}`);
+	}
+
+	// --- Sub-task methods ---
+
+	async listSubTasks(spaceId: string, taskId: string): Promise<SubTaskListResponse> {
+		return apiClient.get<SubTaskListResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks`);
+	}
+
+	async createSubTask(spaceId: string, taskId: string, data: CreateSubTaskRequest): Promise<SubTaskResponse> {
+		return apiClient.post<SubTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks`, data);
+	}
+
+	async updateSubTask(spaceId: string, taskId: string, subtaskId: string, data: UpdateSubTaskRequest): Promise<SubTaskResponse> {
+		return apiClient.put<SubTaskResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}`, data);
+	}
+
+	async deleteSubTask(spaceId: string, taskId: string, subtaskId: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}`);
+	}
+
+	async reorderSubTasks(spaceId: string, taskId: string, data: ReorderSubTasksRequest): Promise<void> {
+		return apiClient.put<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/reorder`, data);
+	}
+
 }
 
 export const taskApi = new TaskApi();

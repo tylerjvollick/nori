@@ -50,13 +50,14 @@ func (h *SpaceHandler) RegisterSpaceRoutes(app *fiber.App, middlewares ...fiber.
 // spaceToDTO converts a Space model to a SpaceResponseDTO
 func spaceToDTO(space *models.Space) dtos.SpaceResponseDTO {
 	return dtos.SpaceResponseDTO{
-		ID:        space.ID,
-		Name:      space.Name,
-		Slug:      space.Slug,
-		AccountID: space.AccountID,
-		IsDefault: space.IsDefault,
-		CreatedAt: space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt: space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:               space.ID,
+		Name:             space.Name,
+		Slug:             space.Slug,
+		AccountID:        space.AccountID,
+		IsDefault:        space.IsDefault,
+		DefaultLaborRate: space.DefaultLaborRate,
+		CreatedAt:        space.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:        space.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 }
 

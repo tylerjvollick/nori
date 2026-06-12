@@ -127,3 +127,16 @@ func (r *TaskDepRepository) GetAllForTask(taskID string) ([]models.TaskDep, erro
 		Find(&deps).Error
 	return deps, err
 }
+
+// GetDepsAmongTasks returns all dependency edges where both the source and
+// target are in the given set of task IDs. This is used when cloning a task
+// tree to capture only the internal dependencies.
+func (r *TaskDepRepository) GetDepsAmongTasks(taskIDs []string) ([]models.TaskDep, error) {
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	var deps []models.TaskDep
+	err := r.db.Where("from_task_id IN ? AND to_task_id IN ?", taskIDs, taskIDs).
+		Find(&deps).Error
+	return deps, err
+}

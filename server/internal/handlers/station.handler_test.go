@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tylerjvollick/nori/internal/dtos"
@@ -103,16 +104,24 @@ func (m *mockStationRepo) GetWIPCounts(spaceID uuid.UUID) (map[uuid.UUID]int, er
 
 // --- Test helpers ---
 
-func setupStationApp(handler *StationHandler, authDTO *dtos.AuthDTO) *fiber.App {
+// setupStationApp builds a Fiber app that simulates auth + RequireSpace middleware
+// for station handler tests. The spaceID is injected into c.Locals("spaceID").
+func setupStationApp(handler *StationHandler, authDTO *dtos.AuthDTO, spaceID uuid.UUID) *fiber.App {
 	app := fiber.New()
 	app.Use(func(c *fiber.Ctx) error {
 		c.Locals("authDTO", authDTO)
+		c.Locals("spaceID", spaceID)
 		return c.Next()
 	})
-	handler.RegisterStationRoutes(app)
+	spaceGroup := app.Group("/api/v1/spaces/:spaceId")
+	handler.RegisterStationRoutes(spaceGroup)
 	return app
 }
 
+// adminAuthDTOWithSpace and userAuthDTOWithSpace are shared test helpers used by
+// station and task_dep handler tests. They set ActiveSpaceID for handlers that
+// still read it directly (e.g. task_dep), and pass spaceID to setupStationApp for
+// handlers that use spaceIDFromPath.
 func adminAuthDTOWithSpace(accountID, spaceID uuid.UUID) *dtos.AuthDTO {
 	adminRole := models.RoleAdmin
 	return &dtos.AuthDTO{
@@ -137,6 +146,11 @@ func userAuthDTOWithSpace(accountID, spaceID uuid.UUID) *dtos.AuthDTO {
 	}
 }
 
+// stationURL builds a path under the space-scoped route prefix.
+func stationURL(spaceID uuid.UUID, rest string) string {
+	return "/api/v1/spaces/" + spaceID.String() + "/stations" + rest
+}
+
 // --- CreateStation tests ---
 
 func TestCreateStation_AdminSuccess(t *testing.T) {
@@ -147,12 +161,12 @@ func TestCreateStation_AdminSuccess(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"name": "Milling",
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -181,7 +195,7 @@ func TestCreateStation_WithOptionalFields(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	desc := "The main assembly area"
 	body, _ := json.Marshal(map[string]interface{}{
@@ -190,7 +204,7 @@ func TestCreateStation_WithOptionalFields(t *testing.T) {
 		"wipLimit":    5,
 		"bufferSize":  3,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -213,44 +227,15 @@ func TestCreateStation_NonAdminForbidden(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := userAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]string{"name": "Milling"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-}
-
-func TestCreateStation_NoSpaceID(t *testing.T) {
-	repo := newMockStationRepo()
-	handler := NewStationHandler(repo)
-	accountID := uuid.New()
-	// Admin with no active space
-	adminRole := models.RoleAdmin
-	auth := &dtos.AuthDTO{
-		User: models.User{
-			ID:   uuid.New(),
-			Role: &adminRole,
-		},
-		AccountID:     accountID,
-		ActiveSpaceID: nil,
-	}
-	app := setupStationApp(handler, auth)
-
-	body, _ := json.Marshal(map[string]string{"name": "Milling"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := app.Test(req, -1)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-
-	var result map[string]string
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	assert.Equal(t, "X-Space-ID header is required", result["error"])
 }
 
 func TestCreateStation_EmptyName(t *testing.T) {
@@ -259,10 +244,10 @@ func TestCreateStation_EmptyName(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]string{"name": ""})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -280,9 +265,9 @@ func TestCreateStation_InvalidBody(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader([]byte("not json")))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader([]byte("not json")))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -298,10 +283,10 @@ func TestCreateStation_RepoCreateError(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]string{"name": "Milling"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -321,10 +306,10 @@ func TestCreateStation_GetMaxDisplayOrderError(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]string{"name": "Milling"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/stations", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, stationURL(spaceID, ""), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -361,9 +346,9 @@ func TestGetStation_Success(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -385,9 +370,9 @@ func TestGetStation_NotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stations/"+uuid.New().String(), nil)
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/"+uuid.New().String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -410,9 +395,9 @@ func TestGetStation_WrongSpace(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -424,9 +409,9 @@ func TestGetStation_InvalidID(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stations/not-a-uuid", nil)
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/not-a-uuid"), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
@@ -458,7 +443,7 @@ func TestUpdateStation_Success(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	newName := "Assembly v2"
 	newWIP := 5
@@ -468,7 +453,7 @@ func TestUpdateStation_Success(t *testing.T) {
 		"wipLimit":   newWIP,
 		"bufferSize": newBuffer,
 	})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/stations/"+stationID.String(), bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -511,13 +496,13 @@ func TestUpdateStation_PartialUpdate(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	// Only update isActive
 	body, _ := json.Marshal(map[string]interface{}{
 		"isActive": false,
 	})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/stations/"+stationID.String(), bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -546,10 +531,10 @@ func TestUpdateStation_NonAdminForbidden(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := userAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{"name": "New Name"})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/stations/"+stationID.String(), bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -563,10 +548,10 @@ func TestUpdateStation_NotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{"name": "New Name"})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/stations/"+uuid.New().String(), bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+uuid.New().String()), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -587,10 +572,10 @@ func TestUpdateStation_RepoError(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
 	body, _ := json.Marshal(map[string]interface{}{"name": "New Name"})
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/stations/"+stationID.String(), bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := app.Test(req, -1)
@@ -616,9 +601,9 @@ func TestDeleteStation_Success(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
@@ -639,9 +624,9 @@ func TestDeleteStation_NonAdminForbidden(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := userAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
@@ -653,9 +638,9 @@ func TestDeleteStation_NotFound(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stations/"+uuid.New().String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, stationURL(spaceID, "/"+uuid.New().String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -674,9 +659,9 @@ func TestDeleteStation_WrongSpace(t *testing.T) {
 	accountID := uuid.New()
 	spaceID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
@@ -695,9 +680,9 @@ func TestDeleteStation_RepoError(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/stations/"+stationID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, stationURL(spaceID, "/"+stationID.String()), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
@@ -729,9 +714,9 @@ func TestListStations_Success(t *testing.T) {
 	handler := NewStationHandler(repo)
 	accountID := uuid.New()
 	auth := adminAuthDTOWithSpace(accountID, spaceID)
-	app := setupStationApp(handler, auth)
+	app := setupStationApp(handler, auth, spaceID)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stations", nil)
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, ""), nil)
 	resp, err := app.Test(req, -1)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -741,4 +726,142 @@ func TestListStations_Success(t *testing.T) {
 	require.Len(t, result, 1)
 	assert.Equal(t, "Assembly", result[0].Name)
 	assert.Equal(t, 1, result[0].WIPCount)
+}
+
+// --- CostsHour tests ---
+
+func TestUpdateStation_SetCostsHour(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": "95.00"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result dtos.StationResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotNil(t, result.CostsHour)
+	assert.True(t, result.CostsHour.Equal(decimal.RequireFromString("95.00")))
+
+	require.NotNil(t, repo.updatedStation)
+	require.NotNil(t, repo.updatedStation.CostsHour)
+	assert.True(t, repo.updatedStation.CostsHour.Equal(decimal.RequireFromString("95.00")))
+}
+
+func TestUpdateStation_ClearCostsHourWithNull(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("65.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "Table Saw", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": null}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result dtos.StationResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result.CostsHour)
+
+	require.NotNil(t, repo.updatedStation)
+	assert.Nil(t, repo.updatedStation.CostsHour, "explicit null should clear costsHour")
+}
+
+func TestUpdateStation_CostsHourAbsentUnchanged(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("65.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "Table Saw", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"name": "Table Saw 2"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.NotNil(t, repo.updatedStation)
+	require.NotNil(t, repo.updatedStation.CostsHour, "absent field should not change costsHour")
+	assert.True(t, repo.updatedStation.CostsHour.Equal(rate))
+}
+
+func TestUpdateStation_NegativeCostsHourRejected(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	body := []byte(`{"costsHour": "-5"}`)
+	req := httptest.NewRequest(http.MethodPut, stationURL(spaceID, "/"+stationID.String()), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Nil(t, repo.updatedStation, "negative costsHour should not be persisted")
+}
+
+func TestGetStation_IncludesCostsHour(t *testing.T) {
+	stationID := uuid.New()
+	spaceID := uuid.New()
+	rate := decimal.RequireFromString("95.00")
+
+	repo := newMockStationRepo()
+	repo.stations = []models.Station{
+		{ID: stationID, SpaceID: spaceID, Name: "CNC", WIPLimit: 1, IsActive: true, CostsHour: &rate},
+	}
+
+	handler := NewStationHandler(repo)
+	auth := adminAuthDTOWithSpace(uuid.New(), spaceID)
+	app := setupStationApp(handler, auth, spaceID)
+
+	req := httptest.NewRequest(http.MethodGet, stationURL(spaceID, "/"+stationID.String()), nil)
+	resp, err := app.Test(req, -1)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var raw map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&raw))
+	require.Contains(t, raw, "costsHour")
+	assert.Equal(t, "95", raw["costsHour"])
 }

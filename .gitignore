@@ -19,3 +19,13 @@ docker/.env
 /nori
 server/nori
 tmp/
+
+# Server env (use compose env vars instead; never track env files)
+server/.env
+
+# Local agent/tooling state
+.claude/
+.specify/
+
+# Secret scan reports
+.gitleaks-report*

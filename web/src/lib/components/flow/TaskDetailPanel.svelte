@@ -12,12 +12,6 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import {
-		Circle,
-		CircleDot,
-		CircleCheck,
-		CirclePause,
-		CircleX,
-		CircleMinus,
 		Clock,
 		User,
 		Calendar,
@@ -25,12 +19,23 @@
 		ArrowRight,
 		ArrowLeft,
 		ChevronRight,
+		BookOpen,
+		Briefcase,
+		ListTodo,
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
+	import { taskApi } from '$lib/api/task';
+	import { timeEntryApi, type TimeEntryResponse } from '$lib/api/timeEntry';
+	import { Input } from '$lib/components/ui/input';
 	import TaskActions from './TaskActions.svelte';
+	import StatusDropdown from './StatusDropdown.svelte';
+	import TimerControls from './TimerControls.svelte';
+	import TimeEntryEditor from './TimeEntryEditor.svelte';
+	import SubTaskList from './SubTaskList.svelte';
 
 	interface Props {
 		task?: TaskTreeResponse;
+		spaceId: string;
 		stationMap?: Map<string, string>;
 		deps?: TaskDepsResponse | null;
 		/** Called after a successful task action with the updated task */
@@ -39,36 +44,45 @@
 		oncomplete?: (response: CompleteTaskResponse) => void;
 		/** When true, show skeleton placeholders instead of task data */
 		isLoading?: boolean;
+		/**
+		 * 'recipe': hides status action buttons and actual time fields.
+		 * 'task' (default): full detail view.
+		 */
+		mode?: 'task' | 'recipe';
+		/** Map of task ID → title, used to display dependency titles instead of IDs. */
+		taskTitleMap?: Map<string, string>;
+		/** Name of the parent container (recipe or job name) for breadcrumb. */
+		parentName?: string;
+		/** Type of the parent container for breadcrumb icon. */
+		parentType?: 'recipe' | 'job';
+		/** Called when the user clicks the parent breadcrumb to navigate back. */
+		onnavparent?: () => void;
+		/** Called when a dependency badge is clicked — selects that task in the graph. */
+		onselecttask?: (taskId: string) => void;
+		/** Whether to hide the sub-tasks section (e.g. for recipe/job root tasks). */
+		hideSubTasks?: boolean;
+		/** Recipe version status (e.g. 'published', 'draft') — shown on root task only. */
+		recipeStatus?: string;
+		/** Recipe version number — shown on root task only. */
+		recipeVersion?: number;
+		/** Called after a field is saved to refresh data. */
+		onmutate?: () => void;
 	}
 
-	let { task, stationMap = new Map(), deps = null, onaction, oncomplete, isLoading = false }: Props = $props();
+	let {
+		task, spaceId, stationMap = new Map(), deps = null,
+		onaction, oncomplete, isLoading = false, mode = 'task',
+		taskTitleMap = new Map(),
+		parentName, parentType, onnavparent, onselecttask,
+		hideSubTasks = false,
+		recipeStatus, recipeVersion,
+		onmutate,
+	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
 	// --- Helpers ---
 
-	type StatusConfig = {
-		label: string;
-		colorClass: string;
-		bgClass: string;
-	};
-
-	function getStatusConfig(status: string): StatusConfig {
-		switch (status) {
-			case 'active':
-				return { label: 'Active', colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10' };
-			case 'done':
-				return { label: 'Done', colorClass: 'text-green-500', bgClass: 'bg-green-500/10' };
-			case 'paused':
-				return { label: 'Paused', colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10' };
-			case 'skipped':
-				return { label: 'Skipped', colorClass: 'text-muted-foreground', bgClass: 'bg-muted' };
-			case 'cancelled':
-				return { label: 'Cancelled', colorClass: 'text-red-500', bgClass: 'bg-red-500/10' };
-			default:
-				return { label: 'Open', colorClass: 'text-muted-foreground', bgClass: 'bg-muted' };
-		}
-	}
 
 	function priorityLabel(priority: number): string {
 		switch (priority) {
@@ -178,11 +192,6 @@
 
 	// --- Forward navigation ---
 
-	/**
-	 * The first dependent (successor) task ID, used for the "Next" button.
-	 * In deps.dependents: fromTaskId = the downstream task, toTaskId = this task (upstream/blocker).
-	 * GetDependents queries WHERE to_task_id = currentTask, so fromTaskId is the successor.
-	 */
 	let nextTaskId = $derived.by((): string | null => {
 		if (!deps || deps.dependents.length === 0) return null;
 		return deps.dependents[0].fromTaskId;
@@ -194,29 +203,149 @@
 		}
 	}
 
+	/** Handle dependency badge click — select in graph if handler provided, else navigate. */
+	function handleDepClick(e: MouseEvent, depTaskId: string): void {
+		if (onselecttask) {
+			e.preventDefault();
+			onselecttask(depTaskId);
+		}
+	}
+
 	// --- Derived state (safe when task is undefined during loading) ---
 
 	let progress = $derived(task ? computeProgress(task) : { done: 0, total: 0 });
-	let statusCfg = $derived(task ? getStatusConfig(task.status) : getStatusConfig('open'));
 	let station = $derived(task ? getStationName(task.stationId) : null);
+
+	// --- Time formula editing (recipe mode) ---
+	let formulaInput = $state('');
+	let formulaSaving = $state(false);
+
+	// Sync formula input when task changes.
+	$effect(() => {
+		if (task) {
+			formulaInput = task.estimatedTimeFormula ?? '';
+		}
+	});
+
+	async function saveFormula(): Promise<void> {
+		if (!task || formulaSaving) return;
+		const newValue = formulaInput.trim();
+		const oldValue = task.estimatedTimeFormula ?? '';
+		if (newValue === oldValue) return;
+
+		formulaSaving = true;
+		try {
+			await taskApi.updateTask(spaceId, task.id, {
+				estimatedTimeFormula: newValue || '',
+			});
+			onmutate?.();
+		} finally {
+			formulaSaving = false;
+		}
+	}
+
+	// --- Batch size editing (recipe mode) ---
+	let batchSizeEditing = $state(false);
+	let batchSizeInput = $state('');
+	let batchSizeSaving = $state(false);
+
+	let batchSizeDisplay = $derived(
+		task?.batchSize != null ? String(task.batchSize) : 'Inherit',
+	);
+
+	function startBatchSizeEdit(): void {
+		batchSizeEditing = true;
+		batchSizeInput = task?.batchSize != null ? String(task.batchSize) : '';
+	}
+
+	async function saveBatchSize(): Promise<void> {
+		if (!task || batchSizeSaving) return;
+		batchSizeEditing = false;
+
+		const trimmed = batchSizeInput.trim().toLowerCase();
+
+		if (trimmed === '' || trimmed === 'inherit') {
+			// Clear to inherit.
+			if (task.batchSize == null) return; // already inherit
+			batchSizeSaving = true;
+			try {
+				await taskApi.updateTask(spaceId, task.id, { clearBatchSize: true });
+				onmutate?.();
+			} finally {
+				batchSizeSaving = false;
+			}
+		} else {
+			const num = parseInt(trimmed, 10);
+			if (isNaN(num) || num < 1) return;
+			if (task.batchSize === num) return; // unchanged
+			batchSizeSaving = true;
+			try {
+				await taskApi.updateTask(spaceId, task.id, { batchSize: num });
+				onmutate?.();
+			} finally {
+				batchSizeSaving = false;
+			}
+		}
+	}
+
+	// --- Time entry tracking (job/task mode) ---
+	let timeEntries = $state<TimeEntryResponse[]>([]);
+
+	// Fetch time entries when task changes (only in job/task mode).
+	$effect(() => {
+		const currentTask = task;
+		if (currentTask && mode !== 'recipe') {
+			loadTimeEntries(currentTask.id);
+		} else {
+			timeEntries = [];
+		}
+	});
+
+	let timeEditorOpen = $state(false);
+
+	async function loadTimeEntries(taskId: string): Promise<void> {
+		try {
+			const result = await timeEntryApi.list(spaceId, taskId);
+			timeEntries = result.items;
+		} catch {
+			timeEntries = [];
+		}
+	}
+
+	/** Wrap onaction to also refresh time entries after start/pause/resume. */
+	function handleAction(updated: TaskResponse): void {
+		onaction?.(updated);
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
+
+	/** Wrap oncomplete to also refresh time entries after completion. */
+	function handleComplete(response: CompleteTaskResponse): void {
+		oncomplete?.(response);
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
+
+	/** Called after the StatusDropdown changes status. */
+	function handleStatusChange(newStatus: import('$lib/types/task').TaskStatus): void {
+		if (task) {
+			// Optimistically update local task and notify parent
+			const updated = { ...task, status: newStatus } as TaskResponse;
+			onaction?.(updated);
+			loadTimeEntries(task.id);
+		}
+	}
+
+	/** Called after a timer action (start/pause/resume/stop). */
+	function handleTimerUpdate(): void {
+		if (task && mode !== 'recipe') {
+			loadTimeEntries(task.id);
+		}
+	}
 </script>
 
-{#snippet statusIcon(status: string, sizeClass: string)}
-	{@const cfg = getStatusConfig(status)}
-	{#if status === 'active'}
-		<CircleDot class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'done'}
-		<CircleCheck class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'paused'}
-		<CirclePause class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'cancelled'}
-		<CircleX class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'skipped'}
-		<CircleMinus class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else}
-		<Circle class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{/if}
-{/snippet}
 
 <div class="p-6 space-y-5">
 	{#if isLoading || !task}
@@ -268,51 +397,88 @@
 			</div>
 		</div>
 	{:else}
-		<!-- Header: title, ID, type -->
+		<!-- Breadcrumb: Parent (recipe/job) > Task -->
+		{#if parentName && parentType}
+			<nav class="flex items-center gap-1 text-xs text-muted-foreground">
+				<button
+					class="flex items-center gap-1 hover:text-foreground transition-colors truncate max-w-[45%]"
+					onclick={() => onnavparent?.()}
+				>
+					{#if parentType === 'recipe'}
+						<BookOpen class="size-3 shrink-0" />
+					{:else}
+						<Briefcase class="size-3 shrink-0" />
+					{/if}
+					<span class="truncate">{parentName}</span>
+				</button>
+				<ChevronRight class="size-3 shrink-0 text-muted-foreground/50" />
+				<span class="flex items-center gap-1 text-foreground truncate">
+					<ListTodo class="size-3 shrink-0" />
+					<span class="truncate">{task.title}</span>
+				</span>
+			</nav>
+		{/if}
+
+		<!-- Header: title, type badge, recipe status/version -->
 		<div>
 			<div class="flex items-center gap-2 mb-2">
-				<Badge variant="outline" class="text-xs font-mono">
-					{task.id}
-				</Badge>
 				<Badge variant="outline" class="text-xs">
 					{typeLabel(task.type)}
 				</Badge>
+				{#if recipeStatus}
+					<Badge
+						variant={recipeStatus === 'published' ? 'secondary' : 'outline'}
+						class="text-xs {recipeStatus === 'published'
+							? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800'
+							: 'bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800'}"
+						data-testid="recipe-status-tag"
+					>
+						{recipeStatus === 'published' ? 'Published' : 'Draft'}
+					</Badge>
+				{/if}
+				{#if recipeVersion}
+					<Badge variant="secondary" class="text-xs" data-testid="recipe-version-tag">v{recipeVersion}</Badge>
+				{/if}
 			</div>
-			<h2 class="text-lg font-semibold text-foreground">{task.title}</h2>
+			<div class="flex items-center gap-2">
+				<h2 class="text-lg font-semibold text-foreground flex-1 min-w-0 truncate">{task.title}</h2>
+				{#if mode !== 'recipe'}
+					<StatusDropdown
+						status={task.status}
+						{spaceId}
+						taskId={task.id}
+						isBlocked={deps !== null && deps.blockers.length > 0}
+						onchange={handleStatusChange}
+					/>
+				{/if}
+			</div>
 			{#if task.description}
 				<p class="text-sm text-muted-foreground mt-1">{task.description}</p>
 			{/if}
 		</div>
 
-		<!-- Action buttons -->
-		<TaskActions {task} layout="bar" {onaction} {oncomplete} />
+		<!-- Action buttons (hidden in recipe mode — no status transitions) -->
+		{#if mode !== 'recipe'}
+			<TaskActions {task} {spaceId} layout="bar" onaction={handleAction} oncomplete={handleComplete} />
 
-		<!-- Forward navigation: go to next task in dependency chain -->
-		{#if nextTaskId}
-			<Button
-				variant="outline"
-				size="sm"
-				class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
-				onclick={navigateToNextTask}
-			>
-				<span class="text-sm">Next: <span class="font-mono">{nextTaskId}</span></span>
-				<ChevronRight class="size-4" />
-			</Button>
+			<!-- Forward navigation: go to next task in dependency chain -->
+			{#if nextTaskId}
+				<Button
+					variant="outline"
+					size="sm"
+					class="w-full gap-2 justify-between text-muted-foreground hover:text-foreground"
+					onclick={navigateToNextTask}
+				>
+					<span class="text-sm">Next: <span class="font-medium">{taskTitleMap.get(nextTaskId) ?? 'Task'}</span></span>
+					<ChevronRight class="size-4" />
+				</Button>
+			{/if}
 		{/if}
 
 		<Separator />
 
 		<!-- Core metadata -->
 		<div class="space-y-3">
-			<!-- Status -->
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Status</span>
-				<Badge class="{statusCfg.bgClass} {statusCfg.colorClass} border-transparent">
-					{@render statusIcon(task.status, 'w-3 h-3 mr-1')}
-					{statusCfg.label}
-				</Badge>
-			</div>
-
 			<!-- Priority -->
 			<div class="flex items-center justify-between">
 				<span class="text-sm text-muted-foreground">Priority</span>
@@ -379,44 +545,151 @@
 		<div class="space-y-3">
 			<h4 class="text-sm font-medium text-foreground">Time</h4>
 
-			<div class="flex items-center justify-between">
-				<span class="text-sm text-muted-foreground">Actual Time</span>
-				<span class="text-sm text-foreground flex items-center gap-1">
-					<Clock class="w-3 h-3 text-muted-foreground" />
-					{formatDuration(task.actualTimeSeconds)}
-				</span>
-			</div>
-
-			{#if task.startedAt}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Started</span>
-					<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
+			{#if mode === 'recipe'}
+				<!-- Recipe mode: editable formula input -->
+				<div class="space-y-1.5">
+					<label for="estimated-time-formula" class="text-sm text-muted-foreground">Estimated Time</label>
+					<Input
+						id="estimated-time-formula"
+						data-testid="estimated-time-formula"
+						type="text"
+						placeholder={'e.g. 30m, 5m * {{batch_size}}'}
+						bind:value={formulaInput}
+						onblur={saveFormula}
+						onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+						disabled={formulaSaving}
+						class="h-8 text-sm"
+					/>
+					<p class="text-xs text-muted-foreground">
+						Flat: <code class="bg-muted px-1 rounded">30m</code>, <code class="bg-muted px-1 rounded">1h</code> &middot;
+						Formula: <code class="bg-muted px-1 rounded">5m * {'{{'}batch_size{'}}'}</code>
+					</p>
 				</div>
-			{/if}
 
-			{#if task.completedAt}
-				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Completed</span>
-					<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
+				<!-- Batch size -->
+				<div class="flex items-center justify-between" data-testid="batch-size-field">
+					<span class="text-sm text-muted-foreground">Batch Size</span>
+					{#if batchSizeEditing}
+						<Input
+							type="text"
+							bind:value={batchSizeInput}
+							placeholder="Inherit"
+							class="w-24 h-7 text-sm text-right"
+							autofocus
+							data-testid="batch-size-input"
+							onblur={saveBatchSize}
+							onkeydown={(e: KeyboardEvent) => {
+								if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+								if (e.key === 'Escape') { batchSizeEditing = false; }
+							}}
+							disabled={batchSizeSaving}
+						/>
+					{:else}
+						<button
+							class="text-sm text-foreground hover:text-primary cursor-pointer transition-colors"
+							onclick={startBatchSizeEdit}
+							data-testid="batch-size-value"
+						>
+							{batchSizeDisplay}
+						</button>
+					{/if}
 				</div>
-			{/if}
+			{:else}
+				<!-- Job/task mode: show recipe estimate (read-only) + user override -->
+				{#if task.estimatedTimeFromRecipeSeconds}
+					<div class="flex items-center justify-between" data-testid="recipe-estimate">
+						<span class="text-sm text-muted-foreground">Recipe Estimate</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Clock class="w-3 h-3 text-muted-foreground" />
+							{formatDuration(task.estimatedTimeFromRecipeSeconds)}
+						</span>
+					</div>
+				{/if}
 
-			{#if task.dueDate}
+				{#if task.estimatedTimeSeconds}
+					<div class="flex items-center justify-between" data-testid="estimated-time-override">
+						<span class="text-sm text-muted-foreground">Estimated Time</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Clock class="w-3 h-3 text-muted-foreground" />
+							{formatDuration(task.estimatedTimeSeconds)}
+						</span>
+					</div>
+				{/if}
+
 				<div class="flex items-center justify-between">
-					<span class="text-sm text-muted-foreground">Due Date</span>
-					<span class="text-sm text-foreground flex items-center gap-1">
-						<Calendar class="w-3 h-3 text-muted-foreground" />
-						{formatDate(task.dueDate)}
+					<span class="text-sm text-muted-foreground">Timer</span>
+					<TimerControls
+						{spaceId}
+						taskId={task.id}
+						taskStatus={task.status}
+						entries={timeEntries}
+						onupdate={handleTimerUpdate}
+					/>
+				</div>
+
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Total Recorded</span>
+					<span class="flex items-center gap-1.5">
+						<span class="text-sm font-mono text-foreground" data-testid="logged-time">
+							{formatDuration(task.actualTimeSeconds)}
+						</span>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+							onclick={() => { timeEditorOpen = true; }}
+						>
+							Edit
+						</Button>
 					</span>
 				</div>
+
+				{#if task}
+					<TimeEntryEditor
+						{spaceId}
+						taskId={task.id}
+						bind:open={timeEditorOpen}
+						onchange={() => { if (task) { loadTimeEntries(task.id); } }}
+					/>
+				{/if}
+
+				{#if task.startedAt}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Started</span>
+						<span class="text-sm text-foreground">{formatDateTime(task.startedAt)}</span>
+					</div>
+				{/if}
+
+				{#if task.completedAt}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Completed</span>
+						<span class="text-sm text-foreground">{formatDateTime(task.completedAt)}</span>
+					</div>
+				{/if}
+
+				{#if task.dueDate}
+					<div class="flex items-center justify-between">
+						<span class="text-sm text-muted-foreground">Due Date</span>
+						<span class="text-sm text-foreground flex items-center gap-1">
+							<Calendar class="w-3 h-3 text-muted-foreground" />
+							{formatDate(task.dueDate)}
+						</span>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
-		<!-- Children progress -->
+		<!-- Sub-tasks (hidden for recipe/job root tasks) -->
+		{#if !hideSubTasks}
+			<Separator />
+			<SubTaskList spaceId={spaceId} taskId={task.id} />
+		{/if}
+
+		<!-- Children progress (child tasks in the graph) -->
 		{#if progress.total > 0}
 			<Separator />
 			<div class="space-y-2">
-				<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
+				<h4 class="text-sm font-medium text-foreground">Child Tasks</h4>
 				<div class="flex items-center justify-between text-sm text-muted-foreground">
 					<span>{progress.done} of {progress.total} complete</span>
 					<span>{Math.round((progress.done / progress.total) * 100)}%</span>
@@ -436,12 +709,15 @@
 						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocked by</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each deps.blockers as dep (dep.id)}
-								<a href="/spaces/{slug}/{dep.toTaskId}" class="no-underline">
+								<button
+									class="inline-flex"
+									onclick={(e) => handleDepClick(e, dep.toTaskId)}
+								>
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowLeft class="w-3 h-3 text-red-400 shrink-0" />
-										<span class="font-mono text-xs">{dep.toTaskId}</span>
+										<span class="text-xs">{taskTitleMap.get(dep.toTaskId) ?? dep.toTaskId}</span>
 									</Badge>
-								</a>
+								</button>
 							{/each}
 						</div>
 					</div>
@@ -452,12 +728,15 @@
 						<span class="text-xs text-muted-foreground uppercase tracking-wide">Blocks</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each deps.dependents as dep (dep.id)}
-								<a href="/spaces/{slug}/{dep.fromTaskId}" class="no-underline">
+								<button
+									class="inline-flex"
+									onclick={(e) => handleDepClick(e, dep.fromTaskId)}
+								>
 									<Badge variant="outline" class="cursor-pointer hover:bg-accent transition-colors gap-1">
 										<ArrowRight class="w-3 h-3 text-orange-400 shrink-0" />
-										<span class="font-mono text-xs">{dep.fromTaskId}</span>
+										<span class="text-xs">{taskTitleMap.get(dep.fromTaskId) ?? dep.fromTaskId}</span>
 									</Badge>
-								</a>
+								</button>
 							{/each}
 						</div>
 					</div>

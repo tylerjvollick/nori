@@ -128,6 +128,8 @@ Station
   - DisplayOrder: int (position on the station view)
   - WIPLimit: int (max concurrent active tasks at this station)
   - BufferSize: int (queue capacity before the station)
+  - CostsHour: decimal (nullable — hourly labor rate; falls back to
+    Space.DefaultLaborRate)
   - IsActive: bool
   - CreatedAt, UpdatedAt: timestamp
 ```
@@ -158,14 +160,14 @@ ID generation: root IDs are `{space-slug}-{4-hex}`. Child IDs append
 Task
   - ID: string (primary key — hierarchical, e.g. "nori-a3f8.1.2")
   - SpaceID: uuid (FK → Space)
-  - ParentID: string (FK → Task, nullable — null = root/Job)
+  - ParentID: string (FK → Task, nullable — null = root/Job/Recipe)
   - RecipeID: uuid (FK → Recipe, nullable)
   - RecipeVersionID: int (FK → RecipeVersion, nullable — snapshot at creation)
   - StationID: uuid (FK → Station, nullable)
   - CustomerID: uuid (FK → Customer, nullable — typically on root/Job)
   - AssignedToID: uuid (FK → User, nullable)
   - CreatedByID: uuid (FK → User)
-  - Type: enum (job, task, milestone, gate)
+  - Type: enum (job, task, milestone, gate, recipe)
   - Status: enum (open, active, paused, done, skipped, cancelled)
   - Title: string
   - Description: text (nullable)
@@ -176,6 +178,8 @@ Task
   - PausedAt: timestamp (nullable)
   - CompletedAt: timestamp (nullable)
   - ActualTimeSeconds: int (accumulated active time, excludes pauses)
+  - BatchSize: int (nullable — units covered per task, used for recipe batch expansion)
+  - EstimatedTimeSecs: int (nullable — expected duration, used for quoting/comparison)
   - DeviationNotes: text (nullable — "what I did differently")
   - Metadata: jsonb (nullable — extensible structured data)
   - CreatedAt, UpdatedAt: timestamp
@@ -184,11 +188,15 @@ Task
 **Type enum:**
 - `job` — Root-level work item (an order, a build, a maintenance task). Always
   has `ParentID = null`.
-- `task` — A step within a job. The workhorse. Can be nested (task within task).
+- `task` — A step within a job or recipe. The workhorse. Can be nested (task
+  within task).
 - `milestone` — A marker with no work of its own. Useful for "all prep complete"
   checkpoints that other tasks depend on.
 - `gate` — A hold point requiring explicit approval (QC check, cure timer,
   manager sign-off). Gates block downstream tasks until resolved.
+- `recipe` — Root of a recipe task tree (template). A recipe's children are
+  `task`, `milestone`, or `gate` type, same as jobs. Recipes and jobs share
+  the same schema — a recipe is a frozen template, a job is a live instance.
 
 **Status enum:**
 - `open` — Not started, waiting for dependencies or assignment.
@@ -198,10 +206,21 @@ Task
 - `skipped` — Not applicable for this execution.
 - `cancelled` — Abandoned.
 
-**Recipe linkage**: A Job can reference a Recipe. When the Job is created (via
-"pouring" a recipe), the formula engine expands the TOML into a task subgraph.
-Each generated child Task references the RecipeVersion it came from. Ad-hoc
-tasks added during execution have `RecipeVersionID = null`.
+**Recipe linkage**: Recipes and jobs are both task trees. A recipe is a
+template (root `Type = 'recipe'`); a job is a live instance (root
+`Type = 'job'`). When a recipe is "rolled" into a job, the recipe's task tree
+is deep-cloned with batch expansion based on order quantity. Each generated
+child Task references the `RecipeID` and `RecipeVersionID` it was rolled from.
+Ad-hoc tasks added during execution have `RecipeVersionID = null`.
+
+**Batch fields** (used on recipe steps, copied to job tasks during roll):
+- `BatchSize` — How many units this step covers. `NULL` or `1` means per-piece
+  (one task per unit). A value matching the order quantity means the step is
+  done as a single batch. During roll: `ticket_count = order_qty / batch_size`.
+- `EstimatedTimeSecs` — Expected duration for this step. Used for cost
+  estimation on recipes and estimated-vs-actual comparison on jobs.
+
+See `specs/recipes/architecture.md` for the full roll engine design.
 
 ---
 
@@ -279,32 +298,34 @@ TaskComment
 #### Recipe (new — replaces SOPTemplate)
 
 A process template identity. User-facing name is "Recipe" (sushi theme).
-The internal Go package that processes TOML is called `formula` (extracted
-from beads).
 
 ```
 Recipe
   - ID: uuid
   - SpaceID: uuid (FK → Space)
-  - Name: string ("Walnut Dining Table", "Milling Lumber", "Bandsaw Blade Change")
-  - Description: text (nullable)
+  - Slug: string (URL-friendly identifier, e.g. "walnut-dining-table")
   - CurrentVersionID: int (FK → RecipeVersion, nullable — latest published)
-  - ExtendsRecipeID: uuid (FK → Recipe, nullable — inheritance)
+  - ExtendsRecipeID: uuid (FK → Recipe, nullable — inheritance, deferred)
   - CreatedByID: uuid (FK → User)
   - IsActive: bool
   - CreatedAt, UpdatedAt: timestamp
 ```
 
-**Inheritance**: Recipes can extend other recipes (like beads formula `extends`).
-A "Walnut Dining Table" recipe might extend a "Generic Dining Table" recipe,
-overriding the wood species variable and adding a specific finishing step.
+**Name and Description** are derived from the current version's root task
+(`RecipeVersion.RootTaskID → Task.Title/Description`). When no current version
+or root task exists, the recipe slug is used as the display name. This avoids
+duplicating title/description across the recipe and its root task.
+
+**Inheritance** (deferred): Recipes can extend other recipes. A "Walnut Dining
+Table" recipe might extend a "Generic Dining Table" recipe, overriding specific
+steps. This feature exists in the schema but is not implemented in the current
+roll engine. See `specs/recipes/architecture.md` for the deferred features list.
 
 ---
 
 #### RecipeVersion (new — replaces SOPVersion)
 
-Versioned TOML content. Each version is an immutable snapshot of the recipe
-definition.
+Versioned recipe snapshot. Each version points to a frozen task tree.
 
 ```
 RecipeVersion
@@ -312,7 +333,8 @@ RecipeVersion
   - RecipeID: uuid (FK → Recipe)
   - VersionNumber: int (auto-incremented per recipe)
   - Status: enum (draft, published, archived)
-  - Content: text (the TOML source)
+  - RootTaskID: string (FK → Task, nullable — points to frozen recipe task tree)
+  - Content: text (nullable — deprecated TOML source, kept for migration)
   - ChangeSummary: text (nullable — what changed)
   - CreatedByID: uuid (FK → User)
   - CreatedAt: timestamp
@@ -320,16 +342,26 @@ RecipeVersion
 
 **Version lifecycle**:
 - `draft` — Work in progress. Only the author and managers can see it.
-  One active draft per recipe at a time.
-- `published` — The active version. Pouring a recipe uses this version.
+  One active draft per recipe at a time. The draft's task tree is editable.
+- `published` — The active version. Rolling a recipe uses this version.
+  The published version's task tree is a frozen snapshot (clone-on-publish).
 - `archived` — Previous published version. Read-only.
 
 When published, `Recipe.CurrentVersionID` is updated to point to the new
 version. In-flight jobs are not affected — they reference the RecipeVersion
-that was current when they were poured.
+that was current when they were rolled.
 
-**TOML content**: The full recipe definition including steps, variables,
-gates, loops, aspects, and BondPoints. See recipes.md for the TOML format.
+**Task tree storage**: Instead of storing the recipe definition as TOML text,
+each version points to a root Task via `RootTaskID`. The recipe's steps are
+child Tasks in the same `task` table used for jobs. This means:
+- Recipe data is queryable (find all recipes using station X, compute
+  estimated costs across recipes, etc.)
+- The same UI components and API endpoints work for both recipe editing and
+  job task management
+- Diff/promote between a job and its source recipe is a direct tree comparison
+
+The `Content` column (TOML text) is deprecated and will be dropped in a future
+migration. See `specs/recipes/architecture.md` for the full architecture.
 
 ---
 
@@ -436,7 +468,98 @@ Material
   - ReorderQuantity: decimal
   - Location: string (nullable)
   - UnitCost: decimal (nullable — current cost per unit)
+  - Supplier: string (nullable)
+  - SKU: string (nullable)
   - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+  - DeletedAt: timestamp (nullable — GORM soft delete)
+```
+
+---
+
+#### TaskMaterial (new — quoting foundation, see materials-and-bom.md)
+
+Links a recipe/job task to a catalog material with the quantity consumed per
+unit produced. Scaled by batch quantity during dry-run cost computation.
+
+```
+TaskMaterial
+  - ID: uuid
+  - TaskID: string (FK → Task, cascade delete)
+  - MaterialID: uuid (FK → Material, cascade delete)
+  - QuantityPerUnit: decimal (not null)
+  - SnapshottedUnitCost: decimal (nullable — null on recipe task_materials;
+    set to the material's current unit cost when cloned onto a job at roll time)
+  - Notes: text (nullable)
+  - CreatedAt, UpdatedAt: timestamp
+  - UNIQUE (TaskID, MaterialID)
+```
+
+When a recipe is rolled into a job, each recipe task's materials are cloned
+onto the corresponding job tasks (including across batch expansion) with
+`SnapshottedUnitCost` frozen to the material's current `UnitCost`, so the
+job's material costs are stable even if the catalog price later changes.
+
+---
+
+#### Product & ProductVariant (new — quoting foundation)
+
+Product is what the shop sells; a variant is a sellable configuration
+(wood + finish) optionally bound to a recipe with variable bindings and a
+customer-facing price.
+
+```
+Product
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - Name: string
+  - Description: text (nullable)
+  - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+  - DeletedAt: timestamp (nullable — GORM soft delete)
+
+ProductVariant
+  - ID: uuid
+  - ProductID: uuid (FK → Product, cascade delete)
+  - Name: string
+  - RecipeID: uuid (FK → Recipe, nullable, set null on delete)
+  - RecipeVariables: jsonb (nullable — variable bindings for the recipe)
+  - Price: decimal (nullable — customer-facing price)
+  - IsActive: bool
+  - CreatedAt, UpdatedAt: timestamp
+```
+
+---
+
+#### Quote & QuoteLine (new — quoting foundation)
+
+A lightweight priced offer for a customer. No task tree is created until the
+quote is accepted and rolled into a job. Lines freeze a cost snapshot from
+the dry-run cost engine at quote time.
+
+```
+Quote
+  - ID: uuid
+  - SpaceID: uuid (FK → Space)
+  - CustomerID: uuid (FK → Customer, nullable, set null on delete)
+  - Status: enum (draft, sent, accepted, declined, cancelled)
+  - Notes: text (nullable)
+  - Markup: decimal (nullable)
+  - OverrideTotal: decimal (nullable)
+  - AcceptedAt: timestamp (nullable)
+  - CreatedByID: uuid (FK → User)
+  - CreatedAt, UpdatedAt: timestamp
+
+QuoteLine
+  - ID: uuid
+  - QuoteID: uuid (FK → Quote, cascade delete)
+  - ProductVariantID: uuid (FK → ProductVariant, nullable, set null on delete)
+  - RecipeID: uuid (FK → Recipe, nullable — for non-product quotes)
+  - Quantity: int (not null)
+  - UnitPrice: decimal (nullable)
+  - CostSnapshot: jsonb (nullable — frozen dry-run cost breakdown)
+  - RecipeVariables: jsonb (nullable)
+  - Notes: text (nullable)
   - CreatedAt, UpdatedAt: timestamp
 ```
 
@@ -489,7 +612,7 @@ User N:M Space (via SpaceMember with role)
 
 Task N:1 Space
 Task N:1 Task (parent — unlimited nesting via hierarchical IDs)
-Task N:1 Recipe, RecipeVersion (optional — source template)
+Task N:1 Recipe, RecipeVersion (optional — source template for rolled jobs)
 Task N:1 Station (optional — where this work happens)
 Task N:1 Customer (optional — typically on root Job)
 Task N:1 User (assigned)
@@ -504,11 +627,12 @@ Task N:M Tag (via task_tag)
 TaskDep N:1 Task (source), Task (target)
 
 Recipe N:1 Space
-Recipe N:1 Recipe (extends — inheritance)
+Recipe N:1 Recipe (extends — inheritance, deferred)
 Recipe 1:N RecipeVersion
 Recipe N:M Tag (via recipe_tag)
 
-RecipeVersion 1:N BOMItem
+RecipeVersion N:1 Task (root_task_id — points to frozen recipe task tree)
+RecipeVersion 1:N BOMItem (deprecated — moving to TaskMaterial linkage)
 
 BOMItem N:1 Material (optional)
 

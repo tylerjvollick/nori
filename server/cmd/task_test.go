@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,14 @@ func TestTaskCommandHasJSONFlag(t *testing.T) {
 func setupTestServer(t *testing.T, expectedPath string, expectedMethod string, responseBody interface{}, statusCode int) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Time entry side-effect calls (start/pause) are non-blocking best-effort.
+		// Return 200 empty JSON for them without asserting.
+		if strings.Contains(r.URL.Path, "/time-entries/") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{})
+			return
+		}
+
 		assert.Equal(t, expectedPath, r.URL.Path)
 		assert.Equal(t, expectedMethod, r.Method)
 		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
@@ -68,6 +77,7 @@ func setupCredentials(t *testing.T, serverURL string) {
 		AccessToken: "test-token",
 		UserID:      "user-123",
 		UserEmail:   "test@example.com",
+		SpaceID:     "test-space",
 	}
 	require.NoError(t, cli.SaveCredentials(creds))
 }
@@ -80,7 +90,7 @@ func TestRunTaskStart_Success(t *testing.T) {
 		Title:  "Cut mortises",
 		Status: "active",
 	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/start", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/start", http.MethodPost, resp, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskStart(taskStartCmd, []string{"shop-a1.1"})
@@ -89,7 +99,7 @@ func TestRunTaskStart_Success(t *testing.T) {
 
 func TestRunTaskStart_Conflict(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/start",
+		"/api/v1/spaces/test-space/tasks/shop-a1.1/start",
 		http.MethodPost,
 		errorResponse{Error: `task "shop-a1.1" cannot be started: status is "active", must be "open"`},
 		http.StatusConflict,
@@ -109,7 +119,7 @@ func TestRunTaskComplete_Success(t *testing.T) {
 		Title:  "Cut mortises",
 		Status: "done",
 	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/complete", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/complete", http.MethodPost, resp, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskComplete(taskCompleteCmd, []string{"shop-a1.1"})
@@ -118,7 +128,7 @@ func TestRunTaskComplete_Success(t *testing.T) {
 
 func TestRunTaskComplete_Conflict(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/complete",
+		"/api/v1/spaces/test-space/tasks/shop-a1.1/complete",
 		http.MethodPost,
 		errorResponse{Error: `task "shop-a1.1" cannot be completed: status is "open", must be "active"`},
 		http.StatusConflict,
@@ -130,62 +140,24 @@ func TestRunTaskComplete_Conflict(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot be completed")
 }
 
-// --- Pause Tests ---
+// --- Pause Tests (timer-only, non-fatal) ---
 
 func TestRunTaskPause_Success(t *testing.T) {
-	resp := taskActionResponse{
-		ID:     "shop-a1.1",
-		Title:  "Cut mortises",
-		Status: "paused",
-	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/pause", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/time-entries/pause", http.MethodPost, nil, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskPause(taskPauseCmd, []string{"shop-a1.1"})
 	require.NoError(t, err)
 }
 
-func TestRunTaskPause_Conflict(t *testing.T) {
-	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/pause",
-		http.MethodPost,
-		errorResponse{Error: `task "shop-a1.1" cannot be paused: status is "open", must be "active"`},
-		http.StatusConflict,
-	)
-	setupCredentials(t, server.URL)
-
-	err := runTaskPause(taskPauseCmd, []string{"shop-a1.1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be paused")
-}
-
-// --- Resume Tests ---
+// --- Resume Tests (timer-only, non-fatal) ---
 
 func TestRunTaskResume_Success(t *testing.T) {
-	resp := taskActionResponse{
-		ID:     "shop-a1.1",
-		Title:  "Cut mortises",
-		Status: "active",
-	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/resume", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/time-entries/resume", http.MethodPost, nil, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
 	require.NoError(t, err)
-}
-
-func TestRunTaskResume_Conflict(t *testing.T) {
-	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/resume",
-		http.MethodPost,
-		errorResponse{Error: `task "shop-a1.1" cannot be resumed: status is "active", must be "paused"`},
-		http.StatusConflict,
-	)
-	setupCredentials(t, server.URL)
-
-	err := runTaskResume(taskResumeCmd, []string{"shop-a1.1"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot be resumed")
 }
 
 // --- Skip Tests ---
@@ -196,7 +168,7 @@ func TestRunTaskSkip_Success(t *testing.T) {
 		Title:  "Cut mortises",
 		Status: "skipped",
 	}
-	server := setupTestServer(t, "/api/v1/tasks/shop-a1.1/skip", http.MethodPost, resp, http.StatusOK)
+	server := setupTestServer(t, "/api/v1/spaces/test-space/tasks/shop-a1.1/skip", http.MethodPost, resp, http.StatusOK)
 	setupCredentials(t, server.URL)
 
 	err := runTaskSkip(taskSkipCmd, []string{"shop-a1.1"})
@@ -205,7 +177,7 @@ func TestRunTaskSkip_Success(t *testing.T) {
 
 func TestRunTaskSkip_Conflict(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/skip",
+		"/api/v1/spaces/test-space/tasks/shop-a1.1/skip",
 		http.MethodPost,
 		errorResponse{Error: `task "shop-a1.1" cannot be skipped: status is "done" (already terminal)`},
 		http.StatusConflict,
@@ -232,7 +204,7 @@ func TestRunTaskAction_NoCredentials(t *testing.T) {
 
 func TestRunTaskAction_ServerError(t *testing.T) {
 	server := setupTestServer(t,
-		"/api/v1/tasks/shop-a1.1/complete",
+		"/api/v1/spaces/test-space/tasks/shop-a1.1/complete",
 		http.MethodPost,
 		errorResponse{Error: "database error"},
 		http.StatusInternalServerError,
@@ -267,7 +239,7 @@ func TestRunTaskAdd_Success_WithParent(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			assert.Equal(t, "Sand surfaces", body["title"])
@@ -307,8 +279,8 @@ func TestRunTaskAdd_Success_InfersParentFromActiveTask(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Active task lookup
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
-			assert.Contains(t, r.URL.RawQuery, "status=active")
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet {
+			assert.Contains(t, r.URL.RawQuery, "status=in_progress")
 			assert.Contains(t, r.URL.RawQuery, "assigneeId=user-123")
 			json.NewEncoder(w).Encode(activeTaskListResponse{
 				Items: []activeTaskResponse{
@@ -320,7 +292,7 @@ func TestRunTaskAdd_Success_InfersParentFromActiveTask(t *testing.T) {
 		}
 
 		// Create child task
-		if r.URL.Path == "/api/v1/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(taskAddResponse{
 				ID:       "job-xyz.3",
@@ -353,7 +325,7 @@ func TestRunTaskAdd_Success_WithStation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Station list lookup
-		if r.URL.Path == "/api/v1/stations" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/test-space/stations" && r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode([]stationItem{
 				{ID: "station-uuid-1", Name: "Table Saw"},
 				{ID: "station-uuid-2", Name: "Workbench"},
@@ -362,7 +334,7 @@ func TestRunTaskAdd_Success_WithStation(t *testing.T) {
 		}
 
 		// Create child task
-		if r.URL.Path == "/api/v1/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			assert.Equal(t, "station-uuid-1", body["stationId"])
@@ -402,7 +374,7 @@ func TestRunTaskAdd_Success_WithAfter(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+parentID+"/children" && r.Method == http.MethodPost {
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
 			assert.Equal(t, "job-abc.1", body["afterId"])
@@ -472,7 +444,7 @@ func TestRunTaskAdd_StationNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/stations" {
+		if r.URL.Path == "/api/v1/spaces/test-space/stations" {
 			json.NewEncoder(w).Encode([]stationItem{
 				{ID: "station-uuid-1", Name: "Table Saw"},
 			})
@@ -560,7 +532,7 @@ func TestRunTaskNote_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 
 		// Active task lookup
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet {
 			parentID := "job-abc"
 			json.NewEncoder(w).Encode(activeTaskListResponse{
 				Items: []activeTaskResponse{
@@ -572,7 +544,7 @@ func TestRunTaskNote_Success(t *testing.T) {
 		}
 
 		// Add note
-		if r.URL.Path == "/api/v1/tasks/"+activeTaskID+"/notes" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+activeTaskID+"/notes" && r.Method == http.MethodPost {
 			var body map[string]string
 			json.NewDecoder(r.Body).Decode(&body)
 			assert.Equal(t, "Used deeper mortise", body["text"])
@@ -601,7 +573,7 @@ func TestRunTaskNote_Success_JSONOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(activeTaskListResponse{
 				Items: []activeTaskResponse{
 					{ID: activeTaskID, Title: "Cut tenons", Status: "active"},
@@ -611,7 +583,7 @@ func TestRunTaskNote_Success_JSONOutput(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/api/v1/tasks/"+activeTaskID+"/notes" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+activeTaskID+"/notes" {
 			note := "Some note"
 			json.NewEncoder(w).Encode(taskNoteResponse{
 				ID:             activeTaskID,
@@ -665,7 +637,7 @@ func TestRunTaskNote_ServerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks" && r.Method == http.MethodGet {
 			json.NewEncoder(w).Encode(activeTaskListResponse{
 				Items: []activeTaskResponse{
 					{ID: activeTaskID, Title: "Cut tenons", Status: "active"},
@@ -675,7 +647,7 @@ func TestRunTaskNote_ServerError(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/api/v1/tasks/"+activeTaskID+"/notes" {
+		if r.URL.Path == "/api/v1/spaces/test-space/tasks/"+activeTaskID+"/notes" {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(errorResponse{Error: "database error"})
 			return

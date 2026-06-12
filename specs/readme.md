@@ -23,9 +23,16 @@ priority order — work top-down.
 
 ### Spec File Naming
 
-- **Specification**: `specs/{name}.md` — the who/what/where/why/how of a feature.
-- **Implementation checklist**: `specs/{name}-implementation.md` — a checklist
-  of small, committable units of work. Created before implementation begins.
+Specs are transitioning to a directory-based structure:
+
+- **New format**: `specs/{feature}/spec.md` — user-focused specification
+  (speckit format: user stories, functional requirements, success criteria).
+  `specs/{feature}/architecture.md` — technical architecture and
+  implementation reference.
+- **Legacy format**: `specs/{name}.md` — combined who/what/where/why/how.
+  Older specs use this format and will be migrated over time.
+- **Implementation checklist**: `specs/{name}-implementation.md` or
+  `specs/{feature}/checklists/` — small, committable units of work.
 
 ### Workflow
 
@@ -52,18 +59,22 @@ Specs listed in priority order. Work top-down.
 
 | # | Spec | Description | Keywords | Done |
 |---|------|-------------|----------|------|
+| -- | [constitution.md](constitution.md) | Quality gates and development workflow rules for all beads | constitution, quality, testing, playwright, dbtest, migrations, demo, acceptance criteria | :white_check_mark: |
+| -- | [dev-guide.md](dev-guide.md) | Build commands, test commands, code style conventions | build, test, lint, format, style, imports, conventions, commands, go, playwright | :white_check_mark: |
 | 0 | [architecture.md](architecture.md) | System architecture: components, communication, deployment | architecture, system, docker, CLI, server, web, database, deployment, components, diagram | :white_check_mark: |
+| 0a | [deployment.md](deployment.md) | Production deployment: GHCR images, Caddy single origin, install/update/rollback | deployment, production, home lab, docker, compose, caddy, ghcr, registry, images, update, rollback, backup | :white_check_mark: |
 | 1 | [data-model.md](data-model.md) | Task, Recipe, and supporting entity data model | schema, database, entities, relations, postgresql, gorm, models, task, recipe | :white_check_mark: |
 | 2 | [auth-and-tenancy.md](auth-and-tenancy.md) | Multi-tenant spaces, user roles, authentication | auth, login, spaces, roles, permissions, tenancy, accounts, users | :white_check_mark: |
 | 3 | [stations.md](stations.md) | Configurable shop stations with WIP limits | stations, WIP, capacity, buffer, shop floor, layout, workstations | |
-| 4 | [recipes.md](recipes.md) | TOML recipe authoring, versioning, pouring, diff/promote | recipe, TOML, create, edit, steps, variables, gates, loops, versioning, pour, formula | |
-| 5 | [orders.md](orders.md) | Customer orders, line items, recipe pouring on confirm | orders, customers, quotes, due date, lead time, sales, pipeline, pour | |
-| 6 | [job-flow.md](job-flow.md) | Dependency-graph pull system, ready queue, station view | jobs, tasks, pull, drum, buffer, rope, TOC, flow, bottleneck, WIP, dependencies | |
+| 4 | [recipes/spec.md](recipes/spec.md) | Recipe system: authoring, rolling, versioning, cost tracking | recipe, roll, create, edit, steps, versioning, batch, cost, quoting, save-as-recipe | |
+| 4a | [recipes/architecture.md](recipes/architecture.md) | Recipe technical architecture: task-tree model, roll engine, cost pipeline | recipe, architecture, task-tree, roll, pour, batch, fan-in, fan-out, clone, cost, schema | |
+| 5 | [orders.md](orders.md) | Customer orders, line items, recipe rolling on confirm | orders, customers, quotes, due date, lead time, sales, pipeline, roll | |
+| 6 | [job-flow.md](job-flow.md) | Dependency-graph pull system, job lifecycle (backlog/open/in_progress/done), ready queue, station view | jobs, tasks, status, backlog, lifecycle, pull, drum, buffer, rope, TOC, flow, bottleneck, WIP, dependencies | |
 | 7 | [task-execution.md](task-execution.md) | Running live tasks, ready-work algorithm, gates, capture mode | execution, live, run, capture, deviations, notes, first-time, ready, claim, gates | |
-| 8 | [materials-and-bom.md](materials-and-bom.md) | Bill of materials, stock thresholds, pull signals | materials, BOM, inventory, lumber, hardware, replenish, stock | |
+| 8 | [inventory/spec.md](inventory/spec.md) | Materials, BOM, inventory tracking, cost computation (placeholder) | materials, BOM, inventory, lumber, hardware, replenish, stock, cost, finish, custom fields | |
 | 9 | [time-tracking.md](time-tracking.md) | Time event store, multiple input sources | time, clock, check-in, checkout, duration, events, sources, logging | |
 | 10 | [bottleneck-analytics.md](bottleneck-analytics.md) | Constraint identification, WIP reports, throughput | bottleneck, analytics, constraint, throughput, reports, TOC, metrics | |
-| 11 | [cli.md](cli.md) | The `nori` CLI, AI skill for external agents, `nori init` setup | CLI, terminal, commands, task, recipe, ready, pour, cobra, skill, init, agent | |
+| 11 | [cli.md](cli.md) | The `nori` CLI, AI skill for external agents, `nori init` setup | CLI, terminal, commands, task, recipe, product, variant, ready, roll, cobra, skill, init, agent | |
 | 12 | [mcp-server.md](mcp-server.md) | MCP protocol for embedded AI (chat, voice, photo) | MCP, LLM, AI, tools, resources, embedded, chat, voice, internal | |
 | 13 | [ai-features.md](ai-features.md) | Embedded AI: recipe suggestions, capture prompts, BYOK | AI, ollama, local, suggestions, prompts, summaries, inference, BYOK, openai, anthropic | |
 | 14 | [passive-observation.md](passive-observation.md) | Camera/sensor integration, presence detection | camera, sensors, passive, presence, frigate, vision, detection | |

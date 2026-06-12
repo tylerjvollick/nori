@@ -1,7 +1,6 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 import { authApi, type User, type LoginResponse } from '$lib/api/auth';
-import { setActiveSpaceID } from '$lib/api/client';
 
 interface AuthState {
   user: User | null;
@@ -38,11 +37,6 @@ function createAuthStore() {
       try {
         const user = await authApi.getCurrentUser();
 
-        // Persist the active space ID for the X-Space-ID header
-        if (user.activeSpaceId) {
-          setActiveSpaceID(user.activeSpaceId);
-        }
-
         set({
           user,
           isLoading: false,
@@ -52,7 +46,6 @@ function createAuthStore() {
       } catch {
         // Token/cookie is invalid or missing — user is not authenticated
         localStorage.removeItem('accessToken');
-        setActiveSpaceID(null);
         set({
           user: null,
           isLoading: false,
@@ -73,11 +66,6 @@ function createAuthStore() {
 
       // Store token in localStorage as fallback
       localStorage.setItem('accessToken', loginResponse.accessToken);
-
-      // Persist active space ID
-      if (loginResponse.activeSpaceId) {
-        setActiveSpaceID(loginResponse.activeSpaceId);
-      }
 
       if (loginResponse.mustChangePassword) {
         set({
@@ -131,7 +119,6 @@ function createAuthStore() {
       }
 
       localStorage.removeItem('accessToken');
-      setActiveSpaceID(null);
       set({
         user: null,
         isLoading: false,

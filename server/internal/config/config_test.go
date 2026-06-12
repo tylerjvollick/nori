@@ -114,26 +114,25 @@ func TestLoad_MissingAdminPassword(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingAccountName(t *testing.T) {
-	// Set all required vars except account name
+func TestLoad_MissingAccountName_DefaultsToMyShop(t *testing.T) {
 	os.Setenv("NORI_JWT_SECRET", "test-secret-key-at-least-32-chars")
 	os.Setenv("NORI_ADMIN_EMAIL", "admin@test.com")
 	os.Setenv("NORI_ADMIN_PASSWORD", "testpassword123")
+	os.Unsetenv("NORI_ACCOUNT_NAME")
 	defer func() {
 		os.Unsetenv("NORI_JWT_SECRET")
 		os.Unsetenv("NORI_ADMIN_EMAIL")
 		os.Unsetenv("NORI_ADMIN_PASSWORD")
 	}()
 
-	_, err := Load()
+	cfg, err := Load()
 
-	if err == nil {
-		t.Fatal("Expected error for missing NORI_ACCOUNT_NAME, got nil")
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	expectedMsg := "NORI_ACCOUNT_NAME is required"
-	if err.Error() != expectedMsg {
-		t.Errorf("Expected error message '%s', got: %s", expectedMsg, err.Error())
+	if cfg.AccountName != "My Shop" {
+		t.Errorf("Expected AccountName to default to 'My Shop', got: %s", cfg.AccountName)
 	}
 }
 
@@ -197,7 +196,8 @@ func TestValidate_EmptyAdminPassword(t *testing.T) {
 	}
 }
 
-func TestValidate_EmptyAccountName(t *testing.T) {
+func TestValidate_EmptyAccountName_Succeeds(t *testing.T) {
+	// AccountName is optional (defaults to "My Shop" in Load)
 	cfg := &Config{
 		JWTSecret:     "valid-secret-key",
 		AdminEmail:    "admin@test.com",
@@ -207,8 +207,56 @@ func TestValidate_EmptyAccountName(t *testing.T) {
 
 	err := cfg.Validate()
 
+	if err != nil {
+		t.Fatalf("Expected no error for empty AccountName, got: %v", err)
+	}
+}
+
+func TestValidate_E2EAccountEnabled_MissingEmail(t *testing.T) {
+	cfg := &Config{
+		JWTSecret:         "valid-secret-key",
+		AdminEmail:        "admin@test.com",
+		AdminPassword:     "password123",
+		AccountName:       "Test",
+		E2EAccountEnabled: true,
+		E2EAccountEmail:   "",
+	}
+
+	err := cfg.Validate()
 	if err == nil {
-		t.Fatal("Expected error for empty AccountName, got nil")
+		t.Fatal("Expected error for missing E2E email, got nil")
+	}
+}
+
+func TestValidate_E2EAccountEnabled_MissingPassword(t *testing.T) {
+	cfg := &Config{
+		JWTSecret:          "valid-secret-key",
+		AdminEmail:         "admin@test.com",
+		AdminPassword:      "password123",
+		AccountName:        "Test",
+		E2EAccountEnabled:  true,
+		E2EAccountEmail:    "e2e@test.com",
+		E2EAccountPassword: "",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Expected error for missing E2E password, got nil")
+	}
+}
+
+func TestValidate_E2EAccountDisabled_NoValidation(t *testing.T) {
+	cfg := &Config{
+		JWTSecret:         "valid-secret-key",
+		AdminEmail:        "admin@test.com",
+		AdminPassword:     "password123",
+		AccountName:       "Test",
+		E2EAccountEnabled: false,
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Expected no error when E2E disabled, got: %v", err)
 	}
 }
 

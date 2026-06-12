@@ -7,7 +7,7 @@ dev:
 
 dev-down:
 	$(DC_DEV) down --remove-orphans
-dev-fresh:
+dev-destroy:
 	$(DC_DEV) down -v --remove-orphans 
 	
 dev-update:
@@ -60,7 +60,8 @@ define LOAD_ENV
 	       DB_PASSWORD="$${POSTGRES_PASSWORD}" \
 	       DB_NAME="$${POSTGRES_DB:-nori}" \
 	       DB_PORT="$${DB_HOST_PORT:-5433}" \
-	       NORI_PORT="$${NORI_HOST_PORT:-8081}"
+	       NORI_PORT="$${NORI_HOST_PORT:-8081}" \
+	       NORI_ENV="$${NORI_ENV:-development}"
 endef
 
 # Run migrations natively (against local Postgres)
@@ -78,6 +79,12 @@ dev-local:
 	@until docker exec nori-db pg_isready -U postgres > /dev/null 2>&1; do sleep 1; done
 	$(MAKE) migrate-native
 	$(MAKE) serve
+
+build:
+	cd server && go build -o ../nori .
+
+init-dev:
+	$(LOAD_ENV) && cd server && go run . init-dev
 
 open-api:
 	cd ./open-api && bash ./bin/generate-open-api.sh

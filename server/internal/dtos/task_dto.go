@@ -15,16 +15,22 @@ type CreateTaskRequest struct {
 	ParentID    *string         `json:"parentId,omitempty"`
 	StationID   *uuid.UUID      `json:"stationId,omitempty"`
 	Priority    *int            `json:"priority,omitempty"`
+	// Status optionally sets the initial status. Only "open" (default) and
+	// "backlog" are valid at creation time.
+	Status *models.TaskStatus `json:"status,omitempty"`
 }
 
 // UpdateTaskRequest represents the request body for updating a task.
 type UpdateTaskRequest struct {
-	Title        *string            `json:"title,omitempty"`
-	Description  *string            `json:"description,omitempty"`
-	StationID    *uuid.UUID         `json:"stationId,omitempty"`
-	Priority     *int               `json:"priority,omitempty"`
-	Status       *models.TaskStatus `json:"status,omitempty"`
-	AssignedToID *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
+	Title                *string            `json:"title,omitempty"`
+	Description          *string            `json:"description,omitempty"`
+	StationID            *uuid.UUID         `json:"stationId,omitempty"`
+	Priority             *int               `json:"priority,omitempty"`
+	Status               *models.TaskStatus `json:"status,omitempty"`
+	AssignedToID         *string            `json:"assignedToId,omitempty"` // UUID string or empty string to unassign
+	EstimatedTimeFormula *string            `json:"estimatedTimeFormula,omitempty"`
+	BatchSize            *int               `json:"batchSize,omitempty"`     // explicit nil means "inherit"
+	ClearBatchSize       bool               `json:"clearBatchSize,omitempty"` // set true to reset to inherit (nil)
 }
 
 // AddChildTaskRequest represents the request body for adding a child task.
@@ -42,11 +48,24 @@ type CompleteTaskRequest struct {
 	ActualTimeSecs *int `json:"actualTimeSeconds,omitempty"` // Override the logged time (in seconds)
 }
 
+// UnresolvedBlockerResponse describes a blocker that was not yet resolved at completion time.
+type UnresolvedBlockerResponse struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
 // CompleteTaskResponse extends the standard task response with navigation hints.
 type CompleteTaskResponse struct {
 	TaskResponse
-	NextTaskId    *string `json:"nextTaskId,omitempty"`    // First downstream task unblocked by this completion
-	NextTaskTitle *string `json:"nextTaskTitle,omitempty"` // Title of the next task for display
+	NextTaskId         *string                     `json:"nextTaskId,omitempty"`         // First downstream task unblocked by this completion
+	NextTaskTitle      *string                     `json:"nextTaskTitle,omitempty"`      // Title of the next task for display
+	UnresolvedBlockers []UnresolvedBlockerResponse `json:"unresolvedBlockers,omitempty"` // Blockers that were not resolved
+}
+
+// SetStatusRequest is the request body for PUT /tasks/:id/status.
+type SetStatusRequest struct {
+	Status string `json:"status"`
 }
 
 // AddNoteRequest represents the request body for adding a deviation note.
@@ -74,10 +93,13 @@ type TaskResponse struct {
 	DisplayOrder    int               `json:"displayOrder"`
 	DueDate         *time.Time        `json:"dueDate,omitempty"`
 	StartedAt       *time.Time        `json:"startedAt,omitempty"`
-	PausedAt        *time.Time        `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time        `json:"completedAt,omitempty"`
-	ActualTimeSecs  int               `json:"actualTimeSeconds"`
-	DeviationNotes  *string           `json:"deviationNotes,omitempty"`
+	ActualTimeSecs              int     `json:"actualTimeSeconds"`
+	EstimatedTimeSecs           *int    `json:"estimatedTimeSeconds,omitempty"`
+	EstimatedTimeFormula        *string `json:"estimatedTimeFormula,omitempty"`
+	EstimatedTimeFromRecipeSecs *int    `json:"estimatedTimeFromRecipeSeconds,omitempty"`
+	BatchSize                   *int    `json:"batchSize,omitempty"`
+	DeviationNotes              *string `json:"deviationNotes,omitempty"`
 	Metadata        models.JSONB      `json:"metadata,omitempty"`
 	CreatedAt       string            `json:"createdAt"`
 	UpdatedAt       string            `json:"updatedAt"`
@@ -152,10 +174,13 @@ func TaskResponseFromModel(t *models.Task) TaskResponse {
 		DisplayOrder:    t.DisplayOrder,
 		DueDate:         t.DueDate,
 		StartedAt:       t.StartedAt,
-		PausedAt:        t.PausedAt,
 		CompletedAt:     t.CompletedAt,
-		ActualTimeSecs:  t.ActualTimeSecs,
-		DeviationNotes:  t.DeviationNotes,
+		ActualTimeSecs:              t.ActualTimeSecs,
+		EstimatedTimeSecs:           t.EstimatedTimeSecs,
+		EstimatedTimeFormula:        t.EstimatedTimeFormula,
+		EstimatedTimeFromRecipeSecs: t.EstimatedTimeFromRecipeSecs,
+		BatchSize:                   t.BatchSize,
+		DeviationNotes:              t.DeviationNotes,
 		Metadata:        t.Metadata,
 		CreatedAt:       t.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt:       t.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),

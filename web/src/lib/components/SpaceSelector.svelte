@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { setActiveSpaceID } from '$lib/api/client';
 	import { spaceApi, type Space } from '$lib/api/space';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Sidebar from '$lib/components/ui/sidebar';
@@ -18,9 +17,6 @@
 
 	async function selectSpace(space: Space) {
 		if (space.id === user.activeSpaceId) return;
-
-		// Update active space ID in localStorage (sent as X-Space-ID header on all requests)
-		setActiveSpaceID(space.id);
 
 		// Record visit to update recent spaces
 		try {

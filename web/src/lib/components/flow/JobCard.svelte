@@ -7,7 +7,7 @@
 
 	/** A job with aggregate status/time computed from its children. */
 	interface JobWithAggregate extends TaskResponse {
-		aggregateStatus: 'done' | 'active' | 'open';
+		aggregateStatus: 'done' | 'in_progress' | 'open' | 'backlog';
 		totalTimeSeconds: number;
 		childCount: number;
 		doneChildCount: number;
@@ -48,14 +48,16 @@
 		return stationMap.get(stationId) ?? stationId.slice(0, 8);
 	}
 
-	function aggregateStatusLabel(status: 'done' | 'active' | 'open'): { label: string; class: string } {
+	function aggregateStatusLabel(status: 'done' | 'in_progress' | 'open' | 'backlog'): { label: string; class: string } {
 		switch (status) {
 			case 'done':
 				return { label: 'Done', class: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' };
-			case 'active':
+			case 'in_progress':
 				return { label: 'In Progress', class: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' };
 			case 'open':
 				return { label: 'Ready', class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
+			case 'backlog':
+				return { label: 'Backlog', class: 'bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300' };
 		}
 	}
 
@@ -91,7 +93,10 @@
 		</Badge>
 
 		<!-- Aggregate status -->
-		<span class="inline-flex items-center rounded-full px-1.5 py-0 h-5 text-[10px] font-medium {statusInfo.class}">
+		<span
+			data-testid="job-status-badge"
+			class="inline-flex items-center rounded-full px-1.5 py-0 h-5 text-[10px] font-medium {statusInfo.class}"
+		>
 			{statusInfo.label}
 		</span>
 

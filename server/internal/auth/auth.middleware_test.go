@@ -310,7 +310,10 @@ func TestAuthMiddleware_APIKey(t *testing.T) {
 	mockSpaceMemberRepo.AssertExpectations(t)
 }
 
-func TestAuthMiddleware_SpaceIDFromHeader(t *testing.T) {
+func TestAuthMiddleware_SpaceIDHeaderIgnored(t *testing.T) {
+	// X-Space-ID header is no longer processed by the auth middleware.
+	// Space context is now resolved from the URL path by RequireSpace middleware.
+	// Verify that sending the header has no effect on authDTO.ActiveSpaceID.
 	app := fiber.New()
 	userID := uuid.New()
 	accountID := uuid.New()
@@ -321,7 +324,6 @@ func TestAuthMiddleware_SpaceIDFromHeader(t *testing.T) {
 	mockAPIKeyRepo := new(MockAPIKeyRepository)
 	mockSpaceMemberRepo := new(MockSpaceMemberRepository)
 
-	// Setup user mock
 	firstName := "Test"
 	lastName := "User"
 	role := models.RoleUser
@@ -337,19 +339,16 @@ func TestAuthMiddleware_SpaceIDFromHeader(t *testing.T) {
 	}
 	mockUserRepo.On("GetUserByID", userID).Return(user, nil)
 
-	// Generate test JWT without space
 	token := generateTestJWT(userID, nil, jwtSecret)
 
-	// Setup route
 	app.Use(NewAuthMiddleware(mockUserRepo, mockAPIKeyRepo, mockSpaceMemberRepo, jwtSecret))
 	app.Get("/test", func(c *fiber.Ctx) error {
 		authDTO := c.Locals("authDTO").(*dtos.AuthDTO)
-		assert.NotNil(t, authDTO.ActiveSpaceID)
-		assert.Equal(t, spaceID, *authDTO.ActiveSpaceID)
+		// Header must NOT set ActiveSpaceID anymore.
+		assert.Nil(t, authDTO.ActiveSpaceID)
 		return c.SendStatus(fiber.StatusOK)
 	})
 
-	// Make request with X-Space-ID header
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Space-ID", spaceID.String())

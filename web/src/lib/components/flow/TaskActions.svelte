@@ -1,21 +1,22 @@
 <script lang="ts">
 	import type { TaskResponse, TaskStatus, CompleteTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { timeEntryApi } from '$lib/api/timeEntry';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		CircleCheck,
-		Pause,
 		Play,
 		SkipForward,
 		Loader2,
 	} from '@lucide/svelte';
 	import CompletionModal from './CompletionModal.svelte';
 
-	type ActionType = 'start' | 'complete' | 'pause' | 'resume' | 'skip';
+	type ActionType = 'start' | 'complete' | 'skip';
 
 	interface Props {
 		task: TaskResponse;
+		spaceId: string;
 		/** Layout: 'bar' for full button bar, 'compact' for small icon buttons */
 		layout?: 'bar' | 'compact';
 		/** Called after a successful action with the updated task */
@@ -24,30 +25,26 @@
 		oncomplete?: (response: CompleteTaskResponse) => void;
 	}
 
-	let { task, layout = 'bar', onaction, oncomplete }: Props = $props();
+	let { task, spaceId, layout = 'bar', onaction, oncomplete }: Props = $props();
 
 	let loadingAction = $state<ActionType | null>(null);
 	let showSkipDialog = $state(false);
 	let showCompletionModal = $state(false);
 
-	/** Determine available actions for the current task status.
-	 *  Always shown regardless of assignment. Anyone can perform any action. */
+	/** Determine available actions for the current task status. */
 	function getActions(status: TaskStatus): ActionType[] {
 		switch (status) {
 			case 'open':
 				return ['start', 'skip'];
-			case 'active':
-				return ['pause', 'complete', 'skip'];
-			case 'paused':
-				return ['resume', 'complete', 'skip'];
+			case 'in_progress':
+				return ['complete', 'skip'];
 			default:
 				return [];
 		}
 	}
 
-	/** Actions excluded from compact layout (board cards) to prevent accidental taps.
-	 *  Users should open the task detail to start/resume/skip. */
-	const compactExcluded: ActionType[] = ['start', 'resume', 'skip'];
+	/** Actions excluded from compact layout (board cards) to prevent accidental taps. */
+	const compactExcluded: ActionType[] = ['start', 'skip'];
 
 	let actions = $derived(
 		layout === 'compact'
@@ -62,8 +59,6 @@
 	}> = {
 		start: { label: 'Start', variant: 'default' },
 		complete: { label: 'Complete', variant: 'default', class: 'bg-green-600 hover:bg-green-700 text-white' },
-		pause: { label: 'Pause', variant: 'secondary' },
-		resume: { label: 'Resume', variant: 'default' },
 		skip: { label: 'Skip', variant: 'outline' },
 	};
 
@@ -104,16 +99,13 @@
 			let updated: TaskResponse;
 			switch (action) {
 				case 'start':
-					updated = await taskApi.startTask(task.id);
-					break;
-				case 'pause':
-					updated = await taskApi.pauseTask(task.id);
-					break;
-				case 'resume':
-					updated = await taskApi.resumeTask(task.id);
+					updated = await taskApi.startTask(spaceId, task.id);
+					// Also start a timer for tracking.
+					await timeEntryApi.start(spaceId, task.id).catch((e) =>
+						console.warn('Time entry start failed (non-blocking):', e));
 					break;
 				case 'skip':
-					updated = await taskApi.skipTask(task.id);
+					updated = await taskApi.skipTask(spaceId, task.id);
 					break;
 				default:
 					return; // 'complete' handled by modal
@@ -147,10 +139,6 @@
 						<Play class="size-4" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-4" />
-					{:else if action === 'pause'}
-						<Pause class="size-4" />
-					{:else if action === 'resume'}
-						<Play class="size-4" />
 					{:else if action === 'skip'}
 						<SkipForward class="size-4" />
 					{/if}
@@ -177,10 +165,6 @@
 						<Play class="size-3.5" />
 					{:else if action === 'complete'}
 						<CircleCheck class="size-3.5" />
-					{:else if action === 'pause'}
-						<Pause class="size-3.5" />
-					{:else if action === 'resume'}
-						<Play class="size-3.5" />
 					{:else if action === 'skip'}
 						<SkipForward class="size-3.5" />
 					{/if}
@@ -220,6 +204,7 @@
 <!-- Completion flow modal (time confirmation + next task navigation) -->
 <CompletionModal
 	{task}
+	{spaceId}
 	bind:open={showCompletionModal}
 	oncomplete={handleCompletionDone}
 />

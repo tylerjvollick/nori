@@ -10,14 +10,17 @@ import (
 
 // TaskFilter defines the optional filters for listing tasks.
 type TaskFilter struct {
-	SpaceID    *uuid.UUID
-	Status     *models.TaskStatus
-	Type       *models.TaskType
-	StationID  *uuid.UUID
-	AssigneeID *uuid.UUID
-	ParentID   *string // use pointer to distinguish "no filter" from "filter for root tasks (nil parent)"
-	Offset     int
-	Limit      int
+	SpaceID                  *uuid.UUID
+	Status                   *models.TaskStatus
+	Type                     *models.TaskType
+	ExcludeTypes             []models.TaskType // exclude tasks matching any of these types
+	ExcludeDescendantsOfTypes []models.TaskType // also exclude descendants of tasks with these types
+	RootOnly                 bool              // when true, only return tasks with no parent
+	StationID                *uuid.UUID
+	AssigneeID               *uuid.UUID
+	ParentID                 *string // use pointer to distinguish "no filter" from "filter for root tasks (nil parent)"
+	Offset                   int
+	Limit                    int
 }
 
 type TaskRepository struct {
@@ -68,6 +71,21 @@ func (r *TaskRepository) List(filter TaskFilter) ([]models.Task, int64, error) {
 	}
 	if filter.AssigneeID != nil {
 		query = query.Where("assigned_to_id = ?", *filter.AssigneeID)
+	}
+	if len(filter.ExcludeTypes) > 0 {
+		query = query.Where("type NOT IN ?", filter.ExcludeTypes)
+	}
+	if len(filter.ExcludeDescendantsOfTypes) > 0 {
+		// Exclude tasks that are descendants of tasks with the given types.
+		// Uses the hierarchical ID scheme: a descendant's ID starts with
+		// the ancestor's ID followed by a dot (e.g., "root-id.1.2").
+		query = query.Where(
+			"NOT EXISTS (SELECT 1 FROM task AS ancestor WHERE ancestor.type IN ? AND task.id LIKE ancestor.id || '.%')",
+			filter.ExcludeDescendantsOfTypes,
+		)
+	}
+	if filter.RootOnly {
+		query = query.Where("parent_id IS NULL")
 	}
 	if filter.ParentID != nil {
 		query = query.Where("parent_id = ?", *filter.ParentID)

@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
-	import type { Node, Edge, NodeTypes } from '@xyflow/svelte';
+	import type { Node, Edge, NodeTypes, Connection } from '@xyflow/svelte';
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
@@ -11,23 +11,43 @@
 	import type { TaskDepsResponse } from '$lib/api/task';
 	import type { StationResponse } from '$lib/types/station';
 	import { Button } from '$lib/components/ui/button';
-	import { RefreshCw, CircleAlert, Maximize2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { RefreshCw, CircleAlert, Maximize2, Minimize2, Plus, Trash2, LayoutDashboard, GitBranch, List, LayoutGrid } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
-	import { graphDirection, type GraphDirection } from '$lib/stores/graph';
+	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
+	import FlowActions from './FlowActions.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
 
 	/** Optional pre-loaded tasks and deps. When provided, the graph uses these instead of fetching. */
 	interface Props {
+		spaceId: string;
 		tasks?: TaskResponse[];
 		deps?: Map<string, TaskDepsResponse>;
 		stationMap?: Map<string, string>;
 		/** When set, this task gets a highlighted ring in the graph (used for neighborhood view). */
 		focusTaskId?: string;
+		/** Called when a node is single-clicked. Receives the task ID. */
+		onselect?: (taskId: string) => void;
+		/**
+		 * 'recipe': disables double-click navigation; new tasks are created as children of rootTaskId.
+		 * 'task' (default): standard behavior.
+		 */
+		mode?: 'task' | 'recipe';
+		/** When set, new nodes are created as children of this task ID via addChildTask. */
+		rootTaskId?: string;
+		/** Called after a graph mutation (node/edge add/delete) so the parent can re-fetch data. */
+		onmutate?: () => Promise<void> | void;
+		/** Called when the fullscreen toggle is clicked. */
+		onfullscreentoggle?: () => void;
+		/** Whether the graph is currently in fullscreen mode. */
+		isFullscreen?: boolean;
+		/** Optional view toggle config — renders [Graph|List|Board] toggle in the toolbar. */
+		viewToggle?: { current: string; onchange: (mode: string) => void };
 	}
 
-	let { tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId }: Props = $props();
+	let { spaceId, tasks: externalTasks, deps: externalDeps, stationMap: externalStationMap, focusTaskId, onselect, mode = 'task', rootTaskId, onmutate, onfullscreentoggle, isFullscreen = false, viewToggle }: Props = $props();
 
 	/** Whether we're in scoped mode (tasks provided externally). */
 	let isScoped = $derived(!!externalTasks);
@@ -36,7 +56,13 @@
 	const POLL_INTERVAL_MS = 30_000;
 	const TASK_LIMIT = 500;
 	const NODE_WIDTH = 180;
-	const NODE_HEIGHT = 56;
+	const NODE_HEIGHT = 72;
+
+	const VIEW_TOGGLE_MODES = [
+		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'list', label: 'List', icon: List },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
+	] as const;
 
 	// ---- Custom node types ----
 	const nodeTypes: NodeTypes = {
@@ -50,6 +76,15 @@
 	let error = $state<string | null>(null);
 	let isRefreshing = $state(false);
 	let lastRefreshed = $state<Date | null>(null);
+	let isConnecting = $state(false);
+	let connectionError = $state<string | null>(null);
+	let editingNodeId = $state<string | null>(null);
+	let deleteConfirmState = $state<{
+		nodeId: string;
+		nodeTitle: string;
+		hasConnections: boolean;
+		resolve: (ok: boolean) => void;
+	} | null>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let _internalStationMap = $state<Map<string, string>>(new Map());
 	let stationMap = $derived(externalStationMap ?? _internalStationMap);
@@ -68,9 +103,9 @@
 
 	// ---- Status → edge color (matches TaskNode) ----
 	const STATUS_EDGE_COLORS: Record<TaskStatus, string> = {
+		backlog: '#94a3b8', // slate-400
 		open: '#9ca3af', // gray-400
-		active: '#3b82f6', // blue-500
-		paused: '#eab308', // yellow-500
+		in_progress: '#3b82f6', // blue-500
 		done: '#22c55e', // green-500
 		skipped: '#9ca3af', // gray-400
 		cancelled: '#ef4444', // red-500
@@ -78,23 +113,7 @@
 
 	// ---- Dagre layout ----
 
-	// Direction label for the toggle button tooltip
-	const DIRECTION_LABELS: Record<GraphDirection, string> = {
-		LR: 'Left → Right',
-		RL: 'Right → Left',
-		TB: 'Top → Bottom',
-		BT: 'Bottom → Top',
-	};
-
-	const DIRECTION_ICONS: Record<GraphDirection, typeof ArrowRight> = {
-		LR: ArrowRight,
-		RL: ArrowLeft,
-		TB: ArrowDown,
-		BT: ArrowUp,
-	};
-
-	let currentDirection = $state<GraphDirection>('LR');
-	const unsubDirection = graphDirection.subscribe((d) => (currentDirection = d));
+	const currentDirection: GraphDirection = 'LR';
 
 	function getLayoutedElements(
 		inputNodes: Node[],
@@ -103,12 +122,11 @@
 	): { nodes: Node[]; edges: Edge[] } {
 		const g = new dagre.graphlib.Graph();
 		g.setDefaultEdgeLabel(() => ({}));
-		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80, marginx: 20, marginy: 20 });
+		g.setGraph({ rankdir: direction, nodesep: 40, ranksep: 50, marginx: 20, marginy: 20, align: undefined });
 
 		for (const node of inputNodes) {
-			const isJob = (node.data as { type?: string }).type === 'job';
 			g.setNode(node.id, {
-				width: isJob ? NODE_WIDTH + 20 : NODE_WIDTH,
+				width: NODE_WIDTH,
 				height: NODE_HEIGHT,
 			});
 		}
@@ -142,7 +160,7 @@
 
 	async function fetchStations(): Promise<void> {
 		try {
-			const stations: StationResponse[] = await stationApi.listStations();
+			const stations: StationResponse[] = await stationApi.listStations(spaceId);
 			const map = new Map<string, string>();
 			for (const s of stations) {
 				map.set(s.id, s.name);
@@ -167,7 +185,7 @@
 			if (statusFilter) params.status = statusFilter;
 
 			// Fetch all tasks
-			const result = await taskApi.listTasks(params as Parameters<typeof taskApi.listTasks>[0]);
+			const result = await taskApi.listTasks(spaceId, params as Parameters<typeof taskApi.listTasks>[1]);
 			let tasks = result.items;
 
 			// Apply priority filter client-side
@@ -200,7 +218,7 @@
 				const batchResults = await Promise.all(
 					batch.map(async (t) => {
 						try {
-							const deps = await taskApi.getTaskDeps(t.id);
+							const deps = await taskApi.getTaskDeps(spaceId, t.id);
 							return { taskId: t.id, deps };
 						} catch {
 							return { taskId: t.id, deps: { blockers: [], dependents: [] } };
@@ -238,6 +256,10 @@
 				stationName: task.stationId ? stationMap.get(task.stationId) : undefined,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				mode,
+				estimatedTimeSeconds: task.estimatedTimeSeconds,
+				onAddSerial: () => handleAddSerial(task.id),
+				onTabCommit: (title: string) => handleTabCommit(task.id, title),
 			},
 		}));
 
@@ -273,6 +295,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 
@@ -300,6 +323,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 			}
@@ -345,8 +369,10 @@
 
 		// Double-click detection (within 400ms on the same node)
 		if (lastClickedNodeId === nodeId && now - lastClickTime < 400) {
-			// Navigate to task detail
-			goto(`/spaces/${slug}/${nodeId}`);
+			if (mode !== 'recipe') {
+				// Navigate to task detail (task mode only)
+				goto(`/spaces/${slug}/${nodeId}`);
+			}
 			lastClickTime = 0;
 			lastClickedNodeId = '';
 			return;
@@ -354,6 +380,8 @@
 
 		lastClickTime = now;
 		lastClickedNodeId = nodeId;
+		// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
+		selectNode(nodeId);
 	}
 
 	// ---- Re-fetch when filters change ----
@@ -442,6 +470,10 @@
 				isFocus: focusTaskId === task.id,
 				isBlocked: blockedTaskIds.has(task.id),
 				direction: currentDirection,
+				mode,
+				estimatedTimeSeconds: task.estimatedTimeSeconds,
+				onAddSerial: () => handleAddSerial(task.id),
+				onTabCommit: (title: string) => handleTabCommit(task.id, title),
 			},
 		}));
 
@@ -475,6 +507,7 @@
 							type: 'arrowclosed' as unknown as import('@xyflow/system').MarkerType,
 							color: STATUS_EDGE_COLORS[blockerStatus],
 						},
+						data: { depId: dep.id },
 					});
 				}
 			}
@@ -498,6 +531,19 @@
 		const deps = externalDeps;
 		if (tasks) {
 			buildFromExternalData(tasks, deps);
+		}
+	});
+
+	// When editingNodeId is set and the target node exists, activate inline editing.
+	// This handles the case where the node is created via API, then the graph rebuilds
+	// reactively — the editing state must be applied after the rebuild completes.
+	$effect(() => {
+		const eid = editingNodeId;
+		if (eid && nodes.some(n => n.id === eid)) {
+			const node = nodes.find(n => n.id === eid);
+			if (node && !(node.data as any).editing) {
+				untrack(() => activateNodeEditing(eid, true));
+			}
 		}
 	});
 
@@ -525,6 +571,10 @@
 		edges = layouted.edges;
 	}
 
+	function handleRelayout(): void {
+		relayoutForDirection(currentDirection);
+	}
+
 	onMount(async () => {
 		if (isScoped) {
 			// In scoped mode, tasks are provided externally. No fetching needed.
@@ -536,12 +586,305 @@
 
 	onDestroy(() => {
 		stopPolling();
-		unsubDirection();
 	});
 
 	function formatLastRefreshed(date: Date | null): string {
 		if (!date) return '';
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	// ---- Cycle detection ----
+
+	function hasCycle(sourceId: string, targetId: string): boolean {
+		// Check if adding source → target would create a cycle.
+		// A cycle exists iff there is already a path from targetId to sourceId.
+		const visited = new Set<string>();
+		const queue: string[] = [targetId];
+		while (queue.length > 0) {
+			const current = queue.shift()!;
+			if (current === sourceId) return true;
+			if (visited.has(current)) continue;
+			visited.add(current);
+			for (const edge of edges) {
+				if (edge.source === current) {
+					queue.push(edge.target);
+				}
+			}
+		}
+		return false;
+	}
+
+	// ---- Edge creation/deletion ----
+
+	async function handleConnect(connection: Connection): Promise<void> {
+		const source = connection.source;
+		const target = connection.target;
+		if (!source || !target || source === target) return;
+
+		// Duplicate check
+		if (edges.some((e) => e.source === source && e.target === target)) return;
+
+		// Cycle guard
+		if (hasCycle(source, target)) {
+			connectionError = 'Cannot create dependency: this would create a cycle';
+			setTimeout(() => { connectionError = null; }, 4000);
+			return;
+		}
+
+		isConnecting = true;
+		connectionError = null;
+		try {
+			await taskApi.addDep(spaceId, source, target, 'blocks');
+			if (isScoped && externalTasks) {
+				buildFromExternalData(externalTasks, externalDeps);
+			} else {
+				await fetchGraph({ silent: true });
+			}
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create dependency';
+			setTimeout(() => { connectionError = null; }, 4000);
+		} finally {
+			isConnecting = false;
+		}
+	}
+
+	async function handleBeforeDelete({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
+		// Handle node deletion
+		if (deletedNodes.length > 0) {
+			for (const node of deletedNodes) {
+				const upstreamEdges = edges.filter((e) => e.target === node.id);
+				const downstreamEdges = edges.filter((e) => e.source === node.id);
+				const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
+				const nodeTitle = (node.data as { title?: string }).title ?? node.id;
+
+				const confirmed = await new Promise<boolean>((resolve) => {
+					deleteConfirmState = { nodeId: node.id, nodeTitle, hasConnections, resolve };
+				});
+
+				if (!confirmed) return false;
+
+				// Reconnect: add a dep from each upstream to each downstream
+				for (const upEdge of upstreamEdges) {
+					for (const downEdge of downstreamEdges) {
+						try {
+							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
+						} catch {
+							// Ignore duplicate dep errors
+						}
+					}
+				}
+
+				// Delete the task
+				try {
+					await taskApi.deleteTask(spaceId, node.id);
+				} catch (e) {
+					connectionError = e instanceof Error ? e.message : 'Failed to delete task';
+					setTimeout(() => { connectionError = null; }, 4000);
+					return false;
+				}
+			}
+
+			// Refresh graph after node deletion
+			if (isScoped && externalTasks) {
+				buildFromExternalData(externalTasks, externalDeps);
+			} else {
+				await fetchGraph({ silent: true });
+			}
+			return false; // We've already updated state via fetch
+		}
+
+		// Handle edge deletion
+		if (deletedEdges.length === 0) return true;
+
+		const failures: string[] = [];
+		await Promise.all(
+			deletedEdges.map(async (edge) => {
+				const depId = (edge.data as { depId?: string } | undefined)?.depId;
+				if (!depId) return;
+				try {
+					await taskApi.removeDep(spaceId, edge.source, depId);
+				} catch (e) {
+					failures.push(e instanceof Error ? e.message : 'Failed to remove dependency');
+				}
+			}),
+		);
+
+		if (failures.length > 0) {
+			connectionError = failures[0];
+			setTimeout(() => { connectionError = null; }, 4000);
+			return false; // Cancel xyflow deletion so edges stay visible
+		}
+
+		// Update our controlled edges state to match xyflow's pending deletion
+		const deletedIds = new Set(deletedEdges.map((e) => e.id));
+		edges = edges.filter((e) => !deletedIds.has(e.id));
+		return true;
+	}
+
+	// ---- Node creation ----
+
+	/** After graph refresh, patch a specific node to show inline title editing. */
+	function activateNodeEditing(taskId: string, refocus = false): void {
+		editingNodeId = taskId;
+		// Select + center on the new/edited node
+		selectNode(taskId);
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? {
+						...n,
+						data: {
+							...n.data,
+							editing: true,
+							onTitleCommit: (title: string) => handleTitleCommit(taskId, title),
+						},
+					}
+				: n,
+		);
+		// For newly created nodes, xyflow steals focus during init.
+		// Re-grab focus after xyflow settles.
+		if (refocus) {
+			setTimeout(() => {
+				const input = flowContainer?.querySelector<HTMLInputElement>(
+					`.svelte-flow__node[data-id="${taskId}"] input`,
+				);
+				input?.focus();
+				input?.select();
+			}, 60);
+		}
+	}
+
+	async function refreshGraph(): Promise<void> {
+		if (isScoped && onmutate) {
+			await onmutate();
+		} else if (isScoped && externalTasks) {
+			buildFromExternalData(externalTasks, externalDeps);
+		} else {
+			await fetchGraph({ silent: true });
+		}
+	}
+
+	async function handleAddUnconnected(): Promise<void> {
+		if (!spaceId) return;
+		try {
+			const newTask = rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
+			await refreshGraph();
+			editingNodeId = newTask.id;
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleAddSerial(sourceNodeId: string): Promise<void> {
+		if (!spaceId) return;
+		// Capture downstream edges before we modify state
+		const downstreamEdges = edges.filter((e) => e.source === sourceNodeId);
+		try {
+			const newTask = rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
+
+			// sourceNode → newTask
+			await taskApi.addDep(spaceId, sourceNodeId, newTask.id, 'blocks');
+
+			// Reconnect downstream: replace sourceNode → X with newTask → X
+			for (const downEdge of downstreamEdges) {
+				const depId = (downEdge.data as { depId?: string })?.depId;
+				if (depId) {
+					try {
+						await taskApi.removeDep(spaceId, sourceNodeId, depId);
+					} catch { /* ignore */ }
+					await taskApi.addDep(spaceId, newTask.id, downEdge.target, 'blocks');
+				}
+			}
+
+			await refreshGraph();
+			editingNodeId = newTask.id;
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create serial task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleAddParallel(sourceNodeId: string): Promise<void> {
+		if (!spaceId || !sourceNodeId) return;
+		// Find upstream blockers of source node (edges where sourceNode is target)
+		const upstreamEdges = edges.filter((e) => e.target === sourceNodeId);
+		try {
+			const newTask = rootTaskId
+				? await taskApi.addChildTask(spaceId, rootTaskId, { title: 'New Task' })
+				: await taskApi.createTask(spaceId, {
+					title: 'New Task',
+					type: 'task',
+					priority: 2,
+				});
+
+			// Give newTask the same upstream deps as sourceNode
+			for (const upEdge of upstreamEdges) {
+				await taskApi.addDep(spaceId, upEdge.source, newTask.id, 'blocks');
+			}
+
+			await refreshGraph();
+			editingNodeId = newTask.id;
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to create parallel task';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleTitleCommit(taskId: string, title: string): Promise<void> {
+		editingNodeId = null;
+		// Clear editing state on the node immediately
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? { ...n, data: { ...n.data, editing: false, onTitleCommit: undefined } }
+				: n,
+		);
+		if (!title || title === 'New Task') return;
+		try {
+			await taskApi.updateTask(spaceId, taskId, { title });
+			// Update the node title locally
+			nodes = nodes.map((n) =>
+				n.id === taskId ? { ...n, data: { ...n.data, title } } : n,
+			);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to update task title';
+			setTimeout(() => { connectionError = null; }, 4000);
+		}
+	}
+
+	async function handleTabCommit(taskId: string, title: string): Promise<void> {
+		// Commit the title first (same as Enter)
+		editingNodeId = null;
+		nodes = nodes.map((n) =>
+			n.id === taskId
+				? { ...n, data: { ...n.data, editing: false, onTitleCommit: undefined } }
+				: n,
+		);
+		if (title && title !== 'New Task') {
+			try {
+				await taskApi.updateTask(spaceId, taskId, { title });
+				nodes = nodes.map((n) =>
+					n.id === taskId ? { ...n, data: { ...n.data, title } } : n,
+				);
+			} catch (e) {
+				connectionError = e instanceof Error ? e.message : 'Failed to update task title';
+				setTimeout(() => { connectionError = null; }, 4000);
+				return;
+			}
+		}
+		// Then create a serial downstream node with editing active
+		await handleAddSerial(taskId);
 	}
 
 	// ---- Keyboard navigation ----
@@ -555,15 +898,208 @@
 		return sel?.id ?? null;
 	});
 
+	// Reference to the flow container div, used to restore focus on Escape.
+	let flowContainer: HTMLDivElement | undefined = $state(undefined);
+
+	// Flow actions handle — populated by FlowActions child inside <SvelteFlow>
+	let flowHandle: {
+		setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void;
+		fitView: (opts?: { padding?: number; duration?: number }) => void;
+		zoomIn: (opts?: { duration?: number }) => void;
+		zoomOut: (opts?: { duration?: number }) => void;
+	} | undefined = $state(undefined);
+
+	// When fullscreen changes, wait for the container to resize then fit the graph
+	$effect(() => {
+		// Track isFullscreen to trigger on change
+		const _fs = isFullscreen;
+		if (flowHandle) {
+			// Wait for DOM to settle with new container dimensions
+			setTimeout(() => {
+				window.dispatchEvent(new Event('resize'));
+				setTimeout(() => {
+					flowHandle?.fitView({ padding: 0.1, duration: 200 });
+				}, 100);
+			}, 50);
+		}
+	});
+
+	/** Programmatically select a node, notify the detail panel, and pan to center it. */
+	function selectNode(nodeId: string): void {
+		nodes = nodes.map((n) => ({ ...n, selected: n.id === nodeId }));
+		onselect?.(nodeId);
+
+		// Smoothly pan so the selected node is centered in the viewport
+		const node = nodes.find((n) => n.id === nodeId);
+		if (node && flowHandle) {
+			const centerX = node.position.x + NODE_WIDTH / 2;
+			const centerY = node.position.y + NODE_HEIGHT / 2;
+			flowHandle.setCenter(centerX, centerY, { zoom: 1.15, duration: 200 });
+		}
+	}
+
+	/**
+	 * Vim-style graph navigation.
+	 * - upstream / downstream: walk along dependency edges (k=upstream, j=downstream).
+	 * - prev-sibling / next-sibling: move among nodes that share the same upstream
+	 *   parent (h=prev, l=next), sorted by visual position.
+	 */
+	function navigateVim(dir: 'upstream' | 'downstream' | 'prev-sibling' | 'next-sibling'): void {
+		if (nodes.length === 0) return;
+
+		// No selection → select the first node based on layout direction.
+		// LR: leftmost (X first); TB: topmost (Y first).
+		if (!selectedNodeId) {
+			const sorted =
+				currentDirection === 'LR' || currentDirection === 'RL'
+					? [...nodes].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y)
+					: [...nodes].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+			selectNode(sorted[0].id);
+			return;
+		}
+
+		// Helper: sort sibling/fork candidates by visual position.
+		// LR/RL: siblings stacked vertically → sort by Y. TB/BT: horizontal → sort by X.
+		function sortByPosition(ns: Node[]): Node[] {
+			return currentDirection === 'LR' || currentDirection === 'RL'
+				? [...ns].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+				: [...ns].sort((a, b) => a.position.x - b.position.x || a.position.y - b.position.y);
+		}
+
+		switch (dir) {
+			case 'upstream': {
+				// k — go to upstream node (edge where selected is target)
+				const upEdges = edges.filter((e) => e.target === selectedNodeId);
+				if (upEdges.length === 0) return; // at root, do nothing
+				const candidates = upEdges
+					.map((e) => nodes.find((n) => n.id === e.source))
+					.filter(Boolean) as Node[];
+				if (candidates.length === 0) return;
+				const sorted = sortByPosition(candidates);
+				selectNode(sorted[0].id);
+				break;
+			}
+			case 'downstream': {
+				// j — go to downstream node (edge where selected is source), prefer left branch
+				const downEdges = edges.filter((e) => e.source === selectedNodeId);
+				if (downEdges.length === 0) return; // at leaf, do nothing
+				const candidates = downEdges
+					.map((e) => nodes.find((n) => n.id === e.target))
+					.filter(Boolean) as Node[];
+				if (candidates.length === 0) return;
+				// Prefer first branch at forks: LR → topmost (Y), TB → leftmost (X)
+				const sorted = sortByPosition(candidates);
+				selectNode(sorted[0].id);
+				break;
+			}
+			case 'prev-sibling':
+			case 'next-sibling': {
+				// h/l — move among nodes that share the same upstream parent
+				const upEdges = edges.filter((e) => e.target === selectedNodeId);
+				let siblings: Node[];
+
+				if (upEdges.length > 0) {
+					// All nodes downstream of the same parent
+					const parentId = upEdges[0].source;
+					const sibEdges = edges.filter((e) => e.source === parentId);
+					siblings = sibEdges
+						.map((e) => nodes.find((n) => n.id === e.target))
+						.filter(Boolean) as Node[];
+				} else {
+					// Root nodes: all nodes with no incoming edges
+					const targetIds = new Set(edges.map((e) => e.target));
+					siblings = nodes.filter((n) => !targetIds.has(n.id));
+				}
+
+				if (siblings.length <= 1) return;
+				const sorted = sortByPosition(siblings);
+				const idx = sorted.findIndex((n) => n.id === selectedNodeId);
+				if (idx === -1) return;
+
+				const nextIdx =
+					dir === 'prev-sibling'
+						? (idx - 1 + sorted.length) % sorted.length
+						: (idx + 1) % sorted.length;
+				selectNode(sorted[nextIdx].id);
+				break;
+			}
+		}
+	}
+
 	function handleKeydown(e: KeyboardEvent): void {
 		if (isEditableTarget(e)) return;
 
+		// Option+S (Mac) / Alt+S: Add serial node on selected node
+		if (e.altKey && e.code === 'KeyS') {
+			if (selectedNodeId) {
+				e.preventDefault();
+				handleAddSerial(selectedNodeId);
+			}
+			return;
+		}
+
+		// Option+P (Mac) / Alt+P: Add parallel node on selected node
+		if (e.altKey && e.code === 'KeyP') {
+			if (selectedNodeId) {
+				e.preventDefault();
+				handleAddParallel(selectedNodeId);
+			}
+			return;
+		}
+
+		// Ctrl+R: Rename selected node inline (preventDefault always to avoid browser reload)
+		if (e.ctrlKey && e.key === 'r') {
+			e.preventDefault();
+			if (selectedNodeId) {
+				activateNodeEditing(selectedNodeId, true);
+			}
+			return;
+		}
+
+		// Option+L (Mac) / Alt+L: Re-run dagre layout
+		if (e.altKey && e.code === 'KeyL') {
+			e.preventDefault();
+			handleRelayout();
+			return;
+		}
+
+		// Vim-style navigation — skip if any modifier is held (avoid clashing with Alt+L etc.)
+		// LR: h=upstream, l=downstream, j=next-sibling (down), k=prev-sibling (up)
+		// TB: h=prev-sibling, j=downstream, k=upstream, l=next-sibling
+		if (!e.altKey && !e.metaKey && !e.ctrlKey) {
+			const isHorizontal = currentDirection === 'LR' || currentDirection === 'RL';
+			switch (e.key) {
+				case 'h':
+					e.preventDefault();
+					navigateVim(isHorizontal ? 'upstream' : 'prev-sibling');
+					return;
+				case 'j':
+					e.preventDefault();
+					navigateVim(isHorizontal ? 'next-sibling' : 'downstream');
+					return;
+				case 'k':
+					e.preventDefault();
+					navigateVim(isHorizontal ? 'prev-sibling' : 'upstream');
+					return;
+				case 'l':
+					e.preventDefault();
+					navigateVim(isHorizontal ? 'downstream' : 'next-sibling');
+					return;
+			}
+		}
+
 		switch (e.key) {
 			case 'Enter': {
-				if (selectedNodeId) {
-					e.preventDefault();
-					goto(`/spaces/${slug}/${selectedNodeId}`);
-				}
+				// No-op: hjkl navigation and clicking already open the detail panel.
+				e.preventDefault();
+				break;
+			}
+			case 'Escape': {
+				// Prevent xyflow from deselecting nodes — there should always be
+				// an active node unless viewing the root recipe/job.
+				e.preventDefault();
+				e.stopPropagation();
+				flowContainer?.focus();
 				break;
 			}
 			case '+':
@@ -604,7 +1140,25 @@
 	<!-- Graph header -->
 	<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
 		<div class="flex items-center gap-3">
-			<h1 class="text-lg font-semibold text-foreground">{focusTaskId ? 'Neighborhood' : 'Graph'}</h1>
+			{#if viewToggle}
+				<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+					{#each VIEW_TOGGLE_MODES as m (m.value)}
+						<Button
+							variant={viewToggle.current === m.value ? 'secondary' : 'ghost'}
+							size="sm"
+							class="gap-1.5 rounded-md px-2.5 h-7 text-xs {viewToggle.current === m.value
+								? 'bg-background shadow-sm'
+								: 'hover:bg-transparent hover:text-foreground'}"
+							onclick={() => viewToggle.onchange(m.value)}
+						>
+							<m.icon class="size-3.5" />
+							{m.label}
+						</Button>
+					{/each}
+				</div>
+			{:else}
+				<h1 class="text-lg font-semibold text-foreground">{mode === 'recipe' ? 'Recipe Steps' : (focusTaskId ? 'Neighborhood' : 'Graph')}</h1>
+			{/if}
 			{#if !isLoading && taskCount > 0}
 				<span class="text-xs text-muted-foreground">
 					{taskCount} tasks, {edgeCount} dependencies
@@ -617,15 +1171,13 @@
 					Updated {formatLastRefreshed(lastRefreshed)}
 				</span>
 			{/if}
-			<Button
-				variant="outline"
-				size="sm"
-				onclick={() => graphDirection.cycle()}
-				title="Graph direction: {DIRECTION_LABELS[currentDirection]}"
-			>
-				{@const DirIcon = DIRECTION_ICONS[currentDirection]}
-				<DirIcon class="size-4" />
-				<span class="ml-1.5">{DIRECTION_LABELS[currentDirection]}</span>
+			<Button variant="outline" size="sm" onclick={handleAddUnconnected} title="Add unconnected node">
+				<Plus class="size-4" />
+				<span class="ml-1.5">Add Node</span>
+			</Button>
+			<Button variant="outline" size="sm" onclick={handleRelayout} title="Re-run dagre layout (Alt+L)" disabled={taskCount === 0}>
+				<LayoutDashboard class="size-4" />
+				<span class="ml-1.5">Re-layout</span>
 			</Button>
 			<Button variant="outline" size="sm" onclick={handleManualRefresh} disabled={isRefreshing}>
 				<RefreshCw class="size-4 {isRefreshing ? 'animate-spin' : ''}" />
@@ -642,6 +1194,56 @@
 			<Button variant="outline" size="sm" class="ml-auto" onclick={() => fetchGraph()}>
 				Retry
 			</Button>
+		</div>
+	{/if}
+
+	<!-- Delete confirmation dialog -->
+	{#if deleteConfirmState}
+		{@const dcs = deleteConfirmState}
+		<Dialog.Root
+			open={true}
+			onOpenChange={(open) => {
+				if (!open) {
+					dcs.resolve(false);
+					deleteConfirmState = null;
+				}
+			}}
+		>
+			<Dialog.Content>
+				<Dialog.Header>
+					<Dialog.Title>Delete task?</Dialog.Title>
+					<Dialog.Description>
+						Delete "<strong>{dcs.nodeTitle}</strong>"?
+						{#if dcs.hasConnections}
+							Upstream and downstream dependencies will be reconnected automatically.
+						{/if}
+						This action cannot be undone.
+					</Dialog.Description>
+				</Dialog.Header>
+				<Dialog.Footer>
+					<Button
+						variant="outline"
+						onclick={() => { dcs.resolve(false); deleteConfirmState = null; }}
+					>
+						Cancel
+					</Button>
+					<Button
+						variant="destructive"
+						onclick={() => { dcs.resolve(true); deleteConfirmState = null; }}
+					>
+						<Trash2 class="size-4 mr-1.5" />
+						Delete
+					</Button>
+				</Dialog.Footer>
+			</Dialog.Content>
+		</Dialog.Root>
+	{/if}
+
+	<!-- Connection error toast -->
+	{#if connectionError}
+		<div class="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+			<CircleAlert class="size-4 text-destructive shrink-0" />
+			<span class="text-destructive">{connectionError}</span>
 		</div>
 	{/if}
 
@@ -668,7 +1270,20 @@
 			</div>
 		</div>
 	{:else}
-		<div class="flex-1 min-h-0">
+		<div bind:this={flowContainer} class="flex-1 min-h-0 relative" tabindex="-1">
+			{#if onfullscreentoggle}
+				<button
+					onclick={onfullscreentoggle}
+					class="absolute top-3 right-3 z-10 flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+					title={isFullscreen ? 'Exit full size' : 'Full size'}
+				>
+					{#if isFullscreen}
+						<Minimize2 class="size-4" />
+					{:else}
+						<Maximize2 class="size-4" />
+					{/if}
+				</button>
+			{/if}
 			<SvelteFlow
 				{nodes}
 				{edges}
@@ -676,13 +1291,22 @@
 				fitView
 				fitViewOptions={{ padding: 0.2 }}
 				nodesDraggable={true}
-				nodesConnectable={false}
+				nodesConnectable={true}
 				elementsSelectable={true}
 				minZoom={0.1}
 				maxZoom={2}
 				colorMode="system"
 				onnodeclick={handleNodeClick}
+				onpaneclick={() => {
+					// Re-select the current node — prevent xyflow from deselecting
+					if (selectedNodeId) {
+						nodes = nodes.map((n) => ({ ...n, selected: n.id === selectedNodeId }));
+					}
+				}}
+				onconnect={handleConnect}
+				onbeforedelete={handleBeforeDelete}
 			>
+				<FlowActions bind:handle={flowHandle} />
 				<Background />
 				<Controls />
 				<MiniMap
@@ -693,8 +1317,7 @@
 						if (nodeData.isBlocked && status === 'open') return '#ef4444';
 						const colors: Record<string, string> = {
 							open: '#9ca3af',
-							active: '#3b82f6',
-							paused: '#eab308',
+							in_progress: '#3b82f6',
 							done: '#22c55e',
 							skipped: '#9ca3af',
 							cancelled: '#ef4444',
@@ -706,3 +1329,10 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	/* Slow down the animated edge dash movement (xyflow default is 0.5s) */
+	:global(.svelte-flow .svelte-flow__edge.animated path) {
+		animation-duration: 2s !important;
+	}
+</style>

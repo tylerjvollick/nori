@@ -10,7 +10,7 @@
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte.js';
 	import {
 		LayoutGrid,
-		FileText,
+		BookOpen,
 		Package,
 		Wrench,
 		Folder,
@@ -38,7 +38,7 @@
 		...restProps
 	}: ComponentProps<typeof Sidebar.Root> = $props();
 
-	let spaces = $derived($spaceStore.recentSpaces);
+	let spaces = $derived($spaceStore.spaces);
 	let user = $state<User | null>(null);
 	let showCreateDialog = $state(false);
 	let newSpaceName = $state('');
@@ -79,9 +79,9 @@
 		user = state.user;
 	});
 
-	// Load recent spaces on mount
+	// Load all spaces for the current account on mount
 	onMount(() => {
-		spaceStore.loadRecentSpaces();
+		spaceStore.loadSpaces();
 	});
 
 	function isActive(href: string): boolean {
@@ -115,15 +115,8 @@
 	// Admin role check
 	let isAdmin = $derived(pageUser?.role === 'admin');
 
-	// Navigation structure
-	const navMain = [
-		{
-			title: 'SOPs',
-			url: '/sops',
-			icon: FileText,
-			isActive: isActive('/sops')
-		}
-	];
+	// Navigation structure (recipes moved under space tabs)
+	const navMain: { title: string; url: string; icon: typeof BookOpen; isActive: boolean }[] = [];
 
 	const navResources = [
 		{
@@ -235,7 +228,6 @@
 					{/snippet}
 				</Collapsible.Root>
 
-				<!-- SOPs -->
 				{#each navMain as item (item.title)}
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton

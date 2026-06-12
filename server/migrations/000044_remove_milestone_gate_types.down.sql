@@ -1,0 +1,2 @@
+-- No-op: cannot restore original types for tasks that were converted.
+-- milestone and gate types can be re-added manually if needed.

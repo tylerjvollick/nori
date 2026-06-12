@@ -35,7 +35,7 @@ type SpaceMemberRepositoryInterface interface {
 // NewAuthMiddleware creates a consolidated auth middleware that:
 // - Supports JWT from Authorization header or auth_token cookie
 // - Supports API keys with "nori_" prefix
-// - Extracts active Space from X-Space-ID header or token claims
+// - Extracts active Space from token claims or user's recent spaces
 // - Stores authDTO in c.Locals("authDTO") for consistent access
 func NewAuthMiddleware(
 	userRepo UserRepositoryInterface,
@@ -67,15 +67,6 @@ func NewAuthMiddleware(
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Invalid or expired credentials",
 			})
-		}
-
-		// Extract active SpaceID from X-Space-ID header if present
-		// This overrides the space from the JWT token
-		spaceIDHeader := c.Get("X-Space-ID")
-		if spaceIDHeader != "" {
-			if spaceID, err := uuid.Parse(spaceIDHeader); err == nil {
-				authDTO.ActiveSpaceID = &spaceID
-			}
 		}
 
 		// Store authDTO in context using consistent key "authDTO"

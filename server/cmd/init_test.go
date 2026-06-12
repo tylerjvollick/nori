@@ -474,9 +474,8 @@ func TestCreateSpace_ServerError(t *testing.T) {
 
 func TestCreateStation_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/v1/stations", r.URL.Path)
+		assert.Equal(t, "/api/v1/spaces/space-123/stations", r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "space-123", r.Header.Get("X-Space-ID"))
 
 		var body map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&body)
@@ -676,9 +675,8 @@ func TestInitFullAPIFlow(t *testing.T) {
 				Name: "Workshop",
 			})
 
-		case "/api/v1/stations":
+		case "/api/v1/spaces/space-uuid/stations":
 			assert.Equal(t, "Bearer jwt-token", r.Header.Get("Authorization"))
-			assert.Equal(t, "space-uuid", r.Header.Get("X-Space-ID"))
 
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
@@ -755,8 +753,8 @@ func TestInitFullAPIFlow(t *testing.T) {
 	expected := []string{
 		"POST /auth/login",
 		"POST /api/spaces",
-		"POST /api/v1/stations",
-		"POST /api/v1/stations",
+		"POST /api/v1/spaces/space-uuid/stations",
+		"POST /api/v1/spaces/space-uuid/stations",
 		"POST /admin/api-keys",
 	}
 	assert.Equal(t, expected, callSequence)

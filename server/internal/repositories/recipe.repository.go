@@ -37,7 +37,7 @@ func (r *RecipeRepository) Create(recipe *models.Recipe) error {
 
 func (r *RecipeRepository) GetByID(id uuid.UUID) (*models.Recipe, error) {
 	var recipe models.Recipe
-	err := r.db.Preload("CurrentVersion").First(&recipe, "id = ?", id).Error
+	err := r.db.Preload("CurrentVersion").Preload("CurrentVersion.RootTask").First(&recipe, "id = ?", id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("recipe not found")
@@ -49,7 +49,7 @@ func (r *RecipeRepository) GetByID(id uuid.UUID) (*models.Recipe, error) {
 
 func (r *RecipeRepository) GetBySlug(spaceID uuid.UUID, slug string) (*models.Recipe, error) {
 	var recipe models.Recipe
-	err := r.db.Preload("CurrentVersion").Where("space_id = ? AND slug = ?", spaceID, slug).First(&recipe).Error
+	err := r.db.Preload("CurrentVersion").Preload("CurrentVersion.RootTask").Where("space_id = ? AND slug = ?", spaceID, slug).First(&recipe).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("recipe not found")
@@ -83,7 +83,7 @@ func (r *RecipeRepository) List(filter RecipeFilter) ([]models.Recipe, int64, er
 	}
 
 	var recipes []models.Recipe
-	q := query.Preload("CurrentVersion").Order("name ASC")
+	q := query.Preload("CurrentVersion").Preload("CurrentVersion.RootTask").Order("slug ASC")
 	if filter.Offset > 0 {
 		q = q.Offset(filter.Offset)
 	}
@@ -113,6 +113,10 @@ func (r *RecipeRepository) CreateVersion(version *models.RecipeVersion) error {
 	return r.db.Create(version).Error
 }
 
+func (r *RecipeRepository) UpdateVersion(version *models.RecipeVersion) error {
+	return r.db.Save(version).Error
+}
+
 func (r *RecipeRepository) GetVersionByID(id int) (*models.RecipeVersion, error) {
 	var version models.RecipeVersion
 	err := r.db.First(&version, "id = ?", id).Error
@@ -123,6 +127,38 @@ func (r *RecipeRepository) GetVersionByID(id int) (*models.RecipeVersion, error)
 		return nil, err
 	}
 	return &version, nil
+}
+
+// GetVersionWithTaskTree returns a recipe version with its root task preloaded.
+// The full task tree (descendants) is loaded separately via the hierarchical ID
+// prefix pattern and returned as a flat slice. Callers that need the tree
+// structure can rebuild it from ParentID references.
+func (r *RecipeRepository) GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error) {
+	version, err := r.GetVersionByID(id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if version.RootTaskID == nil {
+		return version, nil, nil
+	}
+
+	// Load the root task.
+	var rootTask models.Task
+	if err := r.db.First(&rootTask, "id = ?", *version.RootTaskID).Error; err != nil {
+		return nil, nil, fmt.Errorf("loading root task: %w", err)
+	}
+	version.RootTask = &rootTask
+
+	// Load the full descendant tree using the hierarchical ID prefix.
+	var tasks []models.Task
+	if err := r.db.Where("id = ? OR id LIKE ?", rootTask.ID, rootTask.ID+".%").
+		Order("display_order ASC, created_at ASC").
+		Find(&tasks).Error; err != nil {
+		return nil, nil, fmt.Errorf("loading task tree: %w", err)
+	}
+
+	return version, tasks, nil
 }
 
 // ListVersions returns all versions for a recipe, ordered by version number descending.

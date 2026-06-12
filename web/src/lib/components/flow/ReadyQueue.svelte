@@ -2,12 +2,13 @@
 	import type { TaskResponse } from '$lib/types/task';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Clock, User, Inbox } from '@lucide/svelte';
-	import { formatTimeSpent } from '$lib/utils/time';
+	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
 		/** Ready tasks to display. Sorted by priority then createdAt internally. */
 		tasks: TaskResponse[];
+		spaceId: string;
 		/** Map of station ID -> station name for display. */
 		stationMap: Map<string, string>;
 		/** Whether data is currently loading. */
@@ -20,6 +21,7 @@
 
 	let {
 		tasks,
+		spaceId,
 		stationMap,
 		isLoading = false,
 		onclick,
@@ -143,11 +145,11 @@
 						</span>
 					{/if}
 
-					<TaskActions {task} layout="compact" {onaction} />
+					<TaskActions {task} {spaceId} layout="compact" {onaction} />
 
 					<span class="flex items-center gap-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
 						<Clock class="size-3" />
-						{formatTimeSpent(task.actualTimeSeconds, task.status, task.startedAt)}
+						{formatDuration(task.actualTimeSeconds)}
 					</span>
 				</div>
 			</div>

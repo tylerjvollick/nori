@@ -8,7 +8,6 @@
 		Circle,
 		CircleDot,
 		CircleCheck,
-		CirclePause,
 		CircleX,
 		CircleMinus,
 		Clock,
@@ -318,12 +317,10 @@
 
 	function getStatusConfig(status: string): StatusConfig {
 		switch (status) {
-			case 'active':
-				return { label: 'Active', colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10' };
+			case 'in_progress':
+				return { label: 'In Progress', colorClass: 'text-blue-500', bgClass: 'bg-blue-500/10' };
 			case 'done':
 				return { label: 'Done', colorClass: 'text-green-500', bgClass: 'bg-green-500/10' };
-			case 'paused':
-				return { label: 'Paused', colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10' };
 			case 'skipped':
 				return { label: 'Skipped', colorClass: 'text-muted-foreground', bgClass: 'bg-muted' };
 			case 'cancelled':
@@ -341,12 +338,10 @@
 
 {#snippet statusIcon(status: string, sizeClass: string)}
 	{@const cfg = getStatusConfig(status)}
-	{#if status === 'active'}
+	{#if status === 'in_progress'}
 		<CircleDot class="{sizeClass} {cfg.colorClass} shrink-0" />
 	{:else if status === 'done'}
 		<CircleCheck class="{sizeClass} {cfg.colorClass} shrink-0" />
-	{:else if status === 'paused'}
-		<CirclePause class="{sizeClass} {cfg.colorClass} shrink-0" />
 	{:else if status === 'cancelled'}
 		<CircleX class="{sizeClass} {cfg.colorClass} shrink-0" />
 	{:else if status === 'skipped'}

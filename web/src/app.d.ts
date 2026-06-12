@@ -12,6 +12,8 @@ declare global {
 		interface PageData {
 			/** The authenticated user, passed from the root layout server load. */
 			user: User | null;
+			/** The current space, resolved in /spaces/[slug]/+layout.server.ts. */
+			space?: import('$lib/api/space').Space;
 		}
 		// interface PageState {}
 		// interface Platform {}

@@ -1,0 +1,100 @@
+name: nori
+
+# Production compose — pre-built images behind a Caddy reverse proxy.
+# Create docker/.env from docker/.env.prod.example before running.
+#
+# Home lab (pre-built images):   docker compose pull && docker compose up -d
+# Local build (no registry yet): docker compose up --build -d
+#
+# Only Caddy publishes a host port; the server and Postgres stay internal.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: nori-proxy
+    ports:
+      - "${NORI_HOST_PORT:-8080}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - nori-server
+      - nori-web
+
+  nori-migrate:
+    container_name: nori-migrate
+    image: ghcr.io/tylerjvollick/nori-server:${NORI_IMAGE_TAG:-latest}
+    build: ../server
+    command: ["./nori", "migrate", "up"]
+    environment:
+      DB_HOST: database
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-nori}
+      DB_PORT: 5432
+    depends_on:
+      database:
+        condition: service_healthy
+
+  nori-server:
+    container_name: nori-server
+    image: ghcr.io/tylerjvollick/nori-server:${NORI_IMAGE_TAG:-latest}
+    build: ../server
+    environment:
+      DB_HOST: database
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-nori}
+      DB_PORT: 5432
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-1073741824}
+      ALLOWED_MIME_TYPES: ${ALLOWED_MIME_TYPES:-image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm}
+      NORI_JWT_SECRET: ${NORI_JWT_SECRET}
+      NORI_ADMIN_EMAIL: ${NORI_ADMIN_EMAIL:-admin@nori.dev}
+      NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
+      NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-My Shop}
+    depends_on:
+      database:
+        condition: service_healthy
+      nori-migrate:
+        condition: service_completed_successfully
+    volumes:
+      - nori_uploads:/app/uploads
+
+  nori-web:
+    container_name: nori-web
+    image: ghcr.io/tylerjvollick/nori-web:${NORI_IMAGE_TAG:-latest}
+    build:
+      context: ../web
+      target: prod
+    environment:
+      NODE_ENV: production
+      INTERNAL_API_URL: http://nori-server:8080
+      # Derive the request origin from Caddy's forwarded headers so the
+      # app works on any hostname/IP without baking in an ORIGIN.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+    depends_on:
+      - nori-server
+
+  database:
+    image: postgres:16
+    container_name: nori-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-nori}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  nori_uploads:
+  caddy_data:
+  caddy_config:

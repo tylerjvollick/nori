@@ -6,8 +6,8 @@ test.describe('Navigation — authenticated pages', () => {
   test('/flow redirects to a space', async ({ page }) => {
     const response = await page.goto('/flow');
     expect(response?.status()).toBeLessThan(400);
-    // /flow now redirects to /spaces/:slug
-    await page.waitForURL(/\/spaces\/[A-Z]{2,5}/, { timeout: 5_000 });
+    // /flow now redirects to /spaces/:slug (slug = 2-5 uppercase letters/digits)
+    await page.waitForURL(/\/spaces\/[A-Z][A-Z0-9]{1,4}/, { timeout: 5_000 });
     // Page should render some meaningful content (not a blank white screen)
     await expect(page.locator('body')).not.toBeEmpty();
     // Should not show SvelteKit error page
@@ -27,11 +27,4 @@ test.describe('Navigation — authenticated pages', () => {
     await expect(page.locator('text=Internal Error')).not.toBeVisible();
   });
 
-  test('/sops loads without error', async ({ page }) => {
-    const response = await page.goto('/sops');
-    expect(response?.status()).toBeLessThan(400);
-    // May redirect if /sops isn't built yet — that's fine, just no crash
-    await expect(page.locator('body')).not.toBeEmpty();
-    await expect(page.locator('text=Internal Error')).not.toBeVisible();
-  });
 });

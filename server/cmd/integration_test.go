@@ -462,7 +462,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		// --- Recipe routes ---
 
 		// POST /api/v1/recipes — create recipe
-		if r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodPost {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/recipes" && r.Method == http.MethodPost {
 			state.recordCall("POST /api/v1/recipes")
 			var body map[string]interface{}
 			json.NewDecoder(r.Body).Decode(&body)
@@ -480,7 +480,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// GET /api/v1/recipes — list recipes (supports slug filter)
-		if r.URL.Path == "/api/v1/recipes" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/recipes" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/recipes")
 			slugFilter := r.URL.Query().Get("slug")
 
@@ -501,8 +501,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// Handle recipe-specific routes: /api/v1/recipes/:id/...
-		if len(r.URL.Path) > len("/api/v1/recipes/") {
-			pathRest := r.URL.Path[len("/api/v1/recipes/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/recipes/") {
+			pathRest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/recipes/"):]
 
 			// Extract recipeID and subpath by finding the first /
 			slashIdx := indexOf(pathRest, "/")
@@ -582,6 +582,29 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 					return
 				}
 
+				// POST /api/v1/recipes/:id/publish — publish the latest draft
+				if subpath == "/publish" && r.Method == http.MethodPost {
+					state.recordCall(fmt.Sprintf("POST /api/v1/recipes/%s/publish", recipeID))
+					draftID := 0
+					for _, v := range state.versions {
+						if v.RecipeID == recipeID && v.Status == "draft" {
+							draftID = v.ID
+						}
+					}
+					v := state.publishVersion(draftID)
+					if v == nil {
+						w.WriteHeader(http.StatusUnprocessableEntity)
+						json.NewEncoder(w).Encode(map[string]string{"error": "recipe has no draft version"})
+						return
+					}
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"id":            v.ID,
+						"versionNumber": v.VersionNumber,
+						"status":        v.Status,
+					})
+					return
+				}
+
 				// POST /api/v1/recipes/:id/versions/:vid/publish
 				if len(subpath) > len("/versions/") && r.Method == http.MethodPost {
 					// Parse version ID from: /versions/<vid>/publish
@@ -610,8 +633,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 
 		// --- Recipe versions flat endpoint ---
 		// POST /api/v1/recipe-versions/:vid/publish
-		if len(r.URL.Path) > len("/api/v1/recipe-versions/") && r.Method == http.MethodPost {
-			rest := r.URL.Path[len("/api/v1/recipe-versions/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/recipe-versions/") && r.Method == http.MethodPost {
+			rest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/recipe-versions/"):]
 			var vid int
 			var suffix string
 			fmt.Sscanf(rest, "%d/%s", &vid, &suffix)
@@ -635,7 +658,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		// --- Task routes ---
 
 		// GET /api/v1/tasks/ready
-		if r.URL.Path == "/api/v1/tasks/ready" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/tasks/ready" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/tasks/ready")
 			ready := state.readyTasks()
 			if ready == nil {
@@ -649,7 +672,7 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// GET /api/v1/tasks — list tasks (supports parentId, status, assigneeId filters)
-		if r.URL.Path == "/api/v1/tasks" && r.Method == http.MethodGet {
+		if r.URL.Path == "/api/v1/spaces/space-uuid-001/tasks" && r.Method == http.MethodGet {
 			state.recordCall("GET /api/v1/tasks")
 			parentFilter := r.URL.Query().Get("parentId")
 
@@ -674,8 +697,8 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 		}
 
 		// POST /api/v1/tasks/:id/<action> (complete, pause, resume, skip)
-		if len(r.URL.Path) > len("/api/v1/tasks/") && r.Method == http.MethodPost {
-			rest := r.URL.Path[len("/api/v1/tasks/"):]
+		if len(r.URL.Path) > len("/api/v1/spaces/space-uuid-001/tasks/") && r.Method == http.MethodPost {
+			rest := r.URL.Path[len("/api/v1/spaces/space-uuid-001/tasks/"):]
 
 			// Extract task ID and action.
 			// Paths: /api/v1/tasks/<id>/complete, /api/v1/tasks/<id>/pause, etc.
@@ -695,10 +718,10 @@ func newMockServer(t *testing.T, state *mockState) *httptest.Server {
 
 					switch actionName {
 					case "complete":
-						if task.Status != "active" && task.Status != "open" {
+						if task.Status == "done" || task.Status == "skipped" || task.Status == "cancelled" {
 							w.WriteHeader(http.StatusConflict)
 							json.NewEncoder(w).Encode(map[string]string{
-								"error": fmt.Sprintf("task %q cannot be completed: status is %q, must be \"active\" or \"open\"", taskID, task.Status),
+								"error": fmt.Sprintf("task %q cannot be completed: already in terminal status %q", taskID, task.Status),
 							})
 							return
 						}
@@ -1122,7 +1145,7 @@ func TestChairWorkflowE2E(t *testing.T) {
 	// Recipe create should follow: create recipe, create version, publish version.
 	assert.Equal(t, "POST /api/v1/recipes", calls[1], "should create recipe")
 	assert.Contains(t, calls[2], "POST /api/v1/recipes/recipe-uuid-001/versions", "should create version")
-	assert.Contains(t, calls[3], "POST /api/v1/recipes/recipe-uuid-001/versions/1/publish", "should publish version")
+	assert.Contains(t, calls[3], "POST /api/v1/recipes/recipe-uuid-001/publish", "should publish version")
 
 	// Pour should follow: resolve slug, then pour.
 	assert.Equal(t, "GET /api/v1/recipes", calls[4], "should resolve slug")
@@ -1272,13 +1295,10 @@ func TestChairWorkflowE2E_PourWithoutPublish(t *testing.T) {
 func findChairTOML(t *testing.T) string {
 	t.Helper()
 
-	// Try relative paths from the test working directory.
+	// Pinned snapshot — seeds/chair.toml is a user-editable example and
+	// must not break these tests when it changes.
 	candidates := []string{
-		"../../seeds/chair.toml",    // from server/cmd/
-		"../seeds/chair.toml",       // from server/
-		"seeds/chair.toml",          // from root
-		"../../../seeds/chair.toml", // deeper nesting
-		filepath.Join("..", "..", "seeds", "chair.toml"),
+		"testdata/chair.toml",
 	}
 
 	for _, path := range candidates {

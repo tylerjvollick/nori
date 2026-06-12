@@ -20,23 +20,29 @@
     ChevronDown,
   } from "@lucide/svelte";
   import { isEditableTarget, showToast } from "$lib/utils/keyboard.svelte";
-  import { formatTimeSpent } from "$lib/utils/time";
+  import { formatDuration } from "$lib/utils/time";
 
   /** Optional pre-loaded tasks. When provided, the list uses these instead of fetching. */
   interface Props {
+    spaceId: string;
     tasks?: TaskResponse[];
     deps?: Map<string, TaskDepsResponse>;
     stationMap?: Map<string, string>;
+    /** When provided, clicking a row calls this instead of navigating. */
+    onselect?: (taskId: string) => void;
   }
 
   let {
+    spaceId,
     tasks: externalTasks,
     deps: externalDeps,
     stationMap: externalStationMap,
+    onselect,
   }: Props = $props();
 
   /** Whether we're in scoped mode (tasks provided externally). */
   let isScoped = $derived(!!externalTasks);
+
 
   const POLL_INTERVAL_MS = 30_000;
   const PAGE_SIZE = 200; // Fetch more to build complete chains
@@ -359,7 +365,7 @@
 
   async function fetchStations(): Promise<void> {
     try {
-      const stations: StationResponse[] = await stationApi.listStations();
+      const stations: StationResponse[] = await stationApi.listStations(spaceId);
       const map = new Map<string, string>();
       for (const s of stations) {
         map.set(s.id, s.name);
@@ -400,7 +406,7 @@
 
     try {
       const offset = opts?.append ? allTasks.length : 0;
-      const result = await taskApi.listTasks(buildParams(offset));
+      const result = await taskApi.listTasks(spaceId, buildParams(offset));
 
       let items = result.items;
 
@@ -447,7 +453,7 @@
       const results = await Promise.all(
         batch.map(async (t) => {
           try {
-            const deps = await taskApi.getTaskDeps(t.id);
+            const deps = await taskApi.getTaskDeps(spaceId, t.id);
             return { id: t.id, deps };
           } catch {
             return {
@@ -580,7 +586,11 @@
   let slug = $derived($page.params.slug);
 
   function navigateToTask(taskId: string): void {
-    goto(`/spaces/${slug}/${taskId}`);
+    if (onselect) {
+      onselect(taskId);
+    } else {
+      goto(`/spaces/${slug}/${taskId}`);
+    }
   }
 
   // ---- Keyboard selection ----
@@ -653,7 +663,7 @@
       }
       case "d": {
         const task = selectedTask;
-        if (task && (task.status === "active" || task.status === "paused")) {
+        if (task && task.status === "in_progress") {
           e.preventDefault();
           completeSelectedTask(task);
         }
@@ -688,7 +698,7 @@
 
   async function startSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.startTask(task.id);
+      await taskApi.startTask(spaceId, task.id);
       showToast(`Started: ${task.title}`);
       fetchTasks({ silent: true });
     } catch (err) {
@@ -699,7 +709,7 @@
 
   async function completeSelectedTask(task: TaskResponse): Promise<void> {
     try {
-      await taskApi.completeTask(task.id);
+      await taskApi.completeTask(spaceId, task.id);
       showToast(`Completed: ${task.title}`);
       fetchTasks({ silent: true });
     } catch (err) {
@@ -711,11 +721,11 @@
   // ---- Helpers ----
 
   const STATUS_COLORS: Record<string, string> = {
+    backlog:
+      "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300",
     open: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-    active:
+    in_progress:
       "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
-    paused:
-      "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
     done: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
     skipped: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300",
     cancelled: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
@@ -1036,15 +1046,19 @@
                 <!-- Time Spent -->
                 <td
                   class="px-3 py-2.5 text-xs text-muted-foreground {task.status ===
-                  'active'
+                  'in_progress'
                     ? 'text-blue-500 dark:text-blue-400'
                     : ''}"
                 >
-                  {formatTimeSpent(
-                    task.actualTimeSeconds,
-                    task.status,
-                    task.startedAt,
-                  )}
+                  <span class="inline-flex items-center gap-1">
+                    {#if task.status === 'in_progress'}
+                      <span class="relative flex size-2 shrink-0">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+                      </span>
+                    {/if}
+                    {formatDuration(task.actualTimeSeconds)}
+                  </span>
                 </td>
 
                 <!-- Due Date -->

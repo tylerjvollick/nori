@@ -423,9 +423,9 @@ func TestReadyWorkService_OnlyOpenTasksReturned(t *testing.T) {
 
 	// Mix of statuses — only open tasks should appear.
 	rwTestTask(t, db, "status-open", space.ID, user.ID, models.TaskStatusOpen, 0, nil)
-	rwTestTask(t, db, "status-active", space.ID, user.ID, models.TaskStatusActive, 0, nil)
+	rwTestTask(t, db, "status-inprogress", space.ID, user.ID, models.TaskStatusInProgress, 0, nil)
 	rwTestTask(t, db, "status-done", space.ID, user.ID, models.TaskStatusDone, 0, nil)
-	rwTestTask(t, db, "status-paused", space.ID, user.ID, models.TaskStatusPaused, 0, nil)
+	rwTestTask(t, db, "status-skipped", space.ID, user.ID, models.TaskStatusSkipped, 0, nil)
 
 	tasks, err := svc.GetReadyTasks(space.ID, nil)
 	if err != nil {

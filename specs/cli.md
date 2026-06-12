@@ -76,6 +76,19 @@ nori
   │     ├── diff <name> <v1> <v2>  — Diff two versions
   │     └── publish <name>         — Publish current draft
   │
+  ├── product
+  │     ├── create --name <name>   — Create a product
+  │     │     --description <text>
+  │     ├── list                   — List products with variant counts
+  │     └── variant
+  │           ├── create <productId> --name <name>
+  │           │     --recipe <recipeId> — Bind variant to a recipe
+  │           │     --vars '<json>'     — Recipe variable bindings (JSON object)
+  │           │     --price <amount>    — Customer-facing price
+  │           ├── update <productId> <variantId>
+  │           │     [--name] [--recipe] [--vars] [--price]
+  │           └── delete <productId> <variantId>
+  │
   ├── dep
   │     ├── add <source> <target> [--type blocks|waits_for|related]
   │     ├── rm <source> <target>   — Remove dependency
@@ -85,7 +98,23 @@ nori
   │
   ├── station
   │     ├── list                   — List stations with WIP status
-  │     └── show <name>            — Show station queue
+  │     ├── show <name>            — Show station queue
+  │     └── update <id>            — Update a station
+  │           --costs-hour <rate>  — Set hourly cost rate (e.g. 45.00)
+  │           --clear-costs-hour   — Clear rate (falls back to space default)
+  │
+  ├── space
+  │     └── update                 — Update the current space
+  │           --default-labor-rate <rate>   — Set default hourly labor rate
+  │           --clear-default-labor-rate    — Clear the default labor rate
+  │
+  ├── material                     — Manage the material catalog
+  │     ├── create --name <name> --unit <unit>
+  │     │          [--cost <n>] [--supplier <s>] [--sku <s>]
+  │     │          [--category <c>] [--location <l>]
+  │     ├── list [--search <text>] — List materials (filter by name)
+  │     ├── update <id> [--cost <n>] [--name <s>] [--unit <u>] [...]
+  │     └── delete <id>            — Soft-delete a material
   │
   └── report
         ├── bottleneck             — Current constraint analysis

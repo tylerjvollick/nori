@@ -61,13 +61,13 @@ var (
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks",
-	Long:  "Task lifecycle commands: start, complete, pause, resume, skip, add, and note.",
+	Long:  "Task lifecycle and timer commands: start, complete, pause, resume, skip, add, and note.",
 }
 
 var taskStartCmd = &cobra.Command{
 	Use:   "start <id>",
 	Short: "Start a task",
-	Long:  "Start an open task, transitioning it to active status.",
+	Long:  "Start an open task, transitioning it to in_progress status and starting a timer.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskStart,
 }
@@ -75,23 +75,23 @@ var taskStartCmd = &cobra.Command{
 var taskCompleteCmd = &cobra.Command{
 	Use:   "complete <id>",
 	Short: "Complete a task",
-	Long:  "Mark a task as done. The task must be in active status.",
+	Long:  "Mark a task as done. Works from any non-terminal status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskComplete,
 }
 
 var taskPauseCmd = &cobra.Command{
 	Use:   "pause <id>",
-	Short: "Pause a task",
-	Long:  "Pause an active task.",
+	Short: "Pause timer on a task",
+	Long:  "Pause the running timer on a task. Does not change task status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskPause,
 }
 
 var taskResumeCmd = &cobra.Command{
 	Use:   "resume <id>",
-	Short: "Resume a paused task",
-	Long:  "Resume a paused task back to active status.",
+	Short: "Resume timer on a task",
+	Long:  "Resume the paused timer on a task. Does not change task status.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskResume,
 }
@@ -115,7 +115,7 @@ var taskAddCmd = &cobra.Command{
 var taskNoteCmd = &cobra.Command{
 	Use:   "note <text>",
 	Short: "Add deviation note to current task",
-	Long:  "Add a deviation note to your current active task. Notes are appended if the task already has notes.",
+	Long:  "Add a deviation note to your current in-progress task. Notes are appended if the task already has notes.",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runTaskNote,
 }
@@ -125,7 +125,7 @@ func init() {
 
 	taskAddCmd.Flags().StringVar(&taskAddStation, "station", "", "Station name for the new task")
 	taskAddCmd.Flags().StringVar(&taskAddAfter, "after", "", "Task ID to add as a dependency (new task runs after this one)")
-	taskAddCmd.Flags().StringVar(&taskAddType, "type", "task", "Task type: task, gate, milestone")
+	taskAddCmd.Flags().StringVar(&taskAddType, "type", "task", "Task type: task, job, recipe")
 	taskAddCmd.Flags().StringVar(&taskAddParentID, "parent", "", "Parent task ID (defaults to current job)")
 
 	taskCmd.AddCommand(taskStartCmd)
@@ -139,19 +139,76 @@ func init() {
 }
 
 func runTaskStart(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "start")
+	if err := runTaskAction(args[0], "start"); err != nil {
+		return err
+	}
+	// Also start a time entry (non-blocking — don't fail the task transition).
+	timeEntryStart(args[0])
+	return nil
 }
 
 func runTaskComplete(cmd *cobra.Command, args []string) error {
+	// Timer is auto-stopped by the server on complete.
 	return runTaskAction(args[0], "complete")
 }
 
 func runTaskPause(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "pause")
+	// Pause only controls the timer now, not task status.
+	timeEntryPause(args[0])
+	fmt.Printf("Timer paused for task %s\n", args[0])
+	return nil
 }
 
 func runTaskResume(cmd *cobra.Command, args []string) error {
-	return runTaskAction(args[0], "resume")
+	// Resume only controls the timer now, not task status.
+	timeEntryResume(args[0])
+	fmt.Printf("Timer resumed for task %s\n", args[0])
+	return nil
+}
+
+// timeEntryStart starts a time entry for a task. Non-fatal — just warns on error.
+func timeEntryStart(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/start", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+}
+
+// timeEntryPause pauses a running time entry for a task. Non-fatal — just silently ignores errors.
+func timeEntryPause(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/pause", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
+}
+
+// timeEntryResume resumes a paused time entry. Non-fatal.
+func timeEntryResume(taskID string) {
+	creds, err := cli.LoadCredentials()
+	if err != nil {
+		return
+	}
+	client := newClientWithSpace(creds)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/time-entries/resume", taskID))
+	resp, err := client.Post(path, nil)
+	if err != nil {
+		return
+	}
+	resp.Body.Close()
 }
 
 func runTaskSkip(cmd *cobra.Command, args []string) error {
@@ -167,7 +224,7 @@ func runTaskAction(taskID, action string) error {
 
 	client := newClientWithSpace(creds)
 
-	path := fmt.Sprintf("/api/v1/tasks/%s/%s", taskID, action)
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/%s", taskID, action))
 	resp, err := client.Post(path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -201,9 +258,9 @@ func runTaskAction(taskID, action string) error {
 	return nil
 }
 
-// findActiveTask finds the user's current active task.
+// findActiveTask finds the user's current in-progress task.
 func findActiveTask(client *cli.Client, creds *cli.Credentials) (*activeTaskResponse, error) {
-	path := fmt.Sprintf("/api/v1/tasks?status=active&assigneeId=%s&limit=1", creds.UserID)
+	path := client.SpacePath(fmt.Sprintf("/tasks?status=in_progress&assigneeId=%s&limit=1", creds.UserID))
 	resp, err := client.Get(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to server: %w", err)
@@ -256,7 +313,7 @@ func resolveParentID(client *cli.Client, creds *cli.Credentials) (string, error)
 
 // resolveStationID looks up a station by name and returns its UUID.
 func resolveStationID(client *cli.Client, name string) (string, error) {
-	resp, err := client.Get("/api/v1/stations")
+	resp, err := client.Get(client.SpacePath("/stations"))
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -321,8 +378,8 @@ func runTaskAdd(cmd *cobra.Command, args []string) error {
 		body["afterId"] = taskAddAfter
 	}
 
-	// POST /api/v1/tasks/:parentId/children
-	path := fmt.Sprintf("/api/v1/tasks/%s/children", parentID)
+	// POST /api/v1/spaces/:spaceId/tasks/:parentId/children
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/children", parentID))
 	resp, err := client.Post(path, body)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -372,8 +429,8 @@ func runTaskNote(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// POST /api/v1/tasks/:id/notes
-	path := fmt.Sprintf("/api/v1/tasks/%s/notes", active.ID)
+	// POST /api/v1/spaces/:spaceId/tasks/:id/notes
+	path := client.SpacePath(fmt.Sprintf("/tasks/%s/notes", active.ID))
 	resp, err := client.Post(path, map[string]string{
 		"text": text,
 	})

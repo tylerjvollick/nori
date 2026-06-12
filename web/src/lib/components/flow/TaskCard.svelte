@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { onDestroy } from 'svelte';
 	import type { TaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { spaceMembersStore } from '$lib/stores/spaceMembers';
@@ -10,53 +9,27 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Clock, User, UserPlus, UserX, Check, Loader2 } from '@lucide/svelte';
-	import { formatTimeSpent } from '$lib/utils/time';
+	import { formatDuration } from '$lib/utils/time';
 	import TaskActions from './TaskActions.svelte';
 
 	interface Props {
 		task: TaskResponse;
+		spaceId: string;
 		stationMap: Map<string, string>;
 		/** Called after a successful task action with the updated task */
 		onaction?: (updated: TaskResponse) => void;
 		/** When true, a drag is in progress — suppress navigation on click. */
 		isDragging?: boolean;
+		/** When provided, clicking the card calls this instead of navigating. */
+		onselect?: (taskId: string) => void;
 	}
 
-	let { task, stationMap, onaction, isDragging = false }: Props = $props();
+	let { task, spaceId, stationMap, onaction, isDragging = false, onselect }: Props = $props();
 
 	let slug = $derived($page.params.slug);
 
-	// --- Running timer for active tasks ---
-
-	let now = $state(new Date());
-	let tickTimer: ReturnType<typeof setInterval> | null = null;
-
-	$effect(() => {
-		// Read task.status in the effect body for Svelte 5 dependency tracking
-		const status = task.status;
-		if (status === 'active') {
-			tickTimer = setInterval(() => {
-				now = new Date();
-			}, 1_000);
-		}
-
-		return () => {
-			if (tickTimer) {
-				clearInterval(tickTimer);
-				tickTimer = null;
-			}
-		};
-	});
-
-	onDestroy(() => {
-		if (tickTimer) {
-			clearInterval(tickTimer);
-			tickTimer = null;
-		}
-	});
-
-	let timeDisplay = $derived(formatTimeSpent(task.actualTimeSeconds, task.status, task.startedAt, now));
-	let isActive = $derived(task.status === 'active');
+	let timeDisplay = $derived(formatDuration(task.actualTimeSeconds));
+	let isInProgress = $derived(task.status === 'in_progress');
 
 	// --- Space members for assignment picker ---
 
@@ -107,7 +80,7 @@
 		if (isAssigning) return;
 		isAssigning = true;
 		try {
-			const updated = await taskApi.updateTask(task.id, { assignedToId: userId });
+			const updated = await taskApi.updateTask(spaceId, task.id, { assignedToId: userId });
 			onaction?.(updated);
 		} catch (err) {
 			console.error('Failed to assign user:', err);
@@ -120,7 +93,7 @@
 		if (isAssigning) return;
 		isAssigning = true;
 		try {
-			const updated = await taskApi.updateTask(task.id, { assignedToId: '' });
+			const updated = await taskApi.updateTask(spaceId, task.id, { assignedToId: '' });
 			onaction?.(updated);
 		} catch (err) {
 			console.error('Failed to unassign user:', err);
@@ -171,7 +144,7 @@
 <a
 	href="/spaces/{slug}/{task.id}"
 	class="group block"
-	onclick={(e) => { if (isDragging) e.preventDefault(); }}
+	onclick={(e) => { if (isDragging) { e.preventDefault(); return; } if (onselect) { e.preventDefault(); onselect(task.id); } }}
 >
 	<Card.Root class="p-3 shadow-sm hover:ring-primary/40 hover:shadow-md transition-all rounded-lg" size="sm">
 		<Card.Content class="px-0 py-0">
@@ -295,8 +268,14 @@
 					{/if}
 				</div>
 				<div class="flex items-center gap-1.5">
-					<TaskActions {task} layout="compact" {onaction} />
-					<span class="flex items-center gap-0.5 {isActive ? 'text-blue-500 dark:text-blue-400' : ''}">
+					<TaskActions {task} {spaceId} layout="compact" {onaction} />
+					<span class="flex items-center gap-1 {isInProgress ? 'text-blue-500 dark:text-blue-400' : ''}">
+						{#if isInProgress}
+							<span class="relative flex size-2">
+								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+							</span>
+						{/if}
 						<Clock class="size-3" />
 						{timeDisplay}
 					</span>

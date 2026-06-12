@@ -22,21 +22,40 @@ var slugAlphaRegex = regexp.MustCompile(`[^A-Z]`)
 // validSlugRegex matches valid slug format: 2-5 uppercase alphanumeric characters
 var validSlugRegex = regexp.MustCompile(`^[A-Z][A-Z0-9]{1,4}$`)
 
+// StationSeeder creates stations for a newly created space.
+type StationSeeder interface {
+	Create(station *models.Station) error
+}
+
+// DefaultStationNames defines the stations seeded into every new space.
+var DefaultStationNames = []string{
+	"Intake",
+	"Mill",
+	"Joinery",
+	"Assembly",
+	"Finish",
+	"QC",
+	"Ship",
+}
+
 type SpaceService struct {
 	spaceRepository       *repositories.SpaceRepository
 	userRepository        *repositories.UserRepository
 	spaceMemberRepository *repositories.SpaceMemberRepository
+	stationSeeder         StationSeeder
 }
 
 func NewSpaceService(
 	spaceRepository *repositories.SpaceRepository,
 	userRepository *repositories.UserRepository,
 	spaceMemberRepository *repositories.SpaceMemberRepository,
+	stationSeeder StationSeeder,
 ) *SpaceService {
 	return &SpaceService{
 		spaceRepository:       spaceRepository,
 		userRepository:        userRepository,
 		spaceMemberRepository: spaceMemberRepository,
+		stationSeeder:         stationSeeder,
 	}
 }
 
@@ -175,6 +194,9 @@ func (s *SpaceService) CreateSpace(accountID uuid.UUID, dto *dtos.CreateSpaceDTO
 		log.Printf("Warning: failed to add creator as space member for space %s: %v", space.ID, err)
 	}
 
+	// Seed default stations (best-effort)
+	s.seedDefaultStations(space.ID)
+
 	return space, nil
 }
 
@@ -204,7 +226,31 @@ func (s *SpaceService) CreateDefaultSpace(accountID uuid.UUID, creatorUserID uui
 		log.Printf("Warning: failed to add creator as space member for default space %s: %v", space.ID, err)
 	}
 
+	// Seed default stations (best-effort)
+	s.seedDefaultStations(space.ID)
+
 	return space, nil
+}
+
+// seedDefaultStations creates the default set of stations for a new space.
+// Errors are logged but not propagated (best-effort side effect).
+func (s *SpaceService) seedDefaultStations(spaceID uuid.UUID) {
+	if s.stationSeeder == nil {
+		return
+	}
+	for i, name := range DefaultStationNames {
+		station := &models.Station{
+			ID:           uuid.New(),
+			SpaceID:      spaceID,
+			Name:         name,
+			DisplayOrder: i,
+			WIPLimit:     1,
+			IsActive:     true,
+		}
+		if err := s.stationSeeder.Create(station); err != nil {
+			log.Printf("Warning: failed to seed station %q for space %s: %v", name, spaceID, err)
+		}
+	}
 }
 
 // AddMember adds a user as a member of a space (idempotent — skips if already a member).
@@ -328,6 +374,15 @@ func (s *SpaceService) UpdateSpace(spaceID uuid.UUID, accountID uuid.UUID, dto *
 			return nil, fmt.Errorf("slug %q is already in use", newSlug)
 		}
 		space.Slug = newSlug
+	}
+
+	// Update default labor rate if the field was present in the payload.
+	// Explicit null clears the rate; a value sets it.
+	if dto.DefaultLaborRate.Set {
+		if dto.DefaultLaborRate.Valid && dto.DefaultLaborRate.Value.IsNegative() {
+			return nil, fmt.Errorf("defaultLaborRate must be >= 0")
+		}
+		space.DefaultLaborRate = dto.DefaultLaborRate.Ptr()
 	}
 
 	space.UpdatedAt = time.Now()

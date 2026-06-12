@@ -47,3 +47,9 @@ func (r *CostEntryRepository) GetByTaskID(taskID string) ([]models.CostEntry, er
 		Find(&entries).Error
 	return entries, err
 }
+
+// DeleteByTaskIDAndCostType removes all cost entries for a task with the given cost type.
+func (r *CostEntryRepository) DeleteByTaskIDAndCostType(taskID string, costType models.CostType) error {
+	return r.db.Where("task_id = ? AND cost_type = ?", taskID, costType).
+		Delete(&models.CostEntry{}).Error
+}

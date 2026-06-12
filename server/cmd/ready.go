@@ -48,7 +48,7 @@ func runReady(cmd *cobra.Command, args []string) error {
 
 	client := newClientWithSpace(creds)
 
-	resp, err := client.Get("/api/v1/tasks/ready")
+	resp, err := client.Get(client.SpacePath("/tasks/ready"))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}

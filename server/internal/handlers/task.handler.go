@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -20,10 +21,9 @@ type TaskServiceInterface interface {
 	ListTasks(filter repositories.TaskFilter) ([]models.Task, int64, error)
 	UpdateTask(id string, dto *dtos.UpdateTaskRequest) (*models.Task, error)
 	DeleteTask(id string) error
+	SetTaskStatus(taskID string, userID uuid.UUID, newStatus models.TaskStatus) (*models.Task, error)
 	StartTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	CompleteTask(taskID string, userID uuid.UUID, actualTimeSecs *int) (*services.CompleteTaskResult, error)
-	PauseTask(taskID string, userID uuid.UUID) (*models.Task, error)
-	ResumeTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	SkipTask(taskID string, userID uuid.UUID) (*models.Task, error)
 	AddChildTask(parentID string, dto *dtos.AddChildTaskRequest, userID uuid.UUID) (*models.Task, error)
 	AddNote(taskID string, text string) (*models.Task, error)
@@ -45,9 +45,9 @@ func NewTaskHandler(taskService TaskServiceInterface, readyWorkService ReadyWork
 	return &TaskHandler{taskService: taskService, readyWorkService: readyWorkService}
 }
 
-// RegisterTaskRoutes registers task API routes on the Fiber app.
-func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Handler) {
-	group := app.Group("/api/v1/tasks", middlewares...)
+// RegisterTaskRoutes registers task API routes under a space-scoped router.
+func (h *TaskHandler) RegisterTaskRoutes(router fiber.Router, middlewares ...fiber.Handler) {
+	group := router.Group("/tasks", middlewares...)
 
 	group.Get("/ready", h.GetReadyTasks)
 	group.Get("", h.ListTasks)
@@ -56,10 +56,9 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 	group.Get("/:id/tree", h.GetTaskTree)
 	group.Put("/:id", h.UpdateTask)
 	group.Delete("/:id", h.DeleteTask)
+	group.Put("/:id/status", h.SetStatus)
 	group.Post("/:id/start", h.StartTask)
 	group.Post("/:id/complete", h.CompleteTask)
-	group.Post("/:id/pause", h.PauseTask)
-	group.Post("/:id/resume", h.ResumeTask)
 	group.Post("/:id/skip", h.SkipTask)
 	group.Post("/:id/children", h.AddChildTask)
 	group.Post("/:id/notes", h.AddNote)
@@ -67,19 +66,17 @@ func (h *TaskHandler) RegisterTaskRoutes(app *fiber.App, middlewares ...fiber.Ha
 
 // ListTasks returns a paginated list of tasks for the active space.
 func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
 	filter := repositories.TaskFilter{
-		SpaceID: authDTO.ActiveSpaceID,
+		SpaceID: &spaceID,
 	}
 
 	// Parse optional query parameters
@@ -90,6 +87,12 @@ func (h *TaskHandler) ListTasks(c *fiber.Ctx) error {
 	if taskType := c.Query("type"); taskType != "" {
 		t := models.TaskType(taskType)
 		filter.Type = &t
+	} else {
+		// By default, exclude job and recipe root tasks and their descendants
+		// from the tasks list. Use GET /api/v1/jobs for jobs and
+		// GET /api/v1/recipes/:id/tasks for recipe trees.
+		filter.ExcludeTypes = []models.TaskType{models.TaskTypeJob, models.TaskTypeRecipe}
+		filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeRecipe}
 	}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
@@ -147,10 +150,9 @@ func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return err
 	}
 
 	var dto dtos.CreateTaskRequest
@@ -166,8 +168,13 @@ func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
 		})
 	}
 
-	task, err := h.taskService.CreateTask(*authDTO.ActiveSpaceID, authDTO.User.ID, &dto)
+	task, err := h.taskService.CreateTask(spaceID, authDTO.User.ID, &dto)
 	if err != nil {
+		if errors.Is(err, services.ErrMaxDepthExceeded) {
+			return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -177,13 +184,12 @@ func (h *TaskHandler) CreateTask(c *fiber.Ctx) error {
 }
 
 // getTaskInSpace fetches a task by ID and verifies it belongs to the
-// requester's active space. Returns 404 on mismatch (not 403) to avoid
+// space from the URL path. Returns 404 on mismatch (not 403) to avoid
 // leaking existence of tasks in other spaces.
-func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID string) (*models.Task, error) {
-	if authDTO.ActiveSpaceID == nil {
-		return nil, c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
+func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, taskID string) (*models.Task, error) {
+	spaceID, err := spaceIDFromPath(c)
+	if err != nil {
+		return nil, err
 	}
 
 	task, err := h.taskService.GetTaskByID(taskID)
@@ -193,7 +199,7 @@ func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID
 		})
 	}
 
-	if task.SpaceID != *authDTO.ActiveSpaceID {
+	if task.SpaceID != spaceID {
 		return nil, c.Status(http.StatusNotFound).JSON(fiber.Map{
 			"error": "task not found",
 		})
@@ -204,8 +210,7 @@ func (h *TaskHandler) getTaskInSpace(c *fiber.Ctx, authDTO *dtos.AuthDTO, taskID
 
 // GetTask returns a single task by ID.
 func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -216,7 +221,7 @@ func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 		})
 	}
 
-	task, err := h.getTaskInSpace(c, authDTO, id)
+	task, err := h.getTaskInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -228,8 +233,7 @@ func (h *TaskHandler) GetTask(c *fiber.Ctx) error {
 // Uses a single database query to fetch all descendants, then assembles the tree
 // in memory — O(n) where n = total descendants.
 func (h *TaskHandler) GetTaskTree(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -241,7 +245,7 @@ func (h *TaskHandler) GetTaskTree(c *fiber.Ctx) error {
 	}
 
 	// Verify root task belongs to the requester's space.
-	root, err := h.getTaskInSpace(c, authDTO, id)
+	root, err := h.getTaskInSpace(c, id)
 	if err != nil {
 		return err
 	}
@@ -260,8 +264,7 @@ func (h *TaskHandler) GetTaskTree(c *fiber.Ctx) error {
 
 // UpdateTask updates an existing task.
 func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -273,7 +276,7 @@ func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space before updating.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -296,8 +299,7 @@ func (h *TaskHandler) UpdateTask(c *fiber.Ctx) error {
 
 // DeleteTask deletes a task by ID.
 func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -309,7 +311,7 @@ func (h *TaskHandler) DeleteTask(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space before deleting.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -337,7 +339,7 @@ func (h *TaskHandler) StartTask(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space before starting.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -368,7 +370,7 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space before completing.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -390,11 +392,20 @@ func (h *TaskHandler) CompleteTask(c *fiber.Ctx) error {
 		NextTaskTitle: result.NextTaskTitle,
 	}
 
+	// Include unresolved blockers if any.
+	for _, b := range result.UnresolvedBlockers {
+		resp.UnresolvedBlockers = append(resp.UnresolvedBlockers, dtos.UnresolvedBlockerResponse{
+			ID:     b.ID,
+			Title:  b.Title,
+			Status: string(b.Status),
+		})
+	}
+
 	return c.Status(http.StatusOK).JSON(resp)
 }
 
-// PauseTask pauses an active task.
-func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
+// SetStatus changes the task status via PUT /tasks/:id/status.
+func (h *TaskHandler) SetStatus(c *fiber.Ctx) error {
 	authDTO, err := requireAuth(c)
 	if err != nil {
 		return err
@@ -407,41 +418,17 @@ func (h *TaskHandler) PauseTask(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verify task belongs to the requester's space before pausing.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
-	task, err := h.taskService.PauseTask(id, authDTO.User.ID)
-	if err != nil {
-		return c.Status(http.StatusConflict).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+	var dto dtos.SetStatusRequest
+	if err := c.BodyParser(&dto); err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
-}
-
-// ResumeTask resumes a paused task.
-func (h *TaskHandler) ResumeTask(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
-		return err
-	}
-
-	id := c.Params("id")
-	if id == "" {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "task ID is required",
-		})
-	}
-
-	// Verify task belongs to the requester's space before resuming.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
-		return err
-	}
-
-	task, err := h.taskService.ResumeTask(id, authDTO.User.ID)
+	newStatus := models.TaskStatus(dto.Status)
+	task, err := h.taskService.SetTaskStatus(id, authDTO.User.ID, newStatus)
 	if err != nil {
 		return c.Status(http.StatusConflict).JSON(fiber.Map{
 			"error": err.Error(),
@@ -466,7 +453,7 @@ func (h *TaskHandler) SkipTask(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space before skipping.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -485,18 +472,21 @@ func (h *TaskHandler) SkipTask(c *fiber.Ctx) error {
 //   - ?stationId=uuid — filter by station
 //   - ?assigneeId=uuid — filter by assigned user
 func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
+	if _, err := requireAuth(c); err != nil {
+		return err
+	}
+
+	spaceID, err := spaceIDFromPath(c)
 	if err != nil {
 		return err
 	}
 
-	if authDTO.ActiveSpaceID == nil {
-		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
-			"error": "X-Space-ID header is required",
-		})
-	}
-
+	// By default, ready work returns only type=task and excludes descendants
+	// of job/recipe roots.
+	taskType := models.TaskTypeTask
 	var filter services.ReadyTaskFilter
+	filter.Type = &taskType
+	filter.ExcludeDescendantsOfTypes = []models.TaskType{models.TaskTypeRecipe}
 	if stationID := c.Query("stationId"); stationID != "" {
 		if id, err := uuid.Parse(stationID); err == nil {
 			filter.StationID = &id
@@ -508,7 +498,7 @@ func (h *TaskHandler) GetReadyTasks(c *fiber.Ctx) error {
 		}
 	}
 
-	tasks, err := h.readyWorkService.GetReadyTasks(*authDTO.ActiveSpaceID, &filter)
+	tasks, err := h.readyWorkService.GetReadyTasks(spaceID, &filter)
 	if err != nil {
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
@@ -541,7 +531,7 @@ func (h *TaskHandler) AddChildTask(c *fiber.Ctx) error {
 	}
 
 	// Verify parent task belongs to the requester's space.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -560,6 +550,11 @@ func (h *TaskHandler) AddChildTask(c *fiber.Ctx) error {
 
 	task, err := h.taskService.AddChildTask(id, &dto, authDTO.User.ID)
 	if err != nil {
+		if errors.Is(err, services.ErrMaxDepthExceeded) {
+			return c.Status(http.StatusUnprocessableEntity).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
@@ -570,8 +565,7 @@ func (h *TaskHandler) AddChildTask(c *fiber.Ctx) error {
 
 // AddNote appends a deviation note to the specified task.
 func (h *TaskHandler) AddNote(c *fiber.Ctx) error {
-	authDTO, err := requireAuth(c)
-	if err != nil {
+	if _, err := requireAuth(c); err != nil {
 		return err
 	}
 
@@ -583,7 +577,7 @@ func (h *TaskHandler) AddNote(c *fiber.Ctx) error {
 	}
 
 	// Verify task belongs to the requester's space.
-	if _, err := h.getTaskInSpace(c, authDTO, id); err != nil {
+	if _, err := h.getTaskInSpace(c, id); err != nil {
 		return err
 	}
 
@@ -609,3 +603,4 @@ func (h *TaskHandler) AddNote(c *fiber.Ctx) error {
 
 	return c.Status(http.StatusOK).JSON(dtos.TaskResponseFromModel(task))
 }
+

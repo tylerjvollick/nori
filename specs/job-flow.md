@@ -151,18 +151,29 @@ of job release to match drum throughput and buffer monitoring alerts.
 ### Job Lifecycle
 
 ```
-[Created] → [Active] → [Done]
-                ↓
-           [Cancelled]
+[Backlog] → [Open] → [In Progress] → [Done]
+     \________↑____________↓
+              |       [Cancelled]
+              └→ (backlog → in_progress shortcut allowed)
 ```
 
 A Job (root Task) is:
-- `open` — Created, tasks not yet started. Waiting in release queue.
-- `active` — At least one child task is active.
+- `backlog` — Confirmed (e.g. quote accepted) but not yet scheduled. Excluded
+  from ready work. Shown in the gray "Backlog" column on the Jobs board.
+- `open` — Scheduled, tasks not yet started. Waiting in release queue.
+- `in_progress` — Work has started (at least one child task in progress).
 - `done` — All child tasks are done/skipped.
 - `cancelled` — Abandoned.
 
-Job status is computed from child task statuses, not set manually.
+Allowed transitions: `backlog → open` (schedule), `backlog → in_progress`
+(shortcut), `open → in_progress`, `in_progress → done`, and `open ↔ backlog` /
+`in_progress → open` reverts. `backlog → done` is invalid — backlog work must
+be scheduled or started first. `skipped`/`cancelled` are reachable from any
+non-terminal status; `done` from any non-terminal status except `backlog`.
+
+The displayed job status on the board is computed from child task statuses,
+except `backlog`, which is set on the job itself (at creation or via the
+status dropdown) and takes precedence over child aggregation.
 
 ### Dependency Patterns
 

@@ -21,9 +21,7 @@ const (
 type Recipe struct {
 	ID               uuid.UUID      `gorm:"type:uuid;default:uuid_generate_v4();primaryKey" json:"id"`
 	SpaceID          uuid.UUID      `gorm:"type:uuid;not null" json:"spaceId"`
-	Name             string         `gorm:"not null" json:"name"`
 	Slug             string         `gorm:"type:varchar(255);not null" json:"slug"`
-	Description      *string        `json:"description,omitempty"`
 	CategoryID       *uuid.UUID     `gorm:"type:uuid" json:"categoryId,omitempty"`
 	CurrentVersionID *int           `json:"currentVersionId,omitempty"`
 	ExtendsRecipeID  *uuid.UUID     `gorm:"type:uuid" json:"extendsRecipeId,omitempty"`
@@ -52,7 +50,8 @@ type RecipeVersion struct {
 	RecipeID      uuid.UUID           `gorm:"type:uuid;not null" json:"recipeId"`
 	VersionNumber int                 `gorm:"not null" json:"versionNumber"`
 	Status        RecipeVersionStatus `gorm:"type:varchar(50);not null;default:'draft'" json:"status"`
-	Content       string              `gorm:"type:text;not null" json:"content"`
+	Content       *string             `gorm:"type:text" json:"content,omitempty"`
+	RootTaskID    *string             `gorm:"type:varchar(255)" json:"rootTaskId,omitempty"`
 	ChangeSummary *string             `json:"changeSummary,omitempty"`
 	AuthorID      uuid.UUID           `gorm:"type:uuid;not null" json:"authorId"`
 	PublishedAt   *time.Time          `json:"publishedAt,omitempty"`
@@ -60,8 +59,9 @@ type RecipeVersion struct {
 	UpdatedAt     time.Time           `gorm:"default:now()" json:"updatedAt"`
 
 	// Relations
-	Recipe *Recipe `gorm:"foreignKey:RecipeID" json:"recipe,omitempty"`
-	Author *User   `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
+	Recipe   *Recipe `gorm:"foreignKey:RecipeID" json:"recipe,omitempty"`
+	Author   *User   `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
+	RootTask *Task   `gorm:"foreignKey:RootTaskID" json:"rootTask,omitempty"`
 }
 
 func (RecipeVersion) TableName() string {

@@ -14,22 +14,23 @@ import (
 type TaskType string
 
 const (
-	TaskTypeJob       TaskType = "job"
-	TaskTypeTask      TaskType = "task"
-	TaskTypeMilestone TaskType = "milestone"
-	TaskTypeGate      TaskType = "gate"
+	TaskTypeJob    TaskType = "job"
+	TaskTypeTask   TaskType = "task"
+	TaskTypeRecipe TaskType = "recipe"
 )
 
 // TaskStatus represents the current state of a task.
 type TaskStatus string
 
 const (
-	TaskStatusOpen      TaskStatus = "open"
-	TaskStatusActive    TaskStatus = "active"
-	TaskStatusPaused    TaskStatus = "paused"
-	TaskStatusDone      TaskStatus = "done"
-	TaskStatusSkipped   TaskStatus = "skipped"
-	TaskStatusCancelled TaskStatus = "cancelled"
+	// TaskStatusBacklog marks work that is confirmed (e.g. quote accepted)
+	// but not yet scheduled. Backlog tasks are excluded from ready work.
+	TaskStatusBacklog    TaskStatus = "backlog"
+	TaskStatusOpen       TaskStatus = "open"
+	TaskStatusInProgress TaskStatus = "in_progress"
+	TaskStatusDone       TaskStatus = "done"
+	TaskStatusSkipped    TaskStatus = "skipped"
+	TaskStatusCancelled  TaskStatus = "cancelled"
 )
 
 // JSONB is a helper type for storing arbitrary JSON data in PostgreSQL jsonb columns.
@@ -77,10 +78,13 @@ type Task struct {
 	DisplayOrder    int        `gorm:"not null;default:0" json:"displayOrder"`
 	DueDate         *time.Time `json:"dueDate,omitempty"`
 	StartedAt       *time.Time `json:"startedAt,omitempty"`
-	PausedAt        *time.Time `json:"pausedAt,omitempty"`
 	CompletedAt     *time.Time `json:"completedAt,omitempty"`
-	ActualTimeSecs  int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
-	DeviationNotes  *string    `json:"deviationNotes,omitempty"`
+	ActualTimeSecs    int        `gorm:"not null;default:0" json:"actualTimeSeconds"`
+	BatchSize                  *int    `json:"batchSize,omitempty"`
+	EstimatedTimeSecs          *int    `json:"estimatedTimeSecs,omitempty"`
+	EstimatedTimeFormula       *string `json:"estimatedTimeFormula,omitempty"`
+	EstimatedTimeFromRecipeSecs *int   `json:"estimatedTimeFromRecipeSecs,omitempty"`
+	DeviationNotes             *string `json:"deviationNotes,omitempty"`
 	Metadata        JSONB      `gorm:"type:jsonb" json:"metadata,omitempty"`
 	CreatedAt       time.Time  `gorm:"default:now()" json:"createdAt"`
 	UpdatedAt       time.Time  `gorm:"default:now()" json:"updatedAt"`

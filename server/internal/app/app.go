@@ -38,6 +38,8 @@ func New(cfg *config.Config) *App {
 	taskDepRepo := repositories.NewTaskDepRepository(database.DB)
 	recipeRepo := repositories.NewRecipeRepository(database.DB)
 	stationRepo := repositories.NewStationRepository(database.DB)
+	customerRepo := repositories.NewCustomerRepository(database.DB)
+	subTaskRepo := repositories.NewSubTaskRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -53,19 +55,34 @@ func New(cfg *config.Config) *App {
 		}
 	}
 
+	// Services (SpaceService created early so seed can use it for E2E)
+	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo, stationRepo)
+
 	// First-boot seed
-	seedService := services.NewSeedService(accountRepo, userRepo, userRepo, accountRepo, userAccountRepo, cfg)
+	seedService := services.NewSeedService(accountRepo, userRepo, userRepo, accountRepo, userAccountRepo, userRepo, spaceService, cfg)
 	if err := seedService.SeedIfNeeded(); err != nil {
 		log.Fatal("Failed to seed database: " + err.Error())
 	}
 
 	// Services
 	adminUserService := services.NewAdminUserService(userRepo, userAccountRepo, spaceRepo, spaceMemberRepo)
-	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo)
 	authService := services.NewAuthService(userRepo, accountRepo, userAccountRepo, apiKeyRepo, spaceService, cfg.JWTSecret)
-	taskService := services.NewTaskService(taskRepo, taskDepRepo)
+	timeEventRepo := repositories.NewTimeEventRepository(database.DB)
+	timeEntryRepo := repositories.NewTimeEntryRepository(database.DB)
+	costEntryRepo := repositories.NewCostEntryRepository(database.DB)
+	taskService := services.NewTaskService(taskRepo, taskDepRepo, timeEventRepo)
 	readyWorkService := services.NewReadyWorkService(database.DB)
 	recipeService := services.NewRecipeService(database.DB, recipeRepo, taskRepo, taskDepRepo)
+	costService := services.NewCostService(costEntryRepo, timeEventRepo, taskRepo, spaceRepo, stationRepo)
+	timeEntryService := services.NewTimeEntryService(timeEntryRepo, taskRepo)
+	taskService.SetTimeEntryStopper(timeEntryService)
+	productService := services.NewProductService(database.DB, recipeRepo)
+	materialService := services.NewMaterialService(repositories.NewMaterialRepository(database.DB))
+	taskMaterialService := services.NewTaskMaterialService(
+		repositories.NewTaskMaterialRepository(database.DB),
+		taskRepo,
+		repositories.NewMaterialRepository(database.DB),
+	)
 
 	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, spaceMemberRepo, spaceRepo)
@@ -74,9 +91,17 @@ func New(cfg *config.Config) *App {
 	adminUserHandler := handlers.NewAdminUserHandler(adminUserService)
 	adminAPIKeyHandler := handlers.NewAdminAPIKeyHandler(authService, apiKeyRepo)
 	adminSpaceMemberHandler := handlers.NewAdminSpaceMemberHandler(spaceMemberRepo, spaceRepo)
-	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService)
+	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService, recipeService, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
+	costHandler := handlers.NewCostHandler(costService)
+	jobHandler := handlers.NewJobHandler(taskService, costService, recipeService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
+	customerHandler := handlers.NewCustomerHandler(customerRepo)
+	subTaskHandler := handlers.NewSubTaskHandler(subTaskRepo, taskService)
+	timeEntryHandler := handlers.NewTimeEntryHandler(timeEntryService)
+	productHandler := handlers.NewProductHandler(productService)
+	materialHandler := handlers.NewMaterialHandler(materialService)
+	taskMaterialHandler := handlers.NewTaskMaterialHandler(taskMaterialService)
 
 	// Fiber instance with CORS and increased body limit for media uploads
 	app := fiber.New(fiber.Config{
@@ -86,7 +111,7 @@ func New(cfg *config.Config) *App {
 	// Add CORS middleware
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     "http://localhost:5173,http://localhost:5174",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Content-Length, X-Requested-With, X-Space-ID",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, Content-Length, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
 		AllowCredentials: true,
 	}))
@@ -106,17 +131,35 @@ func New(cfg *config.Config) *App {
 
 	// ── Fully guarded routes (auth + password changed) ─────────────────
 	spaceHandler.RegisterSpaceRoutes(app, authMiddleware, requirePasswordChanged)
-	taskHandler.RegisterTaskRoutes(app, authMiddleware, requirePasswordChanged)
-	recipeHandler.RegisterRecipeRoutes(app, authMiddleware, requirePasswordChanged)
-	recipeHandler.RegisterRecipeVersionRoutes(app, authMiddleware, requirePasswordChanged)
-	stationHandler.RegisterStationRoutes(app, authMiddleware, requirePasswordChanged)
-	taskDepHandler.RegisterTaskDepRoutes(app, authMiddleware, requirePasswordChanged)
+
+	// ── Space-scoped routes (/api/v1/spaces/:spaceId/...) ─────────────
+	spaceScoped := app.Group("/api/v1/spaces/:spaceId", authMiddleware, requirePasswordChanged, middleware.RequireSpace(spaceMemberRepo))
+	stationHandler.RegisterStationRoutes(spaceScoped)
+	costHandler.RegisterCostRoutes(spaceScoped)
+	customerHandler.RegisterCustomerRoutes(spaceScoped)
+	recipeHandler.RegisterRecipeRoutes(spaceScoped)
+	recipeHandler.RegisterRecipeVersionRoutes(spaceScoped)
+	jobHandler.RegisterJobRoutes(spaceScoped)
+	taskHandler.RegisterTaskRoutes(spaceScoped)
+	taskDepHandler.RegisterTaskDepRoutes(spaceScoped)
+	subTaskHandler.RegisterSubTaskRoutes(spaceScoped)
+	timeEntryHandler.RegisterTimeEntryRoutes(spaceScoped)
+	productHandler.RegisterProductRoutes(spaceScoped)
+	materialHandler.RegisterMaterialRoutes(spaceScoped)
+	taskMaterialHandler.RegisterTaskMaterialRoutes(spaceScoped)
 
 	// ── Admin routes (auth + password changed + admin role) ────────────
 	admin := app.Group("/admin", authMiddleware, requirePasswordChanged, middleware.RequireAdmin())
 	adminUserHandler.RegisterAdminUserRoutes(admin)
 	adminAPIKeyHandler.RegisterAdminAPIKeyRoutes(admin)
 	adminSpaceMemberHandler.RegisterAdminSpaceMemberRoutes(admin)
+
+	// ── Dev-only test routes (only registered when NORI_ENV=development) ──
+	if os.Getenv("NORI_ENV") == "development" {
+		testHandler := handlers.NewTestHandler(database.DB)
+		testHandler.RegisterTestRoutes(app, authMiddleware, requirePasswordChanged)
+		log.Println("Test routes registered (NORI_ENV=development)")
+	}
 
 	return &App{
 		Fiber:       app,

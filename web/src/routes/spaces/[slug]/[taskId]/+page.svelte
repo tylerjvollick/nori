@@ -4,26 +4,31 @@
 	import { goto } from '$app/navigation';
 	import { taskApi } from '$lib/api/task';
 	import type { TaskTreeResponse, TaskDepsResponse } from '$lib/api/task';
+	import { jobApi } from '$lib/api/job';
 	import type { TaskResponse } from '$lib/types/task';
 	import type { CompleteTaskResponse } from '$lib/types/task';
 	import { stationApi } from '$lib/api/station';
 	import type { StationResponse } from '$lib/types/station';
-	import { spaceStore } from '$lib/stores/space';
-	import TaskTree from '$lib/components/flow/TaskTree.svelte';
 	import TaskDetailPanel from '$lib/components/flow/TaskDetailPanel.svelte';
 	import BoardView from '$lib/components/flow/BoardView.svelte';
 	import GraphView from '$lib/components/flow/GraphView.svelte';
 	import ListView from '$lib/components/flow/ListView.svelte';
+	import JobCostSummary from '$lib/components/flow/JobCostSummary.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import { Separator } from '$lib/components/ui/separator';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, TreePine, LayoutGrid, GitBranch, List } from '@lucide/svelte';
+	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X, Briefcase, ListTodo } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
+	import { toast } from 'svelte-sonner';
 
 	let slug = $derived($page.params.slug);
 	let taskId = $derived($page.params.taskId);
-	let currentSpace = $derived($spaceStore.currentSpace);
+	let space = $derived($page.data.space!);
+	let spaceId = $derived(space.id);
 
 	let tree = $state<TaskTreeResponse | null>(null);
 	let isLoading = $state(true);
@@ -36,13 +41,16 @@
 	/** Whether initial deps fetch for root has completed (success or failure). */
 	let rootDepsAttempted = $state(false);
 
+	// Parent task (for child task breadcrumbs: Spaces > Space > ParentJob > Task)
+	let parentTask = $state<TaskResponse | null>(null);
+
 	// ---- View mode ----
-	type ViewMode = 'tree' | 'board' | 'graph' | 'list';
+	type ViewMode = 'graph' | 'board' | 'list' | 'cost';
 	const ALL_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'tree', label: 'Tree', icon: TreePine },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
 		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
 		{ value: 'list', label: 'List', icon: List },
+		{ value: 'cost', label: 'Cost', icon: DollarSign },
 	];
 
 	/** Whether the root is a non-job leaf task (no children). */
@@ -53,13 +61,21 @@
 	/** For non-job leaf tasks, hide the view toggle entirely (detail + graph only). */
 	let availableViewModes = $derived(isLeafTask ? [] : ALL_VIEW_MODES);
 
+	/** Task view modes (Graph/List/Board) — used in left pane toolbar toggle. */
+	const TASK_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
+		{ value: 'graph', label: 'Graph', icon: GitBranch },
+		{ value: 'list', label: 'List', icon: List },
+		{ value: 'board', label: 'Board', icon: LayoutGrid },
+	];
+	let taskViewModes = $derived(isLeafTask ? [] : TASK_VIEW_MODES);
+
 	let currentView = $derived<ViewMode>(
-		(($page.url.searchParams.get('view') as ViewMode) || 'tree') as ViewMode,
+		(($page.url.searchParams.get('view') as ViewMode) || 'graph') as ViewMode,
 	);
 
 	function setView(mode: ViewMode): void {
 		const url = new URL($page.url);
-		if (mode === 'tree') {
+		if (mode === 'graph') {
 			url.searchParams.delete('view');
 		} else {
 			url.searchParams.set('view', mode);
@@ -94,6 +110,8 @@
 		return all.slice(1);
 	});
 
+	let taskTitleMap = $derived(new Map(flatTasks.map((t) => [t.id, t.title])));
+
 	// ---- Neighborhood graph for leaf tasks ----
 	let neighborhoodTasks = $state<TaskResponse[]>([]);
 	let neighborhoodDeps = $state<Map<string, TaskDepsResponse>>(new Map());
@@ -119,7 +137,7 @@
 		const neighborResults = await Promise.all(
 			[...neighborIds].map(async (id) => {
 				try {
-					return await taskApi.getTask(id);
+					return await taskApi.getTask(spaceId, id);
 				} catch {
 					return null;
 				}
@@ -146,6 +164,12 @@
 	let depsMap = $state<Map<string, TaskDepsResponse>>(new Map());
 	let depsLoaded = $state(false);
 
+	// ---- Graph detail panel ----
+	let graphPanelOpen = $state(true);
+	let graphPanelTask = $state<TaskTreeResponse | null>(null);
+	let graphPanelDeps = $state<TaskDepsResponse | null>(null);
+	let graphPanelLoading = $state(false);
+
 	async function loadDepsForDescendants(): Promise<void> {
 		if (depsLoaded || !tree) return;
 		const tasks = flatTasks;
@@ -158,7 +182,7 @@
 			const results = await Promise.all(
 				batch.map(async (t) => {
 					try {
-						const deps = await taskApi.getTaskDeps(t.id);
+						const deps = await taskApi.getTaskDeps(spaceId, t.id);
 						return { id: t.id, deps };
 					} catch {
 						return { id: t.id, deps: { blockers: [], dependents: [] } as TaskDepsResponse };
@@ -172,6 +196,14 @@
 		depsMap = map;
 		depsLoaded = true;
 	}
+
+	// Initialize graph panel with root task on load
+	$effect(() => {
+		if (tree && !graphPanelTask) {
+			graphPanelTask = tree;
+			graphPanelDeps = selectedDeps;
+		}
+	});
 
 	// Load deps when switching to graph view (or automatically for leaf tasks)
 	$effect(() => {
@@ -195,8 +227,8 @@
 				neighborhoodDeps = new Map();
 				neighborhoodLoaded = true;
 			}
-		} else if ((view === 'graph' || view === 'list' || view === 'tree') && treeVal && !leaf && !dLoaded) {
-			// Job/parent task: load deps for all descendants when graph, list, or tree view selected
+		} else if ((view === 'graph' || view === 'list') && treeVal && !leaf && !dLoaded) {
+			// Job/parent task: load deps for all descendants when graph or list view selected
 			loadDepsForDescendants();
 		}
 	});
@@ -209,14 +241,11 @@
 		if (isLeafTask) return;
 
 		switch (e.key) {
-			case 't':
-				setView('tree');
+			case 'g':
+				setView('graph');
 				break;
 			case 'b':
 				setView('board');
-				break;
-			case 'g':
-				setView('graph');
 				break;
 			case 'l':
 				// Only switch if not in board view (board uses 'l' for column navigation)
@@ -224,29 +253,9 @@
 					setView('list');
 				}
 				break;
-		}
-	}
-
-	async function handleSelect(task: TaskTreeResponse | TaskResponse): Promise<void> {
-		// If given a plain TaskResponse, find the full tree node if possible
-		if (tree && !('children' in task)) {
-			const found = findNode(tree, task.id);
-			if (found) {
-				selectedTask = found;
-			} else {
-				// Wrap as a tree response for the detail panel
-				selectedTask = { ...task, children: [] } as TaskTreeResponse;
-			}
-		} else {
-			selectedTask = task as TaskTreeResponse;
-		}
-		// Load deps for the selected task
-		selectedDeps = null;
-		try {
-			selectedDeps = await taskApi.getTaskDeps(task.id);
-		} catch {
-			// Deps endpoint may fail — degrade gracefully
-			selectedDeps = null;
+			case 'c':
+				setView('cost');
+				break;
 		}
 	}
 
@@ -254,7 +263,7 @@
 	async function handleTaskAction(updated: TaskResponse): Promise<void> {
 		if (!taskId) return;
 		try {
-			const newTree = await taskApi.getTaskTree(taskId);
+			const newTree = await taskApi.getTaskTree(spaceId, taskId);
 			tree = newTree;
 			// Reset deps cache so graph view re-fetches on next switch
 			depsLoaded = false;
@@ -268,7 +277,7 @@
 				if (found) {
 					selectedTask = found;
 					try {
-						selectedDeps = await taskApi.getTaskDeps(found.id);
+						selectedDeps = await taskApi.getTaskDeps(spaceId, found.id);
 					} catch {
 						selectedDeps = null;
 					}
@@ -283,6 +292,31 @@
 	function handleCompletion(response: CompleteTaskResponse): void {
 		if (response.nextTaskId) {
 			goto(`/spaces/${slug}/${response.nextTaskId}`);
+		}
+	}
+
+	/** Called when a node is clicked in the graph view — loads its details into the side panel. */
+	async function handleGraphNodeSelect(taskId: string): Promise<void> {
+		if (!tree) return;
+		graphPanelLoading = true;
+		graphPanelOpen = true;
+		try {
+			const found = findNode(tree, taskId);
+			if (found) {
+				graphPanelTask = found;
+			} else {
+				const flat = flatTasks.find((t) => t.id === taskId);
+				if (flat) {
+					graphPanelTask = { ...flat, children: [] } as TaskTreeResponse;
+				}
+			}
+			try {
+				graphPanelDeps = await taskApi.getTaskDeps(spaceId, taskId);
+			} catch {
+				graphPanelDeps = null;
+			}
+		} finally {
+			graphPanelLoading = false;
 		}
 	}
 
@@ -308,8 +342,8 @@
 		try {
 			// Fetch tree and stations in parallel
 			const [treeData, stations] = await Promise.all([
-				taskApi.getTaskTree(taskId),
-				stationApi.listStations().catch(() => [] as StationResponse[]),
+				taskApi.getTaskTree(spaceId, taskId),
+				stationApi.listStations(spaceId).catch(() => [] as StationResponse[]),
 			]);
 
 			tree = treeData;
@@ -324,11 +358,20 @@
 			// Auto-select root task and load its deps
 			selectedTask = tree;
 			try {
-				selectedDeps = await taskApi.getTaskDeps(tree.id);
+				selectedDeps = await taskApi.getTaskDeps(spaceId, tree.id);
 			} catch {
 				selectedDeps = null;
 			}
 			rootDepsAttempted = true;
+
+			// Load parent task for breadcrumbs (child task under a job)
+			if (tree.parentId) {
+				try {
+					parentTask = await taskApi.getTask(spaceId, tree.parentId);
+				} catch {
+					parentTask = null;
+				}
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load task tree';
 		} finally {
@@ -336,15 +379,64 @@
 		}
 	});
 
-	/** Compute root-level progress. */
-	function computeRootProgress(root: TaskTreeResponse): { done: number; total: number } {
-		if (!root.children || root.children.length === 0) return { done: 0, total: 0 };
-		let done = 0;
-		for (const child of root.children) {
-			if (child.status === 'done' || child.status === 'skipped') done++;
+	/** Reload the task tree and deps — called by GraphView after mutations. */
+	async function handleTreeMutate(): Promise<void> {
+		if (!taskId || !spaceId) return;
+		try {
+			const treeData = await taskApi.getTaskTree(spaceId, taskId);
+			tree = treeData;
+			// Reload deps for descendants
+			await loadDepsForDescendants();
+		} catch {
+			// ignore — tree will be stale but not crash
 		}
-		return { done, total: root.children.length };
 	}
+
+	// ---- Save as Recipe dialog ----
+	let showSaveAsRecipeDialog = $state(false);
+	let recipeName = $state('');
+	let recipeDescription = $state('');
+	let backfillEstimates = $state(true);
+	let isSavingAsRecipe = $state(false);
+
+	/** Whether the root task is a job (save-as-recipe is only available for jobs). */
+	let isJob = $derived(tree?.type === 'job');
+
+	/** Navigate the detail panel back to the job/task root. */
+	function handleNavToRoot(): void {
+		if (tree) {
+			graphPanelTask = tree;
+			graphPanelDeps = null;
+		}
+	}
+
+	/** Select a task in the graph (called from dep badge clicks in detail panel). */
+	function handleSelectTaskInGraph(depTaskId: string): void {
+		handleGraphNodeSelect(depTaskId);
+	}
+
+	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
+	let graphPanelIsRoot = $derived(graphPanelTask?.id === tree?.id);
+
+	async function handleSaveAsRecipe(): Promise<void> {
+		if (!tree || !recipeName.trim()) return;
+		isSavingAsRecipe = true;
+		try {
+			const recipe = await jobApi.saveAsRecipe(spaceId, tree.id, {
+				name: recipeName.trim(),
+				description: recipeDescription.trim() || undefined,
+				backfillEstimatedFromActual: backfillEstimates,
+			});
+			showSaveAsRecipeDialog = false;
+			toast.success('Recipe created from job. Review and publish when ready.');
+			goto(`/recipes/${recipe.id}`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to save as recipe');
+		} finally {
+			isSavingAsRecipe = false;
+		}
+	}
+
 </script>
 
 <svelte:head>
@@ -354,51 +446,89 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex-1 overflow-hidden flex flex-col">
-	<!-- Header: breadcrumbs, title, view toggle -->
-	<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0 space-y-2">
-		<!-- 1. Breadcrumbs -->
-		<Breadcrumb.Root>
-			<Breadcrumb.List>
-				<Breadcrumb.Item>
-					<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
-				</Breadcrumb.Item>
-				<Breadcrumb.Separator />
-				<Breadcrumb.Item>
-					<Breadcrumb.Link href="/spaces/{slug}">{currentSpace?.name ?? slug}</Breadcrumb.Link>
-				</Breadcrumb.Item>
-				<Breadcrumb.Separator />
-				<Breadcrumb.Item>
-					<Breadcrumb.Page>{taskId}</Breadcrumb.Page>
-				</Breadcrumb.Item>
-			</Breadcrumb.List>
-		</Breadcrumb.Root>
+	<!-- Header: breadcrumbs + actions -->
+	<div class="px-4 sm:px-6 pt-3 pb-2 border-b border-border shrink-0">
+		<div class="flex items-center justify-between">
+			<!-- Breadcrumbs -->
+			<Breadcrumb.Root>
+				<Breadcrumb.List>
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces">Spaces</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					<Breadcrumb.Separator />
+					<Breadcrumb.Item>
+						<Breadcrumb.Link href="/spaces/{slug}">{space.name}</Breadcrumb.Link>
+					</Breadcrumb.Item>
+					{#if parentTask}
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href="/spaces/{slug}/{parentTask.id}" class="flex items-center gap-1">
+								<Briefcase class="size-3.5" />
+								{parentTask.title}
+							</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Page class="flex items-center gap-1">
+								<ListTodo class="size-3.5" />
+								{tree?.title ?? taskId}
+							</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					{:else}
+						<Breadcrumb.Separator />
+						<Breadcrumb.Item>
+							<Breadcrumb.Page class="flex items-center gap-1">
+								{#if tree?.type === 'job'}
+									<Briefcase class="size-3.5" />
+								{:else}
+									<ListTodo class="size-3.5" />
+								{/if}
+								{tree?.title ?? taskId}
+							</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					{/if}
+				</Breadcrumb.List>
+			</Breadcrumb.Root>
 
-		<!-- 2. Title (shown once) -->
-		{#if tree}
-			<h1 class="text-lg font-bold text-foreground truncate">{tree.title}</h1>
-		{:else if isLoading}
-			<Skeleton class="h-6 w-48" />
-		{/if}
-
-		<!-- 3. View toggle buttons (hidden for non-job leaf tasks) -->
-		{#if availableViewModes.length > 0}
-			<div class="flex items-center rounded-lg border bg-muted/50 p-0.5 w-fit">
-				{#each availableViewModes as mode (mode.value)}
-					<Button
-						variant={currentView === mode.value ? 'secondary' : 'ghost'}
-						size="sm"
-						class="gap-1.5 rounded-md px-3 {currentView === mode.value
-							? 'bg-background shadow-sm'
-							: 'hover:bg-transparent hover:text-foreground'}"
-						onclick={() => setView(mode.value)}
-					>
-						<mode.icon class="size-4" />
-						{mode.label}
-					</Button>
-				{/each}
-			</div>
-		{/if}
+			<!-- Actions (right side of breadcrumb bar) -->
+			{#if isJob}
+				<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
+					<BookOpen class="size-4 mr-1" />
+					Save as Recipe
+				</Button>
+			{/if}
+		</div>
 	</div>
+
+	<!-- Top-level tabs: [Tasks] [Cost] (for jobs/tasks with children) -->
+	{#if availableViewModes.length > 0}
+		<div class="flex-shrink-0 border-b bg-background px-4 pt-0 pb-0">
+			<div class="flex gap-0" role="tablist">
+				<button
+					role="tab"
+					aria-selected={currentView !== 'cost'}
+					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+						{currentView !== 'cost'
+							? 'border-foreground text-foreground'
+							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+					onclick={() => { if (currentView === 'cost') setView('graph'); }}
+				>
+					Tasks
+				</button>
+				<button
+					role="tab"
+					aria-selected={currentView === 'cost'}
+					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+						{currentView === 'cost'
+							? 'border-foreground text-foreground'
+							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+					onclick={() => setView('cost')}
+				>
+					Cost
+				</button>
+			</div>
+		</div>
+	{/if}
 
 	<!-- 4. View content -->
 	{#if isLoading}
@@ -438,7 +568,9 @@
 					{#if selectedTask}
 						<TaskDetailPanel
 							task={selectedTask}
+							{spaceId}
 							{stationMap}
+							{taskTitleMap}
 							deps={selectedDeps}
 							onaction={handleTaskAction}
 							oncomplete={handleCompletion}
@@ -449,7 +581,7 @@
 				<!-- Right: Neighborhood graph -->
 				<div class="w-1/2 overflow-hidden">
 					{#if neighborhoodLoaded}
-						<GraphView tasks={neighborhoodTasks} deps={neighborhoodDeps} {stationMap} focusTaskId={tree.id} />
+						<GraphView {spaceId} tasks={neighborhoodTasks} deps={neighborhoodDeps} {stationMap} focusTaskId={tree.id} />
 					{:else}
 						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
 							Loading neighborhood...
@@ -458,69 +590,214 @@
 				</div>
 			</div>
 
-		{:else if currentView === 'tree'}
-			{@const rootProgress = computeRootProgress(tree)}
+		{:else if currentView === 'cost'}
+			<!-- Cost tab: full width -->
+			<div class="flex-1 overflow-y-auto">
+				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
+			</div>
 
+		{:else}
+			<!-- Tasks tab: split pane with [Graph|List|Board] toggle -->
 			<div class="flex-1 flex overflow-hidden">
-				<!-- Left: Task tree -->
-				<div class="w-2/5 border-r border-border overflow-y-auto p-4">
-					{#if rootProgress.total > 0}
-						<div class="mb-4">
-							<div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
-								<span>{rootProgress.done}/{rootProgress.total} done</span>
-								<span>{Math.round((rootProgress.done / rootProgress.total) * 100)}%</span>
-							</div>
-							<div class="h-1.5 bg-muted rounded-full overflow-hidden">
-								<div
-									class="h-full bg-green-500 transition-all duration-300"
-									style="width: {(rootProgress.done / rootProgress.total) * 100}%"
-								></div>
-							</div>
-						</div>
-						<Separator class="mb-3" />
-					{/if}
-
-					{#if tree.children && tree.children.length > 0}
-						<TaskTree
+				<!-- Left pane -->
+				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
+					{#if currentView === 'graph'}
+						<GraphView
+							{spaceId}
 							tasks={flatTasks}
 							deps={depsMap}
 							{stationMap}
-							selectedTaskId={selectedTask?.id}
-							onselect={handleSelect}
+							rootTaskId={tree?.id}
+							onselect={handleGraphNodeSelect}
+							onmutate={handleTreeMutate}
+							viewToggle={{ current: currentView, onchange: (mode) => setView(mode as ViewMode) }}
 						/>
-					{:else}
-						<div class="border border-border rounded-lg p-6 text-center">
-							<p class="text-sm text-muted-foreground">No child tasks yet.</p>
+					{:else if currentView === 'board'}
+						<!-- Board toolbar with view toggle -->
+						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
+							<h1 class="text-lg font-semibold text-foreground">Board</h1>
+							<div class="flex items-center gap-3">
+								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+									{#each taskViewModes as mode (mode.value)}
+										<Button
+											variant={currentView === mode.value ? 'secondary' : 'ghost'}
+											size="sm"
+											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
+												? 'bg-background shadow-sm'
+												: 'hover:bg-transparent hover:text-foreground'}"
+											onclick={() => setView(mode.value)}
+										>
+											<mode.icon class="size-3.5" />
+											{mode.label}
+										</Button>
+									{/each}
+								</div>
+							</div>
+						</div>
+						<div class="flex-1 overflow-hidden">
+							<BoardView {spaceId} tasks={flatTasks} {stationMap} onselect={handleGraphNodeSelect} />
+						</div>
+					{:else if currentView === 'list'}
+						<!-- List toolbar with view toggle -->
+						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
+							<h1 class="text-lg font-semibold text-foreground">List</h1>
+							<div class="flex items-center gap-3">
+								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
+									{#each taskViewModes as mode (mode.value)}
+										<Button
+											variant={currentView === mode.value ? 'secondary' : 'ghost'}
+											size="sm"
+											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
+												? 'bg-background shadow-sm'
+												: 'hover:bg-transparent hover:text-foreground'}"
+											onclick={() => setView(mode.value)}
+										>
+											<mode.icon class="size-3.5" />
+											{mode.label}
+										</Button>
+									{/each}
+								</div>
+							</div>
+						</div>
+						<div class="flex-1 overflow-hidden">
+							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} onselect={handleGraphNodeSelect} />
 						</div>
 					{/if}
+
+					<!-- Panel toggle button (desktop) -->
+					<button
+						onclick={() => (graphPanelOpen = !graphPanelOpen)}
+						class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+						title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
+					>
+						<PanelRight class="size-4" />
+					</button>
 				</div>
 
-				<!-- Right: Detail panel -->
-				<div class="w-3/5 overflow-y-auto">
-					{#if selectedTask}
+				<!-- Detail panel (desktop sidebar) -->
+				{#if graphPanelOpen}
+					<div class="hidden lg:flex w-1/2 flex-col border-l border-border overflow-y-auto shrink-0">
 						<TaskDetailPanel
-							task={selectedTask}
+							task={graphPanelTask ?? tree ?? undefined}
+							{spaceId}
 							{stationMap}
-							deps={selectedDeps}
+							{taskTitleMap}
+							deps={graphPanelDeps}
+							isLoading={graphPanelLoading}
 							onaction={handleTaskAction}
 							oncomplete={handleCompletion}
+							parentName={tree?.title}
+							parentType={isJob ? 'job' : undefined}
+							onnavparent={handleNavToRoot}
+							onselecttask={handleSelectTaskInGraph}
+							hideSubTasks={graphPanelIsRoot}
 						/>
-					{:else}
-						<div class="flex items-center justify-center h-full text-sm text-muted-foreground">
-							Select a task to view details
+					</div>
+				{/if}
+
+				<!-- Detail panel (mobile drawer overlay) -->
+				{#if graphPanelTask}
+					<div class="lg:hidden fixed inset-y-0 right-0 w-4/5 max-w-sm z-50 flex flex-col bg-background border-l border-border shadow-xl overflow-y-auto">
+						<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+							<span class="text-sm font-medium text-foreground truncate">{graphPanelTask.title}</span>
+							<button
+								onclick={() => { graphPanelTask = null; }}
+								class="ml-2 text-muted-foreground hover:text-foreground"
+							>
+								<X class="size-4" />
+							</button>
 						</div>
-					{/if}
-				</div>
+						<div class="flex-1 overflow-y-auto">
+							<TaskDetailPanel
+								task={graphPanelTask}
+								{spaceId}
+								{stationMap}
+								{taskTitleMap}
+								deps={graphPanelDeps}
+								isLoading={graphPanelLoading}
+								onaction={handleTaskAction}
+								oncomplete={handleCompletion}
+								parentName={tree?.title}
+								parentType={isJob ? 'job' : undefined}
+								onnavparent={handleNavToRoot}
+								onselecttask={handleSelectTaskInGraph}
+								hideSubTasks={graphPanelIsRoot}
+							/>
+						</div>
+					</div>
+					<!-- Backdrop -->
+					<button
+						class="lg:hidden fixed inset-0 z-40 bg-black/20"
+						onclick={() => { graphPanelTask = tree ?? null; }}
+						aria-label="Close panel"
+					></button>
+				{/if}
 			</div>
-
-		{:else if currentView === 'board'}
-			<BoardView tasks={flatTasks} {stationMap} />
-
-		{:else if currentView === 'graph'}
-			<GraphView tasks={flatTasks} deps={depsMap} {stationMap} />
-
-		{:else if currentView === 'list'}
-			<ListView tasks={flatTasks} deps={depsMap} {stationMap} />
 		{/if}
 	{/if}
 </div>
+
+<!-- Save as Recipe Dialog -->
+<Dialog.Root
+	bind:open={showSaveAsRecipeDialog}
+	onOpenChange={(open) => {
+		if (!open) {
+			recipeName = '';
+			recipeDescription = '';
+			backfillEstimates = true;
+		}
+	}}
+>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Save as Recipe</Dialog.Title>
+			<Dialog.Description>
+				Create a reusable recipe template from this job's task tree.
+			</Dialog.Description>
+		</Dialog.Header>
+		<form
+			onsubmit={(e) => {
+				e.preventDefault();
+				handleSaveAsRecipe();
+			}}
+		>
+			<div class="grid gap-4 py-2">
+				<div class="grid gap-2">
+					<Label for="recipe-name">Recipe Name</Label>
+					<Input
+						id="recipe-name"
+						bind:value={recipeName}
+						placeholder="e.g. Custom Bookshelf"
+						required
+					/>
+				</div>
+				<div class="grid gap-2">
+					<Label for="recipe-description">Description (optional)</Label>
+					<Input
+						id="recipe-description"
+						bind:value={recipeDescription}
+						placeholder="Brief description of this recipe"
+					/>
+				</div>
+				<div class="flex items-center justify-between">
+					<Label for="backfill-estimates" class="text-sm font-normal">
+						Use actual times as estimated times
+					</Label>
+					<Switch id="backfill-estimates" bind:checked={backfillEstimates} />
+				</div>
+			</div>
+			<Dialog.Footer class="pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => (showSaveAsRecipeDialog = false)}
+				>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={isSavingAsRecipe || !recipeName.trim()}>
+					{isSavingAsRecipe ? 'Saving...' : 'Save as Recipe'}
+				</Button>
+			</Dialog.Footer>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>

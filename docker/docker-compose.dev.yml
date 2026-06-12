@@ -35,6 +35,10 @@ services:
       NORI_ADMIN_PASSWORD: ${NORI_ADMIN_PASSWORD}
       NORI_ACCOUNT_NAME: ${NORI_ACCOUNT_NAME:-Nori Dev}
       NORI_SKIP_PASSWORD_CHANGE: ${NORI_SKIP_PASSWORD_CHANGE:-false}
+      NORI_ENV: development
+      E2E_ACCOUNT_ENABLED: ${E2E_ACCOUNT_ENABLED:-true}
+      E2E_ACCOUNT_EMAIL: ${E2E_ACCOUNT_EMAIL:-e2e-test@nori.dev}
+      E2E_ACCOUNT_PASSWORD: ${E2E_ACCOUNT_PASSWORD:-TestPass123!}
       NORI_PORT: ${NORI_PORT:-8080}
     depends_on:
       database:
@@ -48,15 +52,18 @@ services:
 
   nori-web:
     container_name: nori-web
-    build: ../web
+    build:
+      context: ../web
+      target: dev
     ports:
-      - "5173:5173"
+      - "${WEB_HOST_PORT:-5173}:5173"
     volumes:
       - ../web:/app
       - /app/node_modules
     environment:
       - NODE_ENV=development
       - VITE_API_URL=http://localhost:${NORI_HOST_PORT:-8081}
+      - INTERNAL_API_URL=http://nori-server:${NORI_PORT:-8080}
     command: npm run dev -- --host 0.0.0.0
 
   database:

@@ -3,12 +3,14 @@ package services
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 
 	"github.com/tylerjvollick/nori/internal/formula"
@@ -18,10 +20,15 @@ import (
 
 // RecipeRepositoryInterface defines the methods needed from a recipe repository.
 type RecipeRepositoryInterface interface {
+	Create(recipe *models.Recipe) error
+	Update(recipe *models.Recipe) error
 	GetByID(id uuid.UUID) (*models.Recipe, error)
 	GetVersionByID(id int) (*models.RecipeVersion, error)
+	GetVersionWithTaskTree(id int) (*models.RecipeVersion, []models.Task, error)
 	CreateVersion(version *models.RecipeVersion) error
+	UpdateVersion(version *models.RecipeVersion) error
 	ListVersions(recipeID uuid.UUID) ([]models.RecipeVersion, error)
+	PublishVersion(versionID int) error
 }
 
 // RecipeService handles recipe operations including pouring recipes into task graphs.
@@ -74,7 +81,7 @@ func (s *RecipeService) PourRecipe(
 	}
 
 	if recipe.CurrentVersionID == nil {
-		return nil, fmt.Errorf("recipe %q has no published version", recipe.Name)
+		return nil, fmt.Errorf("recipe %q has no published version", recipe.Slug)
 	}
 
 	version, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
@@ -84,7 +91,7 @@ func (s *RecipeService) PourRecipe(
 
 	// 2. Parse TOML content through formula engine.
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(version.Content))
+	f, err := parser.ParseTOML([]byte(*version.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing recipe TOML: %w", err)
 	}
@@ -144,7 +151,7 @@ func (s *RecipeService) PourRecipe(
 	rootID := generateTaskID()
 	jobTitle := formula.Substitute(f.Description, allVars)
 	if jobTitle == "" {
-		jobTitle = recipe.Name
+		jobTitle = recipe.Slug
 	}
 
 	rootTask := &models.Task{
@@ -235,7 +242,9 @@ func createChildTasks(
 	childSeq := 1
 
 	for _, step := range steps {
-		batchSize := 1
+		// nil BatchSize means "inherit orderQty" — produce 1 task with Quantity=orderQty.
+		// Explicit BatchSize means per-piece expansion: ticketCount = orderQty / batchSize.
+		batchSize := orderQty
 		if step.BatchSize != nil {
 			batchSize = *step.BatchSize
 		}
@@ -247,11 +256,6 @@ func createChildTasks(
 		ticketCount := orderQty / batchSize
 
 		taskType := models.TaskTypeTask
-		if step.Type == "milestone" {
-			taskType = models.TaskTypeMilestone
-		} else if step.Type == "gate" {
-			taskType = models.TaskTypeGate
-		}
 
 		priority := 0
 		if step.Priority != nil {
@@ -289,6 +293,7 @@ func createChildTasks(
 				Title:           title,
 				Description:     description,
 				Quantity:        batchSize,
+				BatchSize:       step.BatchSize,
 				Priority:        priority,
 				DisplayOrder:    childSeq - 1, // use the sequence number we just used
 				CreatedAt:       now,
@@ -409,6 +414,766 @@ func wireDependencies(taskDepRepo TaskDepRepositoryInterface, downstreamIDs, ups
 }
 
 // ---------------------------------------------------------------------------
+// Deep Clone Task Tree
+// ---------------------------------------------------------------------------
+
+// TaskTreeCloneOptions controls how a task tree is cloned. Fields left nil
+// inherit values from the source tasks.
+type TaskTreeCloneOptions struct {
+	NewRootID       string     // Required: the ID for the cloned root task.
+	SpaceID         *uuid.UUID // Override SpaceID on all cloned tasks.
+	CreatedByID     *uuid.UUID // Override CreatedByID on all cloned tasks.
+	RecipeID        *uuid.UUID // Set RecipeID on all cloned tasks.
+	RecipeVersionID *int       // Set RecipeVersionID on all cloned tasks.
+	ResetStatus     bool       // If true, reset all cloned tasks to "open".
+	ClearAssignedTo bool       // If true, nil out AssignedToID on all cloned tasks.
+	BackfillEstimatedFromActual bool // If true, populate EstimatedTimeSecs from ActualTimeSecs when estimated is nil.
+	// SnapshotMaterialCost, when true (recipe → job roll), freezes each cloned
+	// task material's snapshotted_unit_cost to the material's current unit cost.
+	SnapshotMaterialCost bool
+}
+
+// DeepCloneTaskTree clones an entire task tree (root + descendants) and all
+// internal dependency edges. It generates new hierarchical IDs rooted at
+// opts.NewRootID while preserving the tree structure.
+//
+// This is the shared utility used by:
+//  1. Publishing a recipe version (clone draft tree → frozen snapshot)
+//  2. Rolling a recipe (clone published tree → new job)
+//  3. Save-as-recipe (clone job tree → recipe draft tree)
+//
+// The function wraps all writes in a transaction when a real DB handle is
+// available (production), or uses the injected repos directly (tests).
+func (s *RecipeService) DeepCloneTaskTree(
+	sourceRootID string,
+	opts TaskTreeCloneOptions,
+) (*models.Task, error) {
+	if opts.NewRootID == "" {
+		return nil, fmt.Errorf("NewRootID is required")
+	}
+
+	// 1. Load all source tasks using the hierarchical ID prefix.
+	sourceTasks, err := s.taskRepo.GetDescendants(sourceRootID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source task tree: %w", err)
+	}
+	if len(sourceTasks) == 0 {
+		return nil, fmt.Errorf("no tasks found for root %q", sourceRootID)
+	}
+
+	// 2. Build the old→new ID mapping. The root maps to NewRootID, and
+	//    descendants have their prefix replaced: "oldRoot.1.2" → "newRoot.1.2".
+	idMap := make(map[string]string, len(sourceTasks))
+	for _, t := range sourceTasks {
+		if t.ID == sourceRootID {
+			idMap[t.ID] = opts.NewRootID
+		} else {
+			suffix := t.ID[len(sourceRootID):]
+			idMap[t.ID] = opts.NewRootID + suffix
+		}
+	}
+
+	// 3. Load internal dependency edges (both endpoints within this tree).
+	taskIDs := make([]string, len(sourceTasks))
+	for i, t := range sourceTasks {
+		taskIDs[i] = t.ID
+	}
+	sourceDeps, err := s.taskDepRepo.GetDepsAmongTasks(taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("loading source dependencies: %w", err)
+	}
+
+	// 4. Clone tasks and deps within a transaction.
+	now := time.Now()
+	var clonedRoot *models.Task
+
+	cloneFn := func(taskRepo TaskRepositoryInterface, taskDepRepo TaskDepRepositoryInterface) error {
+		for _, src := range sourceTasks {
+			clone := src // copy all fields
+			clone.ID = idMap[src.ID]
+			clone.CreatedAt = now
+			clone.UpdatedAt = now
+
+			// Remap ParentID.
+			if src.ParentID != nil {
+				newParent := idMap[*src.ParentID]
+				clone.ParentID = &newParent
+			}
+
+			// Apply overrides.
+			if opts.SpaceID != nil {
+				clone.SpaceID = *opts.SpaceID
+			}
+			if opts.CreatedByID != nil {
+				clone.CreatedByID = *opts.CreatedByID
+			}
+			if opts.RecipeID != nil {
+				clone.RecipeID = opts.RecipeID
+			}
+			if opts.RecipeVersionID != nil {
+				clone.RecipeVersionID = opts.RecipeVersionID
+			}
+			if opts.ResetStatus {
+				clone.Status = models.TaskStatusOpen
+				clone.StartedAt = nil
+				clone.CompletedAt = nil
+				clone.ActualTimeSecs = 0
+			}
+			if opts.ClearAssignedTo {
+				clone.AssignedToID = nil
+			}
+			if opts.BackfillEstimatedFromActual && clone.EstimatedTimeSecs == nil && src.ActualTimeSecs > 0 {
+				est := src.ActualTimeSecs
+				clone.EstimatedTimeSecs = &est
+			}
+			// Evaluate time formula when rolling into a job. For the simple
+			// clone path (orderQty ≤ 1), batch_size defaults to 1. If the task
+			// has an explicit BatchSize, use that; otherwise use 1.
+			if opts.ResetStatus && clone.EstimatedTimeFormula != nil {
+				bs := 1
+				if clone.BatchSize != nil {
+					bs = *clone.BatchSize
+				}
+				estimated, evalErr := formula.EvalTimeFormula(clone.EstimatedTimeFormula, bs)
+				if evalErr != nil {
+					return fmt.Errorf("task %q: %w", clone.Title, evalErr)
+				}
+				clone.EstimatedTimeFromRecipeSecs = estimated
+				// Clear the formula on the job task — it was only needed for evaluation.
+				clone.EstimatedTimeFormula = nil
+			}
+
+			// Clear GORM relation pointers to avoid accidental nested creates.
+			clone.Space = nil
+			clone.Parent = nil
+			clone.Children = nil
+			clone.Station = nil
+			clone.Customer = nil
+			clone.AssignedTo = nil
+			clone.CreatedBy = nil
+			clone.Tags = nil
+
+			if err := taskRepo.Create(&clone); err != nil {
+				return fmt.Errorf("cloning task %q → %q: %w", src.ID, clone.ID, err)
+			}
+
+			if src.ID == sourceRootID {
+				saved := clone
+				clonedRoot = &saved
+			}
+		}
+
+		// Clone dependency edges with remapped IDs.
+		for _, dep := range sourceDeps {
+			newFrom, ok1 := idMap[dep.FromTaskID]
+			newTo, ok2 := idMap[dep.ToTaskID]
+			if !ok1 || !ok2 {
+				continue // skip deps referencing tasks outside the tree
+			}
+
+			cloneDep := &models.TaskDep{
+				ID:         uuid.New(),
+				FromTaskID: newFrom,
+				ToTaskID:   newTo,
+				Type:       dep.Type,
+			}
+			if err := taskDepRepo.AddDep(cloneDep); err != nil {
+				return fmt.Errorf("cloning dep %s→%s: %w", newFrom, newTo, err)
+			}
+		}
+
+		return nil
+	}
+
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txTaskRepo := repositories.NewTaskRepository(tx)
+			txTaskDepRepo := repositories.NewTaskDepRepository(tx)
+			if cloneErr := cloneFn(txTaskRepo, txTaskDepRepo); cloneErr != nil {
+				return cloneErr
+			}
+			// Clone task materials with a 1:1 source→clone task mapping.
+			oneToOne := make(map[string][]string, len(idMap))
+			for src, dst := range idMap {
+				oneToOne[src] = []string{dst}
+			}
+			return s.cloneTaskMaterials(tx, taskIDs, oneToOne, opts.SnapshotMaterialCost)
+		})
+	} else {
+		err = cloneFn(s.taskRepo, s.taskDepRepo)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return clonedRoot, nil
+}
+
+// cloneTaskMaterials copies task_material rows from a set of source tasks onto
+// their cloned counterparts. idMapping maps each source task ID to one or more
+// new task IDs (one for structural clones, many for batch expansion). When
+// snapshot is true, each clone's snapshotted_unit_cost is frozen to the
+// material's current unit cost.
+func (s *RecipeService) cloneTaskMaterials(tx *gorm.DB, sourceTaskIDs []string, idMapping map[string][]string, snapshot bool) error {
+	tmRepo := repositories.NewTaskMaterialRepository(tx)
+	sourceMaterials, err := tmRepo.ListByTaskIDs(sourceTaskIDs)
+	if err != nil {
+		return fmt.Errorf("loading source task materials: %w", err)
+	}
+	if len(sourceMaterials) == 0 {
+		return nil
+	}
+
+	matRepo := repositories.NewMaterialRepository(tx)
+	costCache := make(map[uuid.UUID]*decimal.Decimal)
+
+	for _, sm := range sourceMaterials {
+		for _, newTaskID := range idMapping[sm.TaskID] {
+			clone := &models.TaskMaterial{
+				TaskID:          newTaskID,
+				MaterialID:      sm.MaterialID,
+				QuantityPerUnit: sm.QuantityPerUnit,
+				Notes:           sm.Notes,
+			}
+			if snapshot {
+				cost, ok := costCache[sm.MaterialID]
+				if !ok {
+					if material, mErr := matRepo.GetByID(sm.MaterialID); mErr == nil {
+						cost = material.UnitCost
+					}
+					costCache[sm.MaterialID] = cost
+				}
+				clone.SnapshottedUnitCost = cost
+			}
+			if err := tmRepo.Create(clone); err != nil {
+				return fmt.Errorf("cloning task material for %q: %w", newTaskID, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Recipe Authoring (Task-Tree Model)
+// ---------------------------------------------------------------------------
+
+// AddStepOptions configures optional fields when adding a recipe step.
+type AddStepOptions struct {
+	Description          *string
+	StationID            *uuid.UUID
+	EstimatedTimeSecs    *int
+	EstimatedTimeFormula *string
+	BatchSize            *int
+}
+
+// UpdateStepOptions configures which fields to update on a recipe step.
+type UpdateStepOptions struct {
+	Title                *string
+	Description          *string
+	StationID            *uuid.UUID
+	EstimatedTimeSecs    *int
+	EstimatedTimeFormula *string
+	BatchSize            *int
+}
+
+// CreateRecipeWithTaskTree creates a new recipe with a root task (Type='recipe')
+// as the draft task tree, and a draft RecipeVersion pointing to the root task.
+// This is the entry point for the visual recipe editor, as opposed to the
+// TOML-based CreateVersion flow.
+func (s *RecipeService) CreateRecipeWithTaskTree(
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	name string,
+	description *string,
+	categoryID *uuid.UUID,
+) (*models.Recipe, *models.RecipeVersion, error) {
+	if name == "" {
+		return nil, nil, fmt.Errorf("recipe name is required")
+	}
+
+	recipeID := uuid.New()
+	rootTaskID := uuid.New().String()
+	now := time.Now()
+
+	recipe := &models.Recipe{
+		ID:          recipeID,
+		SpaceID:     spaceID,
+		Slug:        serviceSlugify(name),
+		CategoryID:  categoryID,
+		CreatedByID: createdByID,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	rootTask := &models.Task{
+		ID:          rootTaskID,
+		SpaceID:     spaceID,
+		CreatedByID: createdByID,
+		RecipeID:    &recipeID,
+		Type:        models.TaskTypeRecipe,
+		Status:      models.TaskStatusOpen,
+		Title:       name,
+		Description: description,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	version := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: 1,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &rootTaskID,
+		AuthorID:      createdByID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	createFn := func(recipeRepo RecipeRepositoryInterface, taskRepo TaskRepositoryInterface) error {
+		if err := recipeRepo.Create(recipe); err != nil {
+			return fmt.Errorf("creating recipe: %w", err)
+		}
+		if err := taskRepo.Create(rootTask); err != nil {
+			return fmt.Errorf("creating root task: %w", err)
+		}
+		if err := recipeRepo.CreateVersion(version); err != nil {
+			return fmt.Errorf("creating draft version: %w", err)
+		}
+		// Link the recipe to its initial draft version.
+		recipe.CurrentVersionID = &version.ID
+		if err := recipeRepo.Update(recipe); err != nil {
+			return fmt.Errorf("linking recipe to draft version: %w", err)
+		}
+		return nil
+	}
+
+	var err error
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txRecipeRepo := repositories.NewRecipeRepository(tx)
+			txTaskRepo := repositories.NewTaskRepository(tx)
+			return createFn(txRecipeRepo, txTaskRepo)
+		})
+	} else {
+		err = createFn(s.recipeRepo, s.taskRepo)
+	}
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return recipe, version, nil
+}
+
+// AddRecipeStep adds a child task under a parent task in a recipe's draft tree.
+// The parent can be the recipe root or another step.
+func (s *RecipeService) AddRecipeStep(
+	recipeID uuid.UUID,
+	parentTaskID string,
+	title string,
+	opts AddStepOptions,
+) (*models.Task, error) {
+	if title == "" {
+		return nil, fmt.Errorf("step title is required")
+	}
+
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if !isTaskInTree(parentTaskID, rootTaskID) {
+		return nil, fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
+	}
+
+	// Get existing children to determine next sequence number.
+	children, err := s.taskRepo.GetChildren(parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("getting children: %w", err)
+	}
+
+	parent, err := s.taskRepo.GetByID(parentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("parent task %q not found: %w", parentTaskID, err)
+	}
+
+	nextSeq := len(children) + 1
+	childID := fmt.Sprintf("%s.%d", parentTaskID, nextSeq)
+	now := time.Now()
+
+	child := &models.Task{
+		ID:                childID,
+		SpaceID:           parent.SpaceID,
+		ParentID:          &parentTaskID,
+		CreatedByID:       parent.CreatedByID,
+		RecipeID:          &recipeID,
+		Type:              models.TaskTypeTask,
+		Status:            models.TaskStatusOpen,
+		Title:             title,
+		Description:       opts.Description,
+		StationID:         opts.StationID,
+		EstimatedTimeSecs:    opts.EstimatedTimeSecs,
+		EstimatedTimeFormula: opts.EstimatedTimeFormula,
+		BatchSize:            opts.BatchSize,
+		DisplayOrder:         nextSeq,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	if err := s.taskRepo.Create(child); err != nil {
+		return nil, fmt.Errorf("creating step: %w", err)
+	}
+
+	return child, nil
+}
+
+// RemoveRecipeStep removes a step and all its descendants from a recipe's
+// draft tree, including any dependency edges that reference removed tasks.
+func (s *RecipeService) RemoveRecipeStep(recipeID uuid.UUID, taskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if taskID == rootTaskID {
+		return fmt.Errorf("cannot remove the root task of a recipe")
+	}
+	if !isTaskInTree(taskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", taskID, recipeID)
+	}
+
+	// Get all descendants (including the task itself).
+	descendants, err := s.taskRepo.GetDescendants(taskID)
+	if err != nil {
+		return fmt.Errorf("getting descendants: %w", err)
+	}
+
+	// Clean up dependency edges referencing any of the removed tasks.
+	for _, task := range descendants {
+		deps, err := s.taskDepRepo.GetAllForTask(task.ID)
+		if err != nil {
+			return fmt.Errorf("getting deps for %q: %w", task.ID, err)
+		}
+		for _, dep := range deps {
+			if err := s.taskDepRepo.RemoveDep(dep.FromTaskID, dep.ToTaskID); err != nil {
+				return fmt.Errorf("removing dep %s→%s: %w", dep.FromTaskID, dep.ToTaskID, err)
+			}
+		}
+	}
+
+	// Delete tasks deepest-first to avoid FK violations on parent_id.
+	sort.Slice(descendants, func(i, j int) bool {
+		return len(descendants[i].ID) > len(descendants[j].ID)
+	})
+	for _, task := range descendants {
+		if err := s.taskRepo.Delete(task.ID); err != nil {
+			return fmt.Errorf("deleting task %q: %w", task.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// ReorderRecipeSteps updates the DisplayOrder of steps under a parent task.
+// orderedTaskIDs must contain the IDs of all children of parentTaskID in the
+// desired order.
+func (s *RecipeService) ReorderRecipeSteps(recipeID uuid.UUID, parentTaskID string, orderedTaskIDs []string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if !isTaskInTree(parentTaskID, rootTaskID) {
+		return fmt.Errorf("parent task %q is not in recipe %s tree", parentTaskID, recipeID)
+	}
+
+	for i, taskID := range orderedTaskIDs {
+		if !isTaskInTree(taskID, rootTaskID) {
+			return fmt.Errorf("task %q is not in recipe tree", taskID)
+		}
+		task, err := s.taskRepo.GetByID(taskID)
+		if err != nil {
+			return fmt.Errorf("task %q not found: %w", taskID, err)
+		}
+		if task.ParentID == nil || *task.ParentID != parentTaskID {
+			return fmt.Errorf("task %q is not a child of %q", taskID, parentTaskID)
+		}
+		task.DisplayOrder = i + 1
+		task.UpdatedAt = time.Now()
+		if err := s.taskRepo.Update(task); err != nil {
+			return fmt.Errorf("updating display order for %q: %w", taskID, err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateRecipeStep updates fields on a step in a recipe's draft tree.
+func (s *RecipeService) UpdateRecipeStep(recipeID uuid.UUID, taskID string, opts UpdateStepOptions) (*models.Task, error) {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if !isTaskInTree(taskID, rootTaskID) {
+		return nil, fmt.Errorf("task %q is not in recipe %s tree", taskID, recipeID)
+	}
+
+	task, err := s.taskRepo.GetByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("task %q not found: %w", taskID, err)
+	}
+
+	if opts.Title != nil {
+		task.Title = *opts.Title
+	}
+	if opts.Description != nil {
+		task.Description = opts.Description
+	}
+	if opts.StationID != nil {
+		task.StationID = opts.StationID
+	}
+	if opts.EstimatedTimeSecs != nil {
+		task.EstimatedTimeSecs = opts.EstimatedTimeSecs
+	}
+	if opts.EstimatedTimeFormula != nil {
+		task.EstimatedTimeFormula = opts.EstimatedTimeFormula
+	}
+	if opts.BatchSize != nil {
+		task.BatchSize = opts.BatchSize
+	}
+	task.UpdatedAt = time.Now()
+
+	if err := s.taskRepo.Update(task); err != nil {
+		return nil, fmt.Errorf("updating step: %w", err)
+	}
+
+	return task, nil
+}
+
+// AddStepDependency adds a dependency edge between two steps in a recipe's
+// draft tree. fromTaskID depends on toTaskID (toTaskID blocks fromTaskID).
+func (s *RecipeService) AddStepDependency(recipeID uuid.UUID, fromTaskID string, toTaskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if !isTaskInTree(fromTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
+	}
+	if !isTaskInTree(toTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", toTaskID, recipeID)
+	}
+
+	dep := &models.TaskDep{
+		ID:         uuid.New(),
+		FromTaskID: fromTaskID,
+		ToTaskID:   toTaskID,
+		Type:       models.DepTypeBlocks,
+	}
+
+	if err := s.taskDepRepo.AddDep(dep); err != nil {
+		return fmt.Errorf("adding dependency: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveStepDependency removes a dependency edge between two steps in a
+// recipe's draft tree.
+func (s *RecipeService) RemoveStepDependency(recipeID uuid.UUID, fromTaskID string, toTaskID string) error {
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return err
+	}
+
+	rootTaskID := *version.RootTaskID
+	if !isTaskInTree(fromTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", fromTaskID, recipeID)
+	}
+	if !isTaskInTree(toTaskID, rootTaskID) {
+		return fmt.Errorf("task %q is not in recipe %s tree", toTaskID, recipeID)
+	}
+
+	if err := s.taskDepRepo.RemoveDep(fromTaskID, toTaskID); err != nil {
+		return fmt.Errorf("removing dependency: %w", err)
+	}
+
+	return nil
+}
+
+// PublishVersion publishes a draft recipe version by deep-cloning the draft
+// task tree into a frozen snapshot, then marking the version as published.
+//
+// Steps:
+//  1. Find the draft version and validate it has a root task
+//  2. Deep-clone the draft task tree (new IDs, same structure)
+//  3. Update the version's RootTaskID to the cloned root
+//  4. Publish the version (sets status=published, publishedAt, archives old version,
+//     updates Recipe.CurrentVersionID)
+//
+// The draft task tree remains in the database for future editing. The published
+// version's RootTaskID points to the frozen clone.
+func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersion, error) {
+	// 1. Get the draft version.
+	version, err := s.getDraftVersion(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("getting draft version: %w", err)
+	}
+
+	// 2. Deep-clone the draft task tree.
+	sourceRootID := *version.RootTaskID
+	clonedRootID := uuid.New().String()
+
+	_, err = s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
+		NewRootID: clonedRootID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning draft task tree: %w", err)
+	}
+
+	// 3. Update the version's RootTaskID to the cloned root.
+	version.RootTaskID = &clonedRootID
+	if err := s.recipeRepo.UpdateVersion(version); err != nil {
+		return nil, fmt.Errorf("updating version root task: %w", err)
+	}
+
+	// 4. Publish: set status=published, archive old version, update Recipe.CurrentVersionID.
+	if err := s.recipeRepo.PublishVersion(version.ID); err != nil {
+		return nil, fmt.Errorf("publishing version: %w", err)
+	}
+
+	// Re-fetch the version to get the updated fields (status, publishedAt).
+	published, err := s.recipeRepo.GetVersionByID(version.ID)
+	if err != nil {
+		return nil, fmt.Errorf("re-fetching published version: %w", err)
+	}
+
+	return published, nil
+}
+
+// CreateDraftFromPublished creates a new draft version by cloning the current
+// published version's task tree. This is the task-tree equivalent of "create new
+// version" — the user gets a mutable draft copy they can edit via the task API.
+func (s *RecipeService) CreateDraftFromPublished(
+	recipeID uuid.UUID,
+	authorID uuid.UUID,
+	changeSummary *string,
+) (*models.RecipeVersion, error) {
+	// 1. Load the recipe to find the current published version.
+	recipe, err := s.recipeRepo.GetByID(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe: %w", err)
+	}
+
+	if recipe.CurrentVersionID == nil {
+		return nil, fmt.Errorf("recipe %s has no published version to clone from", recipeID)
+	}
+
+	// 2. Ensure no draft already exists.
+	versions, err := s.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing versions: %w", err)
+	}
+	for _, v := range versions {
+		if v.Status == models.RecipeVersionStatusDraft {
+			return nil, fmt.Errorf("recipe %s already has a draft version (ID %d)", recipeID, v.ID)
+		}
+	}
+
+	// 3. Load the published version and verify it has a root task.
+	publishedVersion, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading published version: %w", err)
+	}
+	if publishedVersion.RootTaskID == nil {
+		return nil, fmt.Errorf("published version has no root task to clone")
+	}
+
+	// 4. Clone the published task tree.
+	clonedRootID := uuid.New().String()
+
+	_, err = s.DeepCloneTaskTree(*publishedVersion.RootTaskID, TaskTreeCloneOptions{
+		NewRootID: clonedRootID,
+		RecipeID:  &recipeID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning published task tree: %w", err)
+	}
+
+	// 5. Determine the next version number.
+	nextVersion := 1
+	if len(versions) > 0 {
+		nextVersion = versions[0].VersionNumber + 1
+	}
+
+	// 6. Create the new draft version.
+	now := time.Now()
+	draft := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: nextVersion,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &clonedRootID,
+		ChangeSummary: changeSummary,
+		AuthorID:      authorID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	if err := s.recipeRepo.CreateVersion(draft); err != nil {
+		return nil, fmt.Errorf("creating draft version: %w", err)
+	}
+
+	return draft, nil
+}
+
+// getDraftVersion finds the draft version for a recipe and validates it has a root task.
+func (s *RecipeService) getDraftVersion(recipeID uuid.UUID) (*models.RecipeVersion, error) {
+	versions, err := s.recipeRepo.ListVersions(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("listing versions: %w", err)
+	}
+	for i := range versions {
+		if versions[i].Status == models.RecipeVersionStatusDraft {
+			if versions[i].RootTaskID == nil {
+				return nil, fmt.Errorf("draft version has no root task")
+			}
+			return &versions[i], nil
+		}
+	}
+	return nil, fmt.Errorf("recipe %s has no draft version", recipeID)
+}
+
+// isTaskInTree checks if a task ID belongs to a recipe tree rooted at rootTaskID.
+func isTaskInTree(taskID string, rootTaskID string) bool {
+	return taskID == rootTaskID || strings.HasPrefix(taskID, rootTaskID+".")
+}
+
+// serviceSlugify converts a name to a URL-friendly slug.
+func serviceSlugify(s string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			prevDash = false
+		} else if !prevDash && b.Len() > 0 {
+			b.WriteRune('-')
+			prevDash = true
+		}
+	}
+	result := b.String()
+	return strings.TrimRight(result, "-")
+}
+
+// ---------------------------------------------------------------------------
 // Recipe Diff
 // ---------------------------------------------------------------------------
 
@@ -500,7 +1265,7 @@ func (s *RecipeService) DiffJobToRecipe(jobID string, recipeVersionID int) (*Rec
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(version.Content))
+	f, err := parser.ParseTOML([]byte(*version.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing recipe TOML: %w", err)
 	}
@@ -708,6 +1473,462 @@ func generateTaskID() string {
 }
 
 // ---------------------------------------------------------------------------
+// Roll Recipe (clone published tree → new job)
+// ---------------------------------------------------------------------------
+
+// RollRecipeOptions configures optional fields when rolling a recipe into a job.
+type RollRecipeOptions struct {
+	Title      *string    // Override the job root title (defaults to recipe name).
+	CustomerID *uuid.UUID // Associate the job with a customer.
+	DueDate    *time.Time // Set a due date on the job root.
+	OrderQty   *int       // Batch expansion: number of units to produce (default 1).
+}
+
+// RollRecipe clones a published recipe version's task tree into a new job.
+//
+// When OrderQty is nil or 1, this is a 1:1 structural clone via DeepCloneTaskTree.
+// When OrderQty > 1, batch expansion is applied: each recipe step is expanded
+// based on its BatchSize (default 1), creating ticket_count = order_qty / batch_size
+// tasks per step. Dependencies are wired using batch-aware patterns (1:1, fan-out,
+// fan-in).
+//
+// The resulting tree gets:
+//   - A new root with Type='job' and a generated nori-{hex} ID
+//   - All children with new hierarchical IDs
+//   - Dependency edges wired (cloned or batch-expanded)
+//   - RecipeID and RecipeVersionID set on all tasks for traceability
+//   - Status reset to 'open' on all tasks
+//
+// Returns the new job root task.
+func (s *RecipeService) RollRecipe(
+	recipeID uuid.UUID,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	opts RollRecipeOptions,
+) (*models.Task, error) {
+	// 1. Load recipe and validate it has a published version.
+	recipe, err := s.recipeRepo.GetByID(recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe: %w", err)
+	}
+	if recipe.CurrentVersionID == nil {
+		return nil, fmt.Errorf("recipe %q has no published version", recipe.Slug)
+	}
+
+	version, err := s.recipeRepo.GetVersionByID(*recipe.CurrentVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading recipe version: %w", err)
+	}
+	if version.RootTaskID == nil {
+		return nil, fmt.Errorf("published version %d has no root task tree", version.ID)
+	}
+
+	sourceRootID := *version.RootTaskID
+	newRootID := generateTaskID()
+	orderQty := 1
+	if opts.OrderQty != nil {
+		orderQty = *opts.OrderQty
+	}
+
+	var jobRoot *models.Task
+
+	if orderQty <= 1 {
+		// Simple path: 1:1 structural clone.
+		clonedRoot, err := s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
+			NewRootID:            newRootID,
+			SpaceID:              &spaceID,
+			CreatedByID:          &createdByID,
+			RecipeID:             &recipeID,
+			RecipeVersionID:      recipe.CurrentVersionID,
+			ResetStatus:          true,
+			SnapshotMaterialCost: true,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("cloning recipe task tree: %w", err)
+		}
+		jobRoot = clonedRoot
+	} else {
+		// Batch expansion path: expand steps based on order_qty / batch_size.
+		root, err := s.rollWithBatchExpansion(
+			sourceRootID, newRootID, spaceID, createdByID,
+			&recipeID, recipe.CurrentVersionID, orderQty,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("batch expansion: %w", err)
+		}
+		jobRoot = root
+	}
+
+	// Update root task: remap type to 'job' and apply optional overrides.
+	jobRoot.Type = models.TaskTypeJob
+	if opts.Title != nil {
+		jobRoot.Title = *opts.Title
+	}
+	if opts.CustomerID != nil {
+		jobRoot.CustomerID = opts.CustomerID
+	}
+	if opts.DueDate != nil {
+		jobRoot.DueDate = opts.DueDate
+	}
+
+	if err := s.taskRepo.Update(jobRoot); err != nil {
+		return nil, fmt.Errorf("updating job root task: %w", err)
+	}
+
+	return jobRoot, nil
+}
+
+// rollWithBatchExpansion loads the published tree, creates a root job task,
+// expands child tasks based on batch sizes, and wires dependencies.
+func (s *RecipeService) rollWithBatchExpansion(
+	sourceRootID string,
+	newRootID string,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	recipeID *uuid.UUID,
+	recipeVersionID *int,
+	orderQty int,
+) (*models.Task, error) {
+	// 1. Load all source tasks.
+	sourceTasks, err := s.taskRepo.GetDescendants(sourceRootID)
+	if err != nil {
+		return nil, fmt.Errorf("loading source task tree: %w", err)
+	}
+	if len(sourceTasks) == 0 {
+		return nil, fmt.Errorf("no tasks found for root %q", sourceRootID)
+	}
+
+	// 2. Load source dependency edges.
+	taskIDs := make([]string, len(sourceTasks))
+	for i, t := range sourceTasks {
+		taskIDs[i] = t.ID
+	}
+	sourceDeps, err := s.taskDepRepo.GetDepsAmongTasks(taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("loading source dependencies: %w", err)
+	}
+
+	// 3. Create root job task (clone of source root).
+	now := time.Now()
+	var sourceRoot models.Task
+	for _, t := range sourceTasks {
+		if t.ID == sourceRootID {
+			sourceRoot = t
+			break
+		}
+	}
+
+	root := &models.Task{
+		ID:              newRootID,
+		SpaceID:         spaceID,
+		CreatedByID:     createdByID,
+		RecipeID:        recipeID,
+		RecipeVersionID: recipeVersionID,
+		Type:            models.TaskTypeJob,
+		Status:          models.TaskStatusOpen,
+		Title:           sourceRoot.Title,
+		Quantity:        1,
+		Priority:        sourceRoot.Priority,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := s.taskRepo.Create(root); err != nil {
+		return nil, fmt.Errorf("creating job root: %w", err)
+	}
+
+	// 4. Expand children with batch logic.
+	sourceToTaskIDs := make(map[string][]string)
+	rootChildren := getChildTasks(sourceRootID, sourceTasks)
+	if err := expandTaskTree(
+		s.taskRepo, newRootID, rootChildren, spaceID, createdByID,
+		recipeID, recipeVersionID, sourceTasks, now, sourceToTaskIDs, orderQty,
+	); err != nil {
+		return nil, err
+	}
+
+	// 5. Wire dependencies using source edges + expansion mapping.
+	if err := wireSourceDependencies(s.taskDepRepo, sourceDeps, sourceToTaskIDs); err != nil {
+		return nil, fmt.Errorf("wiring dependencies: %w", err)
+	}
+
+	// 6. Clone task materials onto every expanded task, snapshotting cost.
+	// The root source task also carries materials; map it to the new root.
+	if s.db != nil {
+		sourceToTaskIDs[sourceRootID] = []string{newRootID}
+		if err := s.cloneTaskMaterials(s.db, taskIDs, sourceToTaskIDs, true); err != nil {
+			return nil, fmt.Errorf("cloning task materials: %w", err)
+		}
+	}
+
+	return root, nil
+}
+
+// expandTaskTree recursively creates child tasks from source recipe tasks,
+// expanding per-piece tasks based on order quantity and batch size.
+// This is the task-tree equivalent of createChildTasks (which works with formula.Step).
+//
+// The sourceToTaskIDs map is populated with source task ID → []new task IDs.
+func expandTaskTree(
+	taskRepo TaskRepositoryInterface,
+	parentID string,
+	sourceChildren []models.Task,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	recipeID *uuid.UUID,
+	recipeVersionID *int,
+	allSourceTasks []models.Task,
+	now time.Time,
+	sourceToTaskIDs map[string][]string,
+	orderQty int,
+) error {
+	childSeq := 1
+
+	for _, src := range sourceChildren {
+		// nil BatchSize means "inherit orderQty" — produce 1 task with Quantity=orderQty.
+		// Explicit BatchSize means per-piece expansion: ticketCount = orderQty / batchSize.
+		batchSize := orderQty
+		if src.BatchSize != nil {
+			batchSize = *src.BatchSize
+		}
+
+		// Calculate ticket count.
+		if orderQty%batchSize != 0 {
+			return fmt.Errorf("task %q: order_qty %d is not evenly divisible by batch_size %d",
+				src.Title, orderQty, batchSize)
+		}
+		ticketCount := orderQty / batchSize
+
+		var taskIDs []string
+
+		for n := 1; n <= ticketCount; n++ {
+			childID := fmt.Sprintf("%s.%d", parentID, childSeq)
+			childSeq++
+
+			// Build title with {{n}} and {{batch_count}} substitution.
+			title := src.Title
+			if ticketCount > 1 {
+				title = strings.ReplaceAll(title, "{{n}}", strconv.Itoa(n))
+				title = strings.ReplaceAll(title, "{{batch_count}}", strconv.Itoa(ticketCount))
+			}
+
+			// Evaluate time formula. For nil batchSize (inherit), {{batch_size}}
+			// resolves to the job's orderQty. For explicit batchSize, it resolves
+			// to the task's batch size.
+			formulaBatchSize := orderQty
+			if src.BatchSize != nil {
+				formulaBatchSize = batchSize
+			}
+			estimatedFromRecipe, err := formula.EvalTimeFormula(src.EstimatedTimeFormula, formulaBatchSize)
+			if err != nil {
+				return fmt.Errorf("task %q: %w", src.Title, err)
+			}
+
+			task := &models.Task{
+				ID:                          childID,
+				SpaceID:                     spaceID,
+				ParentID:                    &parentID,
+				CreatedByID:                 createdByID,
+				RecipeID:                    recipeID,
+				RecipeVersionID:             recipeVersionID,
+				Type:                        models.TaskTypeTask,
+				Status:                      models.TaskStatusOpen,
+				Title:                       title,
+				Description:                 src.Description,
+				Quantity:                    batchSize,
+				Priority:                    src.Priority,
+				StationID:                   src.StationID,
+				DisplayOrder:                childSeq - 1,
+				EstimatedTimeFromRecipeSecs: estimatedFromRecipe,
+				BatchSize:                   src.BatchSize,
+				CreatedAt:                   now,
+				UpdatedAt:                   now,
+			}
+
+			if err := taskRepo.Create(task); err != nil {
+				return fmt.Errorf("creating task from %q (ticket %d/%d): %w",
+					src.Title, n, ticketCount, err)
+			}
+
+			taskIDs = append(taskIDs, childID)
+		}
+
+		sourceToTaskIDs[src.ID] = taskIDs
+
+		// Recursively expand children under the first task of this step.
+		srcChildren := getChildTasks(src.ID, allSourceTasks)
+		if len(srcChildren) > 0 {
+			if err := expandTaskTree(
+				taskRepo, taskIDs[0], srcChildren, spaceID, createdByID,
+				recipeID, recipeVersionID, allSourceTasks, now, sourceToTaskIDs, orderQty,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// getChildTasks returns direct children of the given parent from the task list,
+// sorted by DisplayOrder.
+func getChildTasks(parentID string, tasks []models.Task) []models.Task {
+	var children []models.Task
+	for _, t := range tasks {
+		if t.ParentID != nil && *t.ParentID == parentID {
+			children = append(children, t)
+		}
+	}
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].DisplayOrder < children[j].DisplayOrder
+	})
+	return children
+}
+
+// wireSourceDependencies creates TaskDep edges based on source task dependencies,
+// using the sourceToTaskIDs mapping to resolve expanded task IDs and apply
+// the appropriate wiring pattern (1:1, fan-out, fan-in).
+func wireSourceDependencies(
+	taskDepRepo TaskDepRepositoryInterface,
+	sourceDeps []models.TaskDep,
+	sourceToTaskIDs map[string][]string,
+) error {
+	for _, dep := range sourceDeps {
+		downstreamIDs, ok1 := sourceToTaskIDs[dep.FromTaskID]
+		upstreamIDs, ok2 := sourceToTaskIDs[dep.ToTaskID]
+		if !ok1 || !ok2 {
+			continue
+		}
+
+		if err := wireDependencies(taskDepRepo, downstreamIDs, upstreamIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Save As Recipe (clone job tree → new recipe)
+// ---------------------------------------------------------------------------
+
+// SaveAsRecipeOptions configures optional fields when saving a job as a recipe.
+type SaveAsRecipeOptions struct {
+	Description *string    // Recipe description.
+	CategoryID  *uuid.UUID // Recipe category.
+	BackfillEstimatedFromActual bool // If true, populate EstimatedTimeSecs from ActualTimeSecs when estimated is nil.
+}
+
+// SaveAsRecipe clones a job's task tree into a brand-new recipe. This is the
+// "I just built something — save this as a template" flow.
+//
+// Steps:
+//  1. Load and validate the job root task.
+//  2. Create a new Recipe record.
+//  3. Deep-clone the job tree into a new root with Type='recipe', stripping
+//     runtime fields (status, assigned_to, times) and optionally back-filling
+//     estimated_time_secs from actual_time_secs.
+//  4. Create a draft RecipeVersion pointing to the cloned root.
+//  5. Return the new Recipe.
+func (s *RecipeService) SaveAsRecipe(
+	jobID string,
+	spaceID uuid.UUID,
+	createdByID uuid.UUID,
+	name string,
+	opts SaveAsRecipeOptions,
+) (*models.Recipe, error) {
+	if name == "" {
+		return nil, fmt.Errorf("recipe name is required")
+	}
+
+	// 1. Load job root and validate.
+	rootTask, err := s.taskRepo.GetByID(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("loading job %q: %w", jobID, err)
+	}
+	if rootTask.Type != models.TaskTypeJob {
+		return nil, fmt.Errorf("task %q is not a job (type=%s)", jobID, rootTask.Type)
+	}
+
+	// 2. Prepare IDs and timestamps.
+	recipeID := uuid.New()
+	newRootID := uuid.New().String()
+	now := time.Now()
+
+	// 3. Create Recipe record.
+	recipe := &models.Recipe{
+		ID:          recipeID,
+		SpaceID:     spaceID,
+		Slug:        serviceSlugify(name),
+		CategoryID:  opts.CategoryID,
+		CreatedByID: createdByID,
+		IsActive:    true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	// 4. Deep-clone the job tree, stripping runtime fields.
+	clonedRoot, err := s.DeepCloneTaskTree(jobID, TaskTreeCloneOptions{
+		NewRootID:                   newRootID,
+		SpaceID:                     &spaceID,
+		CreatedByID:                 &createdByID,
+		RecipeID:                    &recipeID,
+		ResetStatus:                 true,
+		ClearAssignedTo:             true,
+		BackfillEstimatedFromActual: opts.BackfillEstimatedFromActual,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cloning job task tree: %w", err)
+	}
+
+	// 5. Update root to recipe type.
+	clonedRoot.Type = models.TaskTypeRecipe
+	clonedRoot.Title = name
+	clonedRoot.Description = opts.Description
+	clonedRoot.CustomerID = nil
+	clonedRoot.DueDate = nil
+	if err := s.taskRepo.Update(clonedRoot); err != nil {
+		return nil, fmt.Errorf("updating cloned root to recipe: %w", err)
+	}
+
+	// 6. Create draft RecipeVersion.
+	version := &models.RecipeVersion{
+		RecipeID:      recipeID,
+		VersionNumber: 1,
+		Status:        models.RecipeVersionStatusDraft,
+		RootTaskID:    &newRootID,
+		AuthorID:      createdByID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+
+	// 7. Persist recipe + version.
+	createFn := func(recipeRepo RecipeRepositoryInterface) error {
+		if err := recipeRepo.Create(recipe); err != nil {
+			return fmt.Errorf("creating recipe: %w", err)
+		}
+		if err := recipeRepo.CreateVersion(version); err != nil {
+			return fmt.Errorf("creating draft version: %w", err)
+		}
+		return nil
+	}
+
+	if s.db != nil {
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			txRecipeRepo := repositories.NewRecipeRepository(tx)
+			return createFn(txRecipeRepo)
+		})
+	} else {
+		err = createFn(s.recipeRepo)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	recipe.CurrentVersionID = nil // Draft, not yet published.
+	return recipe, nil
+}
+
+// ---------------------------------------------------------------------------
 // Recipe Promote
 // ---------------------------------------------------------------------------
 
@@ -760,7 +1981,7 @@ func (s *RecipeService) PromoteJobToRecipe(
 	}
 
 	parser := formula.NewParser()
-	f, err := parser.ParseTOML([]byte(sourceVersion.Content))
+	f, err := parser.ParseTOML([]byte(*sourceVersion.Content))
 	if err != nil {
 		return nil, fmt.Errorf("parsing source TOML: %w", err)
 	}
@@ -792,7 +2013,7 @@ func (s *RecipeService) PromoteJobToRecipe(
 		RecipeID:      recipeID,
 		VersionNumber: nextVersionNumber,
 		Status:        models.RecipeVersionStatusDraft,
-		Content:       newContent,
+		Content:       &newContent,
 		AuthorID:      rootTask.CreatedByID,
 		CreatedAt:     now,
 		UpdatedAt:     now,

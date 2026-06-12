@@ -6,24 +6,24 @@ import type {
 import { apiClient } from './client';
 
 class StationApi {
-	async listStations(): Promise<StationResponse[]> {
-		return apiClient.get<StationResponse[]>('/api/v1/stations');
+	async listStations(spaceId: string): Promise<StationResponse[]> {
+		return apiClient.get<StationResponse[]>(`/api/v1/spaces/${spaceId}/stations`);
 	}
 
-	async getStation(id: string): Promise<StationResponse> {
-		return apiClient.get<StationResponse>(`/api/v1/stations/${id}`);
+	async getStation(spaceId: string, id: string): Promise<StationResponse> {
+		return apiClient.get<StationResponse>(`/api/v1/spaces/${spaceId}/stations/${id}`);
 	}
 
-	async createStation(data: CreateStationRequest): Promise<StationResponse> {
-		return apiClient.post<StationResponse>('/api/v1/stations', data);
+	async createStation(spaceId: string, data: CreateStationRequest): Promise<StationResponse> {
+		return apiClient.post<StationResponse>(`/api/v1/spaces/${spaceId}/stations`, data);
 	}
 
-	async updateStation(id: string, data: UpdateStationRequest): Promise<StationResponse> {
-		return apiClient.put<StationResponse>(`/api/v1/stations/${id}`, data);
+	async updateStation(spaceId: string, id: string, data: UpdateStationRequest): Promise<StationResponse> {
+		return apiClient.put<StationResponse>(`/api/v1/spaces/${spaceId}/stations/${id}`, data);
 	}
 
-	async deleteStation(id: string): Promise<void> {
-		return apiClient.delete<void>(`/api/v1/stations/${id}`);
+	async deleteStation(spaceId: string, id: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/stations/${id}`);
 	}
 }
 

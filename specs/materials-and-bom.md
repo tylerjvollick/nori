@@ -72,6 +72,7 @@ Material
   - ReorderQuantity: decimal (suggested reorder amount)
   - Location: string (nullable — "Rack 3, Bay 2")
   - Supplier: string (nullable)
+  - SKU: string (nullable — supplier SKU)
   - UnitCost: decimal (nullable — for cost estimation)
   - IsActive: bool
   - CreatedAt, UpdatedAt: timestamp
@@ -142,11 +143,22 @@ If materials have UnitCost set, Nori can compute:
 
 ### API Surface
 
+Material catalog CRUD is implemented (space-scoped, soft delete via
+`deleted_at`, `?search=` name filter on list). Stock adjustment and BOM
+endpoints are still planned.
+
 ```
-GET    /api/spaces/:spaceId/materials              — List materials
-POST   /api/spaces/:spaceId/materials              — Create material
-PUT    /api/materials/:id                          — Update material
-POST   /api/materials/:id/adjust                   — Adjust stock (manual)
+GET    /api/v1/spaces/:spaceId/materials           — List materials (?search=) [implemented]
+POST   /api/v1/spaces/:spaceId/materials           — Create material [implemented]
+GET    /api/v1/spaces/:spaceId/materials/:id       — Get material [implemented]
+PUT    /api/v1/spaces/:spaceId/materials/:id       — Update material [implemented]
+DELETE /api/v1/spaces/:spaceId/materials/:id       — Soft-delete material [implemented]
+POST   /api/v1/spaces/:spaceId/materials/:id/adjust — Adjust stock (manual)
+
+POST   /api/v1/spaces/:spaceId/tasks/:taskId/materials      — Attach material to task [implemented]
+GET    /api/v1/spaces/:spaceId/tasks/:taskId/materials      — List task materials [implemented]
+PUT    /api/v1/spaces/:spaceId/tasks/:taskId/materials/:id  — Update quantity/notes [implemented]
+DELETE /api/v1/spaces/:spaceId/tasks/:taskId/materials/:id  — Remove material from task [implemented]
 
 GET    /api/recipe-versions/:versionId/bom            — Get BOM for a version
 POST   /api/recipe-versions/:versionId/bom            — Add BOM item
