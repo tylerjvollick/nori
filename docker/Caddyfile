@@ -1,0 +1,18 @@
+# Reverse proxy giving Nori a single origin: API routes go to the Go
+# server, everything else to the SvelteKit app. Browser API calls use
+# same-origin relative URLs, so no CORS and no baked-in hostnames.
+
+{
+	admin off
+}
+
+:80 {
+	@backend path /api/* /auth/* /admin/* /health
+	handle @backend {
+		reverse_proxy nori-server:8080
+	}
+
+	handle {
+		reverse_proxy nori-web:3000
+	}
+}
