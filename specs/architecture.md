@@ -145,15 +145,18 @@ The HTTP API server. Runs `nori serve` inside Docker on port 8080.
 
 #### 3. nori-web (SvelteKit, Docker container)
 
-The web frontend. Runs on port 5173 (dev) or built as static assets (production).
+The web frontend. Runs the Vite dev server on port 5173 (dev) or the
+SvelteKit adapter-node SSR server on port 3000 behind Caddy (production).
 
 **Current state:** Being rebuilt from Svelte 4 + Tailwind v3 to Svelte 5 +
 Tailwind v4 + shadcn-svelte. The existing pages include login, password
 change, onboarding, admin panel, and flow board.
 
 **Communication:** Talks to nori-server via the same REST API as the CLI.
-The `VITE_API_URL` environment variable points to the server
-(`http://localhost:8080`).
+The `VITE_API_URL` build-time variable points the browser at the server
+(`http://localhost:8081` in dev). In production it is set to the empty
+string, which means same-origin relative URLs — Caddy routes API paths to
+the server. Server-side rendering uses `INTERNAL_API_URL` at runtime.
 
 #### 4. PostgreSQL (Docker container)
 
@@ -206,16 +209,28 @@ docker compose -f docker/docker-compose.dev.yml up --build -d
 # nori-migrate runs new migrations automatically
 ```
 
-#### Production (future)
+#### Production (shipped — see [deployment.md](deployment.md))
 
-The production deployment model is not yet defined, but the direction is:
+`docker/docker-compose.yml` runs pre-built images from GitHub Container
+Registry behind a Caddy reverse proxy (single origin, single published
+port). `.github/workflows/build-images.yml` builds and pushes
+`nori-server` and `nori-web` images (amd64 + arm64, tagged `latest` +
+`sha-<commit>`) on every push to `main`.
 
-- **Pre-built Docker images** pushed to a registry (GitHub Container Registry)
-- **`nori init`** pulls images instead of building from source
-- **Single-command install:** `curl -sSL https://nori.dev/install | sh`
-  downloads the `nori` binary, which then runs `nori init`
-- **Updates:** `nori update` pulls new images and restarts containers
-- No source code needed on the production machine
+```bash
+# Install: copy docker-compose.yml, Caddyfile, .env (from .env.prod.example)
+docker compose pull && docker compose up -d
+
+# Update (nori-migrate applies new migrations automatically)
+docker compose pull && docker compose up -d
+
+# Rollback: pin NORI_IMAGE_TAG=sha-<commit> in .env, pull && up
+```
+
+No source code is needed on the production machine. Future ergonomics
+(per [cli.md](cli.md)): `nori init` pulls images instead of building,
+`nori update` wraps the pull/up cycle, and a `curl | sh` installer
+distributes the binary.
 
 ### Communication Patterns
 
