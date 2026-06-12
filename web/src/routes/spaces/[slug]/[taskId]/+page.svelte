@@ -671,7 +671,6 @@
 							deps={depsMap}
 							{stationMap}
 							rootTaskId={tree?.id}
-							onselect={handleGraphNodeSelect}
 							onmutate={handleTreeMutate}
 							viewToggle={{ current: currentView, onchange: (mode) => setView(mode as ViewMode) }}
 						/>
@@ -698,7 +697,7 @@
 							</div>
 						</div>
 						<div class="flex-1 overflow-hidden">
-							<BoardView {spaceId} tasks={flatTasks} {stationMap} onselect={handleGraphNodeSelect} />
+							<BoardView {spaceId} tasks={flatTasks} {stationMap} />
 						</div>
 					{:else if currentView === 'list'}
 						<!-- List toolbar with view toggle -->
@@ -723,7 +722,7 @@
 							</div>
 						</div>
 						<div class="flex-1 overflow-hidden">
-							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} onselect={handleGraphNodeSelect} />
+							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
 						</div>
 					{/if}
 

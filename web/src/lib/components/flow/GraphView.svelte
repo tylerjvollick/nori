@@ -91,10 +91,6 @@
 	let taskCount = $state(0);
 	let edgeCount = $state(0);
 
-	// For tracking node click timing (single vs double click)
-	let lastClickTime = $state(0);
-	let lastClickedNodeId = $state('');
-
 	// ---- Derived filters from URL ----
 	let slug = $derived($page.params.slug);
 	let stationFilter = $derived($page.url.searchParams.get('station') || '');
@@ -365,23 +361,16 @@
 
 	function handleNodeClick({ node }: { node: Node; event: MouseEvent | TouchEvent }): void {
 		const nodeId = node.id;
-		const now = Date.now();
 
-		// Double-click detection (within 400ms on the same node)
-		if (lastClickedNodeId === nodeId && now - lastClickTime < 400) {
-			if (mode !== 'recipe') {
-				// Navigate to task detail (task mode only)
-				goto(`/spaces/${slug}/${nodeId}`);
-			}
-			lastClickTime = 0;
-			lastClickedNodeId = '';
+		// Recipe editor: single-click selects the node for editing (no navigation).
+		if (mode === 'recipe') {
+			// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
+			selectNode(nodeId);
 			return;
 		}
 
-		lastClickTime = now;
-		lastClickedNodeId = nodeId;
-		// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
-		selectNode(nodeId);
+		// Task mode: single-click navigates to that task's detail page.
+		goto(`/spaces/${slug}/${nodeId}`);
 	}
 
 	// ---- Re-fetch when filters change ----
