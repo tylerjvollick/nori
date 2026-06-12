@@ -47,6 +47,13 @@
 		}
 	});
 
+	// Persist the most recently opened space so `/` can forward back to it
+	$effect(() => {
+		if (browser && slug) {
+			localStorage.setItem('lastVisitedSpace', slug);
+		}
+	});
+
 	// ---- Keyboard shortcuts ----
 
 	function handleKeydown(e: KeyboardEvent): void {
