@@ -168,6 +168,61 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
     await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 5000 });
   });
 
+  // --- nori-zv0.3: job-detail layout swap (panel left, views right) ---
+
+  async function createJobAndOpenDetail(page: import('@playwright/test').Page, title: string) {
+    await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Job' }).click();
+    await page.locator('#job-title').fill(title);
+    await page.getByRole('button', { name: 'Create Job' }).click();
+    await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
+    await page.waitForLoadState('networkidle');
+    // Graph (views pane) is ready when Add Node is present.
+    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
+  test('job detail: detail panel renders to the LEFT of the views pane', async ({ page }) => {
+    await createJobAndOpenDetail(page, 'Swap Layout Job');
+
+    const panelTitle = page.getByRole('heading', { level: 2, name: 'Swap Layout Job' });
+    const addNode = page.getByRole('button', { name: 'Add Node', exact: true });
+    await expect(panelTitle).toBeVisible({ timeout: 10_000 });
+
+    const panelBox = await panelTitle.boundingBox();
+    const viewsBox = await addNode.boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(viewsBox).not.toBeNull();
+    // The detail panel sits left of the views (graph) pane.
+    expect(panelBox!.x).toBeLessThan(viewsBox!.x);
+  });
+
+  test('job detail: in-header collapse toggle hides the panel; expand restores it', async ({
+    page,
+  }) => {
+    await createJobAndOpenDetail(page, 'Collapse Toggle Job');
+
+    const panelTitle = page.getByRole('heading', { level: 2, name: 'Collapse Toggle Job' });
+    await expect(panelTitle).toBeVisible({ timeout: 10_000 });
+
+    // Collapse control lives inside the detail panel header.
+    const collapse = page.getByTestId('panel-collapse');
+    await expect(collapse).toBeVisible();
+    await collapse.click();
+
+    // Panel is hidden; the expand affordance appears in the views pane.
+    await expect(panelTitle).toBeHidden();
+    const expand = page.getByTestId('panel-expand');
+    await expect(expand).toBeVisible();
+
+    // Restore.
+    await expand.click();
+    await expect(panelTitle).toBeVisible();
+    await expect(collapse).toBeVisible();
+  });
+
   test('job detail: Cost tab shows cost summary', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
     await page.waitForLoadState('networkidle');

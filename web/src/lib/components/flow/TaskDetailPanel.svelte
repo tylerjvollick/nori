@@ -22,6 +22,7 @@
 		BookOpen,
 		Briefcase,
 		ListTodo,
+		PanelLeftClose,
 	} from '@lucide/svelte';
 	import { formatDuration } from '$lib/utils/time';
 	import { taskApi } from '$lib/api/task';
@@ -67,6 +68,8 @@
 		recipeVersion?: number;
 		/** Called after a field is saved to refresh data. */
 		onmutate?: () => void;
+		/** When provided, render a collapse control in the panel header that hides the panel. */
+		oncollapse?: () => void;
 	}
 
 	let {
@@ -77,6 +80,7 @@
 		hideSubTasks = false,
 		recipeStatus, recipeVersion,
 		onmutate,
+		oncollapse,
 	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
@@ -348,6 +352,21 @@
 
 
 <div class="p-6 space-y-5">
+	{#if oncollapse}
+		<!-- Panel header control: collapse the detail panel (views pane goes full width) -->
+		<div class="flex justify-end -mt-2 -mb-1">
+			<button
+				type="button"
+				onclick={() => oncollapse?.()}
+				class="hidden lg:flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+				title="Collapse panel"
+				aria-label="Collapse panel"
+				data-testid="panel-collapse"
+			>
+				<PanelLeftClose class="size-4" />
+			</button>
+		</div>
+	{/if}
 	{#if isLoading || !task}
 		<!-- Skeleton loading state -->
 		<div>

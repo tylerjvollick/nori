@@ -17,7 +17,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X, Briefcase, ListTodo } from '@lucide/svelte';
+	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -599,7 +599,29 @@
 		{:else}
 			<!-- Tasks tab: split pane with [Graph|List|Board] toggle -->
 			<div class="flex-1 flex overflow-hidden">
-				<!-- Left pane -->
+				<!-- Left: Detail panel (desktop sidebar) -->
+				{#if graphPanelOpen}
+					<div class="hidden lg:flex w-1/2 flex-col border-r border-border overflow-y-auto shrink-0">
+						<TaskDetailPanel
+							task={graphPanelTask ?? tree ?? undefined}
+							{spaceId}
+							{stationMap}
+							{taskTitleMap}
+							deps={graphPanelDeps}
+							isLoading={graphPanelLoading}
+							onaction={handleTaskAction}
+							oncomplete={handleCompletion}
+							parentName={tree?.title}
+							parentType={isJob ? 'job' : undefined}
+							onnavparent={handleNavToRoot}
+							onselecttask={handleSelectTaskInGraph}
+							hideSubTasks={graphPanelIsRoot}
+							oncollapse={() => (graphPanelOpen = false)}
+						/>
+					</div>
+				{/if}
+
+				<!-- Right: views pane -->
 				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
 					{#if currentView === 'graph'}
 						<GraphView
@@ -664,36 +686,19 @@
 						</div>
 					{/if}
 
-					<!-- Panel toggle button (desktop) -->
-					<button
-						onclick={() => (graphPanelOpen = !graphPanelOpen)}
-						class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
-						title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
-					>
-						<PanelRight class="size-4" />
-					</button>
+					<!-- Expand button (desktop) — shown only when the panel is collapsed -->
+					{#if !graphPanelOpen}
+						<button
+							onclick={() => (graphPanelOpen = true)}
+							class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+							title="Expand panel"
+							aria-label="Expand panel"
+							data-testid="panel-expand"
+						>
+							<PanelLeftOpen class="size-4" />
+						</button>
+					{/if}
 				</div>
-
-				<!-- Detail panel (desktop sidebar) -->
-				{#if graphPanelOpen}
-					<div class="hidden lg:flex w-1/2 flex-col border-l border-border overflow-y-auto shrink-0">
-						<TaskDetailPanel
-							task={graphPanelTask ?? tree ?? undefined}
-							{spaceId}
-							{stationMap}
-							{taskTitleMap}
-							deps={graphPanelDeps}
-							isLoading={graphPanelLoading}
-							onaction={handleTaskAction}
-							oncomplete={handleCompletion}
-							parentName={tree?.title}
-							parentType={isJob ? 'job' : undefined}
-							onnavparent={handleNavToRoot}
-							onselecttask={handleSelectTaskInGraph}
-							hideSubTasks={graphPanelIsRoot}
-						/>
-					</div>
-				{/if}
 
 				<!-- Detail panel (mobile drawer overlay) -->
 				{#if graphPanelTask}
