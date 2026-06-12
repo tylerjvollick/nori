@@ -1,6 +1,9 @@
 import { browser } from '$app/environment';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8081';
+// Empty string is a valid value: it makes all requests same-origin relative
+// URLs (production, where a reverse proxy routes /api etc. to the server).
+// The localhost fallback only applies when the var is not set at build time.
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8081';
 
 export class ApiClient {
   private baseURL: string;

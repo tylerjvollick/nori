@@ -1,0 +1,6 @@
+nori
+tmp
+uploads
+.env
+Dockerfile
+.dockerignore

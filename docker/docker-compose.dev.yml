@@ -52,7 +52,9 @@ services:
 
   nori-web:
     container_name: nori-web
-    build: ../web
+    build:
+      context: ../web
+      target: dev
     ports:
       - "${WEB_HOST_PORT:-5173}:5173"
     volumes:
