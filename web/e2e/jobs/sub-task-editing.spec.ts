@@ -4,8 +4,19 @@ import { resetSpace } from '../helpers/reset';
 let spaceSlug = '';
 
 /**
- * Helper: create a job, add a child task node, click it so the detail
- * panel opens, and return a locator scoped to the desktop detail panel.
+ * The task detail panel. On a leaf task's own detail page it is the left
+ * pane (border-r); we scope by the Sub-tasks heading it contains.
+ */
+function detailPanel(page: Page): Locator {
+  return page
+    .locator('div.border-r')
+    .filter({ has: page.getByRole('heading', { name: 'Sub-tasks' }) })
+    .first();
+}
+
+/**
+ * Helper: create a job, add a child task, open that child's own detail page
+ * (selecting a node now navigates there), and return its detail panel.
  */
 async function createJobAndSelectChildTask(page: Page, jobTitle: string): Promise<Locator> {
   await page.goto(`/spaces/${spaceSlug}/jobs`);
@@ -19,13 +30,18 @@ async function createJobAndSelectChildTask(page: Page, jobTitle: string): Promis
   const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
   await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
   await addNodeBtn.click();
+  const input = page.locator('.svelte-flow__node input');
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await page.keyboard.press('Enter'); // commit the default "New Task" title
   await expect(page.locator('.svelte-flow__node')).toHaveCount(1, { timeout: 10000 });
 
-  // Click node to ensure detail panel is loaded
-  await page.locator('.svelte-flow__node').first().click();
+  // Open the child task's own detail page, where its detail panel (with the
+  // Sub-tasks section) renders as the left pane.
+  const childId = await page.locator('.svelte-flow__node').first().getAttribute('data-id');
+  await page.goto(`/spaces/${spaceSlug}/${childId}`);
+  await page.waitForLoadState('networkidle');
 
-  // Scope to the desktop detail panel sidebar
-  const panel = page.locator('.lg\\:flex.border-l').first();
+  const panel = detailPanel(page);
   await expect(panel.getByRole('heading', { name: 'Sub-tasks' })).toBeVisible({ timeout: 10000 });
 
   return panel;
@@ -141,13 +157,12 @@ test.describe('Sub-task editing (in-flight)', () => {
 
     await addSubTask(panel, 'Persistent step');
 
-    // Reload and re-select the child node
+    // Reload the child detail page; its panel renders directly (no re-select).
     await page.reload();
-    await expect(page.locator('.svelte-flow__node')).toHaveCount(1, { timeout: 10000 });
-    await page.locator('.svelte-flow__node').first().click();
+    await page.waitForLoadState('networkidle');
 
     // Verify sub-task persisted
-    const reloadedPanel = page.locator('.lg\\:flex.border-l').first();
+    const reloadedPanel = detailPanel(page);
     await expect(reloadedPanel.getByRole('heading', { name: 'Sub-tasks' })).toBeVisible({ timeout: 10000 });
     await expect(reloadedPanel.getByText('Persistent step')).toBeVisible({ timeout: 10000 });
   });
