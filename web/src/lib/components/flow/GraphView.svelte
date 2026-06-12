@@ -1079,8 +1079,12 @@
 
 		switch (e.key) {
 			case 'Enter': {
-				// No-op: hjkl navigation and clicking already open the detail panel.
 				e.preventDefault();
+				// Navigate to the selected task's detail page so it becomes the
+				// focused/center node (task mode only — recipe editing keeps Enter free).
+				if (mode !== 'recipe' && selectedNodeId) {
+					goto(`/spaces/${slug}/${selectedNodeId}`);
+				}
 				break;
 			}
 			case 'Escape': {
