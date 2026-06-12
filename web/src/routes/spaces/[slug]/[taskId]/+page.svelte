@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { taskApi } from '$lib/api/task';
@@ -332,19 +331,43 @@
 		return null;
 	}
 
-	onMount(async () => {
-		if (!taskId) {
-			error = 'No task ID provided';
-			isLoading = false;
-			return;
-		}
+	// Sequence guard so a stale in-flight fetch can't overwrite a newer one
+	// when the user navigates quickly between task detail pages.
+	let loadSeq = 0;
+
+	/**
+	 * Load the task tree, stations, deps and parent for a given task id, fully
+	 * resetting per-task state first. Driven reactively by taskId so in-app
+	 * navigation between task detail pages (same [taskId] route) re-fetches
+	 * instead of showing the stale, originally-mounted task.
+	 */
+	async function loadTask(id: string): Promise<void> {
+		const seq = ++loadSeq;
+
+		// Reset per-task state so navigation never renders stale data.
+		isLoading = true;
+		error = null;
+		tree = null;
+		selectedTask = null;
+		selectedDeps = null;
+		rootDepsAttempted = false;
+		parentTask = null;
+		graphPanelTask = null;
+		graphPanelDeps = null;
+		graphPanelLoading = false;
+		depsLoaded = false;
+		depsMap = new Map();
+		neighborhoodLoaded = false;
+		neighborhoodTasks = [];
+		neighborhoodDeps = new Map();
 
 		try {
 			// Fetch tree and stations in parallel
 			const [treeData, stations] = await Promise.all([
-				taskApi.getTaskTree(spaceId, taskId),
+				taskApi.getTaskTree(spaceId, id),
 				stationApi.listStations(spaceId).catch(() => [] as StationResponse[]),
 			]);
+			if (seq !== loadSeq) return; // superseded by a newer navigation
 
 			tree = treeData;
 
@@ -356,27 +379,45 @@
 			stationMap = map;
 
 			// Auto-select root task and load its deps
-			selectedTask = tree;
+			selectedTask = treeData;
 			try {
-				selectedDeps = await taskApi.getTaskDeps(spaceId, tree.id);
+				const deps = await taskApi.getTaskDeps(spaceId, treeData.id);
+				if (seq !== loadSeq) return;
+				selectedDeps = deps;
 			} catch {
+				if (seq !== loadSeq) return;
 				selectedDeps = null;
 			}
 			rootDepsAttempted = true;
 
 			// Load parent task for breadcrumbs (child task under a job)
-			if (tree.parentId) {
+			if (treeData.parentId) {
 				try {
-					parentTask = await taskApi.getTask(spaceId, tree.parentId);
+					const p = await taskApi.getTask(spaceId, treeData.parentId);
+					if (seq !== loadSeq) return;
+					parentTask = p;
 				} catch {
+					if (seq !== loadSeq) return;
 					parentTask = null;
 				}
 			}
 		} catch (e) {
+			if (seq !== loadSeq) return;
 			error = e instanceof Error ? e.message : 'Failed to load task tree';
 		} finally {
-			isLoading = false;
+			if (seq === loadSeq) isLoading = false;
 		}
+	}
+
+	// Re-fetch whenever the task id changes (including in-app navigation).
+	$effect(() => {
+		const id = taskId;
+		if (!id) {
+			error = 'No task ID provided';
+			isLoading = false;
+			return;
+		}
+		loadTask(id);
 	});
 
 	/** Reload the task tree and deps — called by GraphView after mutations. */
