@@ -426,7 +426,11 @@
 		try {
 			const treeData = await taskApi.getTaskTree(spaceId, taskId);
 			tree = treeData;
-			// Reload deps for descendants
+			// Force a fresh deps load. loadDepsForDescendants() early-returns when
+			// depsLoaded is already true, so without resetting it here a newly added
+			// serial/parallel node renders with no connecting edges until a full
+			// page refresh (nori-c98.2).
+			depsLoaded = false;
 			await loadDepsForDescendants();
 		} catch {
 			// ignore — tree will be stale but not crash
