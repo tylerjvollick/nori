@@ -10,9 +10,12 @@ import type {
 	CompleteTaskResponse,
 	SubTaskResponse,
 	SubTaskListResponse,
+	SubTaskImage,
 	CreateSubTaskRequest,
 	UpdateSubTaskRequest,
 	ReorderSubTasksRequest,
+	TaskMedia,
+	TaskMediaListResponse,
 } from '$lib/types/task';
 import { apiClient } from './client';
 
@@ -149,6 +152,39 @@ class TaskApi {
 
 	async reorderSubTasks(spaceId: string, taskId: string, data: ReorderSubTasksRequest): Promise<void> {
 		return apiClient.put<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/reorder`, data);
+	}
+
+	// --- Task media (photos/videos) ---
+
+	async listTaskMedia(spaceId: string, taskId: string): Promise<TaskMediaListResponse> {
+		return apiClient.get<TaskMediaListResponse>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/media`);
+	}
+
+	async uploadTaskMedia(spaceId: string, taskId: string, file: File): Promise<TaskMedia> {
+		const form = new FormData();
+		form.append('file', file);
+		return apiClient.uploadFile<TaskMedia>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/media`, form);
+	}
+
+	async deleteTaskMedia(spaceId: string, taskId: string, mediaId: string): Promise<void> {
+		return apiClient.delete<void>(`/api/v1/spaces/${spaceId}/tasks/${taskId}/media/${mediaId}`);
+	}
+
+	// --- Sub-task images ---
+
+	async uploadSubTaskImage(spaceId: string, taskId: string, subtaskId: string, file: File): Promise<SubTaskImage> {
+		const form = new FormData();
+		form.append('file', file);
+		return apiClient.uploadFile<SubTaskImage>(
+			`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}/images`,
+			form,
+		);
+	}
+
+	async deleteSubTaskImage(spaceId: string, taskId: string, subtaskId: string, imageId: string): Promise<void> {
+		return apiClient.delete<void>(
+			`/api/v1/spaces/${spaceId}/tasks/${taskId}/subtasks/${subtaskId}/images/${imageId}`,
+		);
 	}
 
 }

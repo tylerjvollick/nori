@@ -29,21 +29,70 @@ func (r *SubTaskRepository) Create(s *models.SubTask) error {
 	return r.db.Create(s).Error
 }
 
-// GetByID returns the SubTask with the given UUID, or an error if not found.
+// GetByID returns the SubTask with the given UUID (with images preloaded), or an
+// error if not found.
 func (r *SubTaskRepository) GetByID(id uuid.UUID) (*models.SubTask, error) {
 	var s models.SubTask
-	err := r.db.Where("id = ?", id).First(&s).Error
+	err := r.db.Preload("Images", func(db *gorm.DB) *gorm.DB {
+		return db.Order("display_order asc, created_at asc")
+	}).Where("id = ?", id).First(&s).Error
 	if err != nil {
 		return nil, err
 	}
 	return &s, nil
 }
 
-// ListByTaskID returns all sub-tasks for the given task, ordered by display_order asc.
+// ListByTaskID returns all sub-tasks for the given task (with images preloaded),
+// ordered by display_order asc.
 func (r *SubTaskRepository) ListByTaskID(taskID string) ([]models.SubTask, error) {
 	var subtasks []models.SubTask
-	err := r.db.Where("task_id = ?", taskID).Order("display_order asc").Find(&subtasks).Error
+	err := r.db.Preload("Images", func(db *gorm.DB) *gorm.DB {
+		return db.Order("display_order asc, created_at asc")
+	}).Where("task_id = ?", taskID).Order("display_order asc").Find(&subtasks).Error
 	return subtasks, err
+}
+
+// AddImage inserts a new SubTaskImage record.
+func (r *SubTaskRepository) AddImage(img *models.SubTaskImage) error {
+	return r.db.Create(img).Error
+}
+
+// GetImageByID returns the SubTaskImage with the given UUID, or an error if not found.
+func (r *SubTaskRepository) GetImageByID(id uuid.UUID) (*models.SubTaskImage, error) {
+	var img models.SubTaskImage
+	if err := r.db.Where("id = ?", id).First(&img).Error; err != nil {
+		return nil, err
+	}
+	return &img, nil
+}
+
+// GetMaxImageDisplayOrder returns the current maximum display_order for images of
+// the given sub-task, or -1 if there are no images yet.
+func (r *SubTaskRepository) GetMaxImageDisplayOrder(subTaskID uuid.UUID) (int, error) {
+	var max *int
+	err := r.db.Model(&models.SubTaskImage{}).
+		Select("MAX(display_order)").
+		Where("sub_task_id = ?", subTaskID).
+		Scan(&max).Error
+	if err != nil {
+		return -1, err
+	}
+	if max == nil {
+		return -1, nil
+	}
+	return *max, nil
+}
+
+// DeleteImage removes the SubTaskImage with the given UUID.
+func (r *SubTaskRepository) DeleteImage(id uuid.UUID) error {
+	result := r.db.Where("id = ?", id).Delete(&models.SubTaskImage{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("sub-task image %q not found", id)
+	}
+	return nil
 }
 
 // GetMaxDisplayOrder returns the current maximum display_order for subtasks of

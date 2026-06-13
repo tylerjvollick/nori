@@ -3,9 +3,11 @@
 	import { flip } from 'svelte/animate';
 	import type { SubTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { resolveMediaUrl } from '$lib/api/client';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { toast } from 'svelte-sonner';
 	import {
 		List,
 		LayoutGrid,
@@ -15,6 +17,7 @@
 		ChevronDown,
 		ChevronRight,
 		ImageIcon,
+		ImagePlus,
 		Pencil,
 		Check,
 		X,
@@ -184,9 +187,49 @@
 	}
 
 	const flipDurationMs = 150;
+
+	// --- Image attachment ---
+	let imageInput = $state<HTMLInputElement | null>(null);
+	let uploadTargetId = $state<string | null>(null);
+	let uploadingId = $state<string | null>(null);
+
+	function pickImage(subtaskId: string) {
+		uploadTargetId = subtaskId;
+		imageInput?.click();
+	}
+
+	async function onImageSelected(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		const targetId = uploadTargetId;
+		input.value = '';
+		uploadTargetId = null;
+		if (!file || !targetId) return;
+
+		uploadingId = targetId;
+		try {
+			const img = await taskApi.uploadSubTaskImage(spaceId, taskId, targetId, file);
+			items = items.map((i) =>
+				i.id === targetId ? { ...i, images: [...(i.images ?? []), img] } : i,
+			);
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to attach image');
+		} finally {
+			uploadingId = null;
+		}
+	}
 </script>
 
 <div class="space-y-3">
+	<!-- Hidden file input shared by all sub-task rows for image attachment. -->
+	<input
+		bind:this={imageInput}
+		type="file"
+		accept="image/*"
+		class="hidden"
+		onchange={onImageSelected}
+		data-testid="subtask-image-input"
+	/>
 	<!-- Header with view toggle -->
 	<div class="flex items-center justify-between">
 		<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
@@ -242,7 +285,7 @@
 								<!-- Photo thumbnail -->
 								<div class="size-7 shrink-0 rounded border border-border bg-muted flex items-center justify-center overflow-hidden">
 									{#if item.images && item.images.length > 0}
-										<img src={item.images[0].imageUrl} alt="" class="size-full object-cover" />
+										<img src={resolveMediaUrl(item.images[0].imageUrl)} alt="" class="size-full object-cover" />
 									{:else}
 										<ImageIcon class="size-3 text-muted-foreground/30" />
 									{/if}
@@ -297,6 +340,16 @@
 									<span class="text-sm flex-1 leading-tight">{item.title}</span>
 									<!-- Action buttons (hover) -->
 									<div class="flex items-center gap-0.5 opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0">
+										<button
+											class="text-muted-foreground/60 hover:text-foreground p-0.5 disabled:opacity-50"
+											onclick={() => pickImage(item.id)}
+											type="button"
+											title="Attach image"
+											disabled={uploadingId === item.id}
+											data-testid="subtask-image-add"
+										>
+											<ImagePlus class="size-3" />
+										</button>
 										<button
 											class="text-muted-foreground/60 hover:text-foreground p-0.5"
 											onclick={() => startEdit(item)}
@@ -361,7 +414,7 @@
 							<div class="aspect-square bg-muted flex items-center justify-center relative">
 								{#if item.images && item.images.length > 0}
 									<img
-										src={item.images[0].imageUrl}
+										src={resolveMediaUrl(item.images[0].imageUrl)}
 										alt={item.title}
 										class="w-full h-full object-cover"
 									/>

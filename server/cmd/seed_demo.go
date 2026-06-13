@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -364,6 +366,93 @@ func seedDemo(db *gorm.DB) error {
 		return fmt.Errorf("creating backlog job: %w", err)
 	}
 	log.Printf("  Created backlog job: %s (%s)", backlogJob.Title, backlogJob.ID)
+
+	// 11. Attach a demo photo to a job task and an image to a sub-step, so the
+	//     photo-attachment feature is exercised in the demo environment.
+	if err := seedTaskPhotos(db, space.ID, user.ID, bistroJob.ID); err != nil {
+		return fmt.Errorf("seeding task photos: %w", err)
+	}
+	log.Println("  Attached demo photo to a task and a sub-step")
+
+	return nil
+}
+
+// demoSamplePNG is a tiny valid 1x1 PNG used as placeholder media in the demo.
+const demoSamplePNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+
+// seedTaskPhotos writes a sample image into the upload directory and attaches it
+// to one task in the job (as TaskMedia) and to a new sub-step (as SubTaskImage),
+// exercising the same storage layout the upload handlers produce.
+func seedTaskPhotos(db *gorm.DB, spaceID, userID uuid.UUID, jobID string) error {
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "./uploads"
+	}
+
+	imgBytes, err := base64.StdEncoding.DecodeString(demoSamplePNG)
+	if err != nil {
+		return fmt.Errorf("decoding sample image: %w", err)
+	}
+
+	// Pick a leaf task from the rolled job to attach media to.
+	var task models.Task
+	err = db.Where("space_id = ? AND parent_id = ? AND type = ?", spaceID, jobID, models.TaskTypeTask).
+		Order("display_order asc").First(&task).Error
+	if err != nil {
+		// Fall back to any task in the job; if none, skip silently.
+		if err := db.Where("space_id = ? AND type = ?", spaceID, models.TaskTypeTask).
+			First(&task).Error; err != nil {
+			return nil
+		}
+	}
+
+	writeSample := func(subdir string) (string, error) {
+		dir := filepath.Join(uploadDir, subdir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", err
+		}
+		name := uuid.NewString() + ".png"
+		if err := os.WriteFile(filepath.Join(dir, name), imgBytes, 0o644); err != nil {
+			return "", err
+		}
+		return "/uploads/" + subdir + "/" + name, nil
+	}
+
+	// Task media.
+	mediaURL, err := writeSample("task-media")
+	if err != nil {
+		return err
+	}
+	mediaRepo := repositories.NewTaskMediaRepository(db)
+	if err := mediaRepo.Create(&models.TaskMedia{
+		TaskID:       task.ID,
+		FilePath:     mediaURL,
+		FileName:     "work-in-progress.png",
+		MimeType:     "image/png",
+		FileSize:     int64(len(imgBytes)),
+		DisplayOrder: 0,
+		CapturedByID: &userID,
+	}); err != nil {
+		return fmt.Errorf("creating demo task media: %w", err)
+	}
+
+	// Sub-step with an attached image.
+	subRepo := repositories.NewSubTaskRepository(db)
+	sub := &models.SubTask{TaskID: task.ID, Title: "Check the glue-up squareness", DisplayOrder: 0}
+	if err := subRepo.Create(sub); err != nil {
+		return fmt.Errorf("creating demo sub-task: %w", err)
+	}
+	imgURL, err := writeSample("sub-task-images")
+	if err != nil {
+		return err
+	}
+	if err := subRepo.AddImage(&models.SubTaskImage{
+		SubTaskID:    sub.ID,
+		ImageURL:     imgURL,
+		DisplayOrder: 0,
+	}); err != nil {
+		return fmt.Errorf("creating demo sub-task image: %w", err)
+	}
 
 	return nil
 }

@@ -33,6 +33,7 @@
 	import TimerControls from './TimerControls.svelte';
 	import TimeEntryEditor from './TimeEntryEditor.svelte';
 	import SubTaskList from './SubTaskList.svelte';
+	import TaskPhotos from './TaskPhotos.svelte';
 
 	interface Props {
 		task?: TaskTreeResponse;
@@ -697,6 +698,12 @@
 				{/if}
 			{/if}
 		</div>
+
+		<!-- Photos (hidden for recipe/job root tasks, same as sub-tasks) -->
+		{#if !hideSubTasks}
+			<Separator />
+			<TaskPhotos spaceId={spaceId} taskId={task.id} />
+		{/if}
 
 		<!-- Sub-tasks (hidden for recipe/job root tasks) -->
 		{#if !hideSubTasks}

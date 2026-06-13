@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -14,6 +15,7 @@ import (
 	"github.com/tylerjvollick/nori/internal/middleware"
 	"github.com/tylerjvollick/nori/internal/repositories"
 	"github.com/tylerjvollick/nori/internal/services"
+	"github.com/tylerjvollick/nori/internal/storage"
 )
 
 type App struct {
@@ -40,6 +42,7 @@ func New(cfg *config.Config) *App {
 	stationRepo := repositories.NewStationRepository(database.DB)
 	customerRepo := repositories.NewCustomerRepository(database.DB)
 	subTaskRepo := repositories.NewSubTaskRepository(database.DB)
+	taskMediaRepo := repositories.NewTaskMediaRepository(database.DB)
 
 	// Get photo upload configuration from environment
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -54,6 +57,14 @@ func New(cfg *config.Config) *App {
 			maxUploadSize = size
 		}
 	}
+
+	// Local media storage for task/sub-task photo & video attachments. Files
+	// are written under uploadDir and served back under /uploads.
+	var allowedMimeTypes []string
+	if raw := os.Getenv("ALLOWED_MIME_TYPES"); raw != "" {
+		allowedMimeTypes = strings.Split(raw, ",")
+	}
+	mediaStore := storage.NewLocalStorage(uploadDir, "/uploads", allowedMimeTypes)
 
 	// Services (SpaceService created early so seed can use it for E2E)
 	spaceService := services.NewSpaceService(spaceRepo, userRepo, spaceMemberRepo, stationRepo)
@@ -97,7 +108,8 @@ func New(cfg *config.Config) *App {
 	jobHandler := handlers.NewJobHandler(taskService, costService, recipeService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
 	customerHandler := handlers.NewCustomerHandler(customerRepo)
-	subTaskHandler := handlers.NewSubTaskHandler(subTaskRepo, taskService)
+	subTaskHandler := handlers.NewSubTaskHandler(subTaskRepo, taskService, mediaStore)
+	taskMediaHandler := handlers.NewTaskMediaHandler(taskMediaRepo, taskService, mediaStore)
 	timeEntryHandler := handlers.NewTimeEntryHandler(timeEntryService)
 	productHandler := handlers.NewProductHandler(productService)
 	materialHandler := handlers.NewMaterialHandler(materialService)
@@ -124,6 +136,11 @@ func New(cfg *config.Config) *App {
 	handlers.RegisterHealthRoutes(app)
 	authHandler.RegisterAuthRoutes(app)
 
+	// Uploaded media is served statically so it can be referenced directly in
+	// <img>/<video> src attributes (which cannot send auth headers). Files are
+	// stored under random UUID names, so the paths are unguessable.
+	app.Static("/uploads", mediaStore.BaseDir())
+
 	// ── Auth-only routes (no RequirePasswordChanged) ───────────────────
 	// /auth/change-password, /auth/logout, /auth/me need auth but must
 	// remain accessible to users who still need to change their password.
@@ -143,6 +160,7 @@ func New(cfg *config.Config) *App {
 	taskHandler.RegisterTaskRoutes(spaceScoped)
 	taskDepHandler.RegisterTaskDepRoutes(spaceScoped)
 	subTaskHandler.RegisterSubTaskRoutes(spaceScoped)
+	taskMediaHandler.RegisterTaskMediaRoutes(spaceScoped)
 	timeEntryHandler.RegisterTimeEntryRoutes(spaceScoped)
 	productHandler.RegisterProductRoutes(spaceScoped)
 	materialHandler.RegisterMaterialRoutes(spaceScoped)

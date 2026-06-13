@@ -263,17 +263,25 @@ Photos and videos captured during task execution. Separate from recipe media
 TaskMedia
   - ID: uuid
   - TaskID: string (FK → Task)
-  - FilePath: string
-  - FileName: string
+  - FilePath: string (public URL path, e.g. /uploads/task-media/<uuid>.jpg)
+  - FileName: string (original client filename)
   - MimeType: string
   - FileSize: int64
   - Duration: int (nullable — for videos, in seconds)
   - DisplayOrder: int
-  - CapturedByID: uuid (FK → User)
+  - CapturedByID: uuid (FK → User, nullable — set null if user deleted)
   - CreatedAt: timestamp
 ```
 
-Uses the existing TUS-based chunked upload system.
+Implemented in migration `000052_add_task_media`. Uploads are simple multipart
+form posts (field `file`) handled by `internal/storage.LocalStorage`, which
+validates the MIME type against `ALLOWED_MIME_TYPES`, writes the file under
+`UPLOAD_DIR` (served statically at `/uploads`), and stores the public path in
+`FilePath`. (The earlier plan called for a TUS chunked-upload system; that was
+not built — simple disk-backed upload covers the photo/short-video use case.)
+
+Sub-task images use the same storage layer via the pre-existing
+`sub_task_images` table (`SubTaskImage`, migration `000045`).
 
 ---
 
