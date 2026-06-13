@@ -191,8 +191,11 @@ Discoverable entry points in the UI:
 - **Task detail page** — a `Delete` action in the header, offered on individual
   tasks only (not on a job root, so a whole job tree can't be wiped in one
   click). Confirms, then navigates to the parent task or the jobs list.
+- **Graph view** — with a node keyboard-selected (`hjkl`), `Delete`/`Backspace`
+  deletes it after a confirmation dialog. This is how individual tasks within a
+  job are removed from the graph (single-click navigates to the task instead).
 
-The UI confirms before deleting and performs the upstream→downstream reconnect.
+Both paths confirm before deleting and perform the upstream→downstream reconnect.
 
 ### Dependency Patterns
 

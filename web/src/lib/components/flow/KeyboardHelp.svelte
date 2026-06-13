@@ -55,6 +55,8 @@
 				{ key: 'k', description: 'Navigate upstream (blockers)' },
 				{ key: 'h', description: 'Previous sibling' },
 				{ key: 'l / Tab', description: 'Next sibling / cycle' },
+				{ key: 'Enter', description: 'Open selected task' },
+				{ key: 'Del / ⌫', description: 'Delete selected node' },
 				{ key: 'Ctrl+R', description: 'Rename selected node' },
 				{ key: 'Alt+S', description: 'Add serial node' },
 				{ key: 'Alt+P', description: 'Add parallel node' },

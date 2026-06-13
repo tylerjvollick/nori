@@ -637,49 +637,62 @@
 		}
 	}
 
+	/**
+	 * Delete a single task node: confirm, reconnect its upstream blockers to its
+	 * downstream dependents, hard-delete the task, then refresh the graph.
+	 * Shared by xyflow's onbeforedelete path and the explicit Delete/Backspace
+	 * keyboard shortcut. Returns true if the task was deleted.
+	 *
+	 * Guards against a double-fire: if a confirm dialog is already pending (the
+	 * other path got here first for the same keystroke), this call bails. The
+	 * guard is order-independent because deleteConfirmState is set synchronously
+	 * inside the Promise executor below, before the first await.
+	 */
+	async function deleteNodeById(nodeId: string): Promise<boolean> {
+		if (deleteConfirmState) return false;
+		const node = nodes.find((n) => n.id === nodeId);
+		if (!node) return false;
+
+		const upstreamEdges = edges.filter((e) => e.target === nodeId);
+		const downstreamEdges = edges.filter((e) => e.source === nodeId);
+		const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
+		const nodeTitle = (node.data as { title?: string }).title ?? nodeId;
+
+		const confirmed = await new Promise<boolean>((resolve) => {
+			deleteConfirmState = { nodeId, nodeTitle, hasConnections, resolve };
+		});
+		if (!confirmed) return false;
+
+		// Reconnect: add a dep from each upstream to each downstream
+		for (const upEdge of upstreamEdges) {
+			for (const downEdge of downstreamEdges) {
+				try {
+					await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
+				} catch {
+					// Ignore duplicate dep errors
+				}
+			}
+		}
+
+		try {
+			await taskApi.deleteTask(spaceId, nodeId);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to delete task';
+			setTimeout(() => { connectionError = null; }, 4000);
+			return false;
+		}
+
+		await refreshGraph();
+		return true;
+	}
+
 	async function handleBeforeDelete({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
 		// Handle node deletion
 		if (deletedNodes.length > 0) {
 			for (const node of deletedNodes) {
-				const upstreamEdges = edges.filter((e) => e.target === node.id);
-				const downstreamEdges = edges.filter((e) => e.source === node.id);
-				const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
-				const nodeTitle = (node.data as { title?: string }).title ?? node.id;
-
-				const confirmed = await new Promise<boolean>((resolve) => {
-					deleteConfirmState = { nodeId: node.id, nodeTitle, hasConnections, resolve };
-				});
-
-				if (!confirmed) return false;
-
-				// Reconnect: add a dep from each upstream to each downstream
-				for (const upEdge of upstreamEdges) {
-					for (const downEdge of downstreamEdges) {
-						try {
-							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
-						} catch {
-							// Ignore duplicate dep errors
-						}
-					}
-				}
-
-				// Delete the task
-				try {
-					await taskApi.deleteTask(spaceId, node.id);
-				} catch (e) {
-					connectionError = e instanceof Error ? e.message : 'Failed to delete task';
-					setTimeout(() => { connectionError = null; }, 4000);
-					return false;
-				}
+				await deleteNodeById(node.id);
 			}
-
-			// Refresh graph after node deletion
-			if (isScoped && externalTasks) {
-				buildFromExternalData(externalTasks, externalDeps);
-			} else {
-				await fetchGraph({ silent: true });
-			}
-			return false; // We've already updated state via fetch
+			return false; // deleteNodeById already updated state via refreshGraph
 		}
 
 		// Handle edge deletion
@@ -1084,6 +1097,18 @@
 				// focused/center node (task mode only — recipe editing keeps Enter free).
 				if (mode !== 'recipe' && selectedNodeId) {
 					goto(`/spaces/${slug}/${selectedNodeId}`);
+				}
+				break;
+			}
+			case 'Delete':
+			case 'Backspace': {
+				// Delete the keyboard-selected node (task mode only). Confirms
+				// first via the same dialog as the click+drag delete. This is the
+				// discoverable path: single-click navigates away in task mode, so
+				// hjkl-select then Delete is how a task is removed from the graph.
+				if (mode !== 'recipe' && selectedNodeId) {
+					e.preventDefault();
+					deleteNodeById(selectedNodeId);
 				}
 				break;
 			}
