@@ -16,7 +16,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo } from '@lucide/svelte';
+	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo, Trash2 } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -458,6 +458,54 @@
 	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
 	let graphPanelIsRoot = $derived(graphPanelTask?.id === tree?.id);
 
+	// ---- Delete task ----
+	let showDeleteDialog = $state(false);
+	let isDeleting = $state(false);
+
+	/** Number of descendant sub-tasks that a delete would cascade to. */
+	let descendantCount = $derived(flatTasks.length);
+
+	/**
+	 * Hard-delete the task being viewed. Reconnects its upstream blockers to its
+	 * downstream dependents first (so the chain isn't broken), then deletes and
+	 * navigates away — to the parent task if this is a child, else the jobs list.
+	 * Matches the reconnect-then-delete behavior of GraphView.handleBeforeDelete.
+	 */
+	async function handleDelete(): Promise<void> {
+		if (!tree) return;
+		isDeleting = true;
+		try {
+			// Reconnect upstream blockers -> downstream dependents before deleting.
+			if (selectedDeps) {
+				const upstreamIds = selectedDeps.blockers.map((d) => d.toTaskId);
+				const downstreamIds = selectedDeps.dependents.map((d) => d.fromTaskId);
+				for (const upstream of upstreamIds) {
+					for (const downstream of downstreamIds) {
+						try {
+							await taskApi.addDep(spaceId, upstream, downstream, 'blocks');
+						} catch {
+							// Ignore duplicate-dep errors — the link may already exist.
+						}
+					}
+				}
+			}
+
+			await taskApi.deleteTask(spaceId, tree.id);
+			showDeleteDialog = false;
+			toast.success('Task deleted');
+			// Can't stay on a deleted task's page — go to the parent or the jobs list.
+			if (parentTask) {
+				goto(`/spaces/${slug}/${parentTask.id}`);
+			} else {
+				goto(`/spaces/${slug}/jobs`);
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to delete task');
+		} finally {
+			isDeleting = false;
+		}
+	}
+
 	async function handleSaveAsRecipe(): Promise<void> {
 		if (!tree || !recipeName.trim()) return;
 		isSavingAsRecipe = true;
@@ -531,12 +579,28 @@
 			</Breadcrumb.Root>
 
 			<!-- Actions (right side of breadcrumb bar) -->
-			{#if isJob}
-				<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
-					<BookOpen class="size-4 mr-1" />
-					Save as Recipe
-				</Button>
-			{/if}
+			<div class="flex items-center gap-1">
+				{#if isJob}
+					<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
+						<BookOpen class="size-4 mr-1" />
+						Save as Recipe
+					</Button>
+				{/if}
+				<!-- Delete is offered on individual tasks only; a whole job tree is not
+				     deletable in one click (delete its tasks from the graph instead). -->
+				{#if tree && !isJob}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="text-destructive hover:text-destructive"
+						onclick={() => (showDeleteDialog = true)}
+						data-testid="delete-task"
+					>
+						<Trash2 class="size-4 mr-1" />
+						Delete
+					</Button>
+				{/if}
+			</div>
 		</div>
 	</div>
 
@@ -843,5 +907,39 @@
 				</Button>
 			</Dialog.Footer>
 		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Delete Task Dialog -->
+<Dialog.Root bind:open={showDeleteDialog}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Delete task?</Dialog.Title>
+			<Dialog.Description>
+				Delete "<strong>{tree?.title ?? 'this task'}</strong>"?
+				{#if descendantCount > 0}
+					This will also delete its {descendantCount} sub-task{descendantCount === 1 ? '' : 's'}.
+				{/if}
+				{#if selectedDeps && selectedDeps.blockers.length > 0 && selectedDeps.dependents.length > 0}
+					Upstream and downstream dependencies will be reconnected automatically.
+				{/if}
+				This action cannot be undone.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer class="pt-2">
+			<Button type="button" variant="outline" onclick={() => (showDeleteDialog = false)}>
+				Cancel
+			</Button>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={isDeleting}
+				onclick={handleDelete}
+				data-testid="delete-task-confirm"
+			>
+				<Trash2 class="size-4 mr-1.5" />
+				{isDeleting ? 'Deleting...' : 'Delete'}
+			</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

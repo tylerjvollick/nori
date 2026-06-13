@@ -175,6 +175,25 @@ The displayed job status on the board is computed from child task statuses,
 except `backlog`, which is set on the job itself (at creation or via the
 status dropdown) and takes precedence over child aggregation.
 
+### Deleting Tasks
+
+Deletion is a **hard delete** (`DELETE /api/v1/spaces/:spaceId/tasks/:id`). It
+cascades to all descendant sub-tasks and removes the task's dependency edges
+(`task.parent_id` and `task_dep` are `ON DELETE CASCADE`). It is irreversible —
+to keep a record instead, set the task's status to `cancelled`.
+
+Before deleting a task that sits mid-chain, its upstream blockers are
+reconnected to its downstream dependents (`addDep(upstream, downstream)`) so the
+dependency chain is not broken and downstream tasks don't become unexpectedly
+ready.
+
+Discoverable entry points in the UI:
+- **Task detail page** — a `Delete` action in the header, offered on individual
+  tasks only (not on a job root, so a whole job tree can't be wiped in one
+  click). Confirms, then navigates to the parent task or the jobs list.
+
+The UI confirms before deleting and performs the upstream→downstream reconnect.
+
 ### Dependency Patterns
 
 **Sequential** (most common — recipe step ordering):
@@ -268,6 +287,8 @@ POST   /api/spaces/:spaceId/jobs                        — Create job (manual)
 GET    /api/jobs/:id                                    — Job detail with task tree
 PUT    /api/jobs/:id                                    — Update job metadata
 POST   /api/jobs/:id/cancel                             — Cancel job
+
+DELETE /api/v1/spaces/:spaceId/tasks/:id                — Hard-delete a task (cascades to sub-tasks + deps)
 
 GET    /api/spaces/:spaceId/stations/status              — Station WIP overview
 GET    /api/stations/:id/queue                           — Tasks at/queued for a station
