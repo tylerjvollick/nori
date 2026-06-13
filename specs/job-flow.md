@@ -88,6 +88,24 @@ Progress: 2/8 done, 1 active | Est. remaining: 3h 45m
 Shows the full task tree with dependency status, who's working on what, and
 time data.
 
+In the web app, the job-detail page (`/spaces/[slug]/[taskId]` for a job root)
+presents this view through four top-level tabs:
+
+- **Overview** (default) — a split pane with the task detail panel on the left
+  and the child-task **list** on the right. The detail panel can be collapsed.
+- **Board** — the job's child tasks on a Kanban board (Ready / In Progress /
+  Done), full-width with no detail panel. Clicking or pressing Enter on a card
+  opens that task's detail page.
+- **Graph** — the dependency graph of the job's child tasks, full-width with no
+  detail panel. Clicking a node opens that task's detail page; keyboard
+  shortcuts (`hjkl`, `Alt+S`/`Alt+P`, etc.) operate on the graph.
+- **Cost** — the job cost summary (estimated vs. actual).
+
+The active tab is reflected in the `?view=` query param (`board`, `graph`,
+`cost`; Overview is the default and carries no param), so tabs are
+deep-linkable. Keyboard shortcuts `o`/`b`/`g`/`c` switch tabs. A non-job leaf
+task instead shows its detail panel beside a neighborhood graph, with no tabs.
+
 #### 3. Station View (capacity view)
 
 "What's happening at each station?"

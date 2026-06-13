@@ -14,11 +14,14 @@ async function createJobWithChild(
   await page.getByRole('button', { name: 'New Job' }).click();
   await page.locator('#job-title').fill(jobTitle);
   await page.getByRole('button', { name: 'Create Job' }).click();
-  // Creating a job navigates to its detail page; Add Node only exists there,
-  // so waiting for it guarantees we're past the jobs-list page.
+  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
+
+  // Open the Graph tab to add a child node; Add Node only exists on the detail
+  // page, so waiting for it guarantees we're past the jobs-list page.
+  await page.getByRole('tab', { name: 'Graph' }).click();
   const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
   await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
-  // Now on the job detail page — capture its URL (without any view query).
+  // Now definitely on the job detail page — capture its URL (without the view query).
   const jobUrl = page.url().split('?')[0];
 
   await addNodeBtn.click();
@@ -57,10 +60,11 @@ test.describe('Job detail: selecting a task node navigates to its detail page', 
     });
   });
 
-  test('list view: clicking a task row navigates to that task', async ({ page }) => {
+  test('overview list: clicking a task row navigates to that task', async ({ page }) => {
     const { jobUrl, childId } = await createJobWithChild(page, 'List Nav Job', 'List Child');
 
-    await page.goto(`${jobUrl}?view=list`);
+    // The Overview tab (default, no ?view) shows the child-task list.
+    await page.goto(jobUrl);
     await page.waitForLoadState('networkidle');
 
     const row = page.locator('tr[role="link"]').filter({ hasText: 'List Child' });
@@ -78,7 +82,7 @@ test.describe('Job detail: selecting a task node navigates to its detail page', 
   test('board view: clicking a task card navigates to that task', async ({ page }) => {
     const { childId } = await createJobWithChild(page, 'Board Nav Job', 'Board Child');
 
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
+    await page.getByRole('tab', { name: 'Board' }).click();
 
     const card = page.locator(`a[href$="/spaces/${spaceSlug}/${childId}"]`);
     await expect(card).toBeVisible({ timeout: 10_000 });

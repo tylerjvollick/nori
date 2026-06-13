@@ -16,7 +16,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo, Trash2 } from '@lucide/svelte';
+	import { CircleAlert, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo, Trash2 } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -43,13 +43,13 @@
 	// Parent task (for child task breadcrumbs: Spaces > Space > ParentJob > Task)
 	let parentTask = $state<TaskResponse | null>(null);
 
-	// ---- View mode ----
-	type ViewMode = 'graph' | 'board' | 'list' | 'cost';
-	const ALL_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'graph', label: 'Graph', icon: GitBranch },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
-		{ value: 'list', label: 'List', icon: List },
-		{ value: 'cost', label: 'Cost', icon: DollarSign },
+	// ---- View mode (top-level tabs) ----
+	type ViewMode = 'overview' | 'board' | 'graph' | 'cost';
+	const ALL_VIEW_MODES: { value: ViewMode; label: string }[] = [
+		{ value: 'overview', label: 'Overview' },
+		{ value: 'board', label: 'Board' },
+		{ value: 'graph', label: 'Graph' },
+		{ value: 'cost', label: 'Cost' },
 	];
 
 	/** Whether the root is a non-job leaf task (no children). */
@@ -57,24 +57,26 @@
 		tree !== null && tree.type !== 'job' && (!tree.children || tree.children.length === 0),
 	);
 
-	/** For non-job leaf tasks, hide the view toggle entirely (detail + graph only). */
+	/** For non-job leaf tasks, hide the tabs entirely (detail + neighborhood graph only). */
 	let availableViewModes = $derived(isLeafTask ? [] : ALL_VIEW_MODES);
 
-	/** Task view modes (Graph/List/Board) — used in left pane toolbar toggle. */
-	const TASK_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'graph', label: 'Graph', icon: GitBranch },
-		{ value: 'list', label: 'List', icon: List },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
-	];
-	let taskViewModes = $derived(isLeafTask ? [] : TASK_VIEW_MODES);
+	/** Normalize the ?view= param to a known tab; default/unknown → Overview. */
+	function normalizeView(raw: string | null): ViewMode {
+		switch (raw) {
+			case 'board':
+			case 'graph':
+			case 'cost':
+				return raw;
+			default:
+				return 'overview';
+		}
+	}
 
-	let currentView = $derived<ViewMode>(
-		(($page.url.searchParams.get('view') as ViewMode) || 'graph') as ViewMode,
-	);
+	let currentView = $derived<ViewMode>(normalizeView($page.url.searchParams.get('view')));
 
 	function setView(mode: ViewMode): void {
 		const url = new URL($page.url);
-		if (mode === 'graph') {
+		if (mode === 'overview') {
 			url.searchParams.delete('view');
 		} else {
 			url.searchParams.set('view', mode);
@@ -226,8 +228,9 @@
 				neighborhoodDeps = new Map();
 				neighborhoodLoaded = true;
 			}
-		} else if ((view === 'graph' || view === 'list') && treeVal && !leaf && !dLoaded) {
-			// Job/parent task: load deps for all descendants when graph or list view selected
+		} else if ((view === 'graph' || view === 'overview') && treeVal && !leaf && !dLoaded) {
+			// Job/parent task: load deps for all descendants for the graph and the
+			// Overview list (the list shows blocker/dependent state from deps).
 			loadDepsForDescendants();
 		}
 	});
@@ -240,16 +243,14 @@
 		if (isLeafTask) return;
 
 		switch (e.key) {
-			case 'g':
-				setView('graph');
+			case 'o':
+				setView('overview');
 				break;
 			case 'b':
 				setView('board');
 				break;
-			case 's':
-				// 's' switches to List view; 'l' is left free for the graph's
-				// move-right (vim) navigation so the two no longer collide.
-				setView('list');
+			case 'g':
+				setView('graph');
 				break;
 			case 'c':
 				setView('cost');
@@ -604,32 +605,23 @@
 		</div>
 	</div>
 
-	<!-- Top-level tabs: [Tasks] [Cost] (for jobs/tasks with children) -->
+	<!-- Top-level tabs: [Overview] [Board] [Graph] [Cost] (for jobs/tasks with children) -->
 	{#if availableViewModes.length > 0}
 		<div class="flex-shrink-0 border-b bg-background px-4 pt-0 pb-0">
 			<div class="flex gap-0" role="tablist">
-				<button
-					role="tab"
-					aria-selected={currentView !== 'cost'}
-					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
-						{currentView !== 'cost'
-							? 'border-foreground text-foreground'
-							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
-					onclick={() => { if (currentView === 'cost') setView('graph'); }}
-				>
-					Tasks
-				</button>
-				<button
-					role="tab"
-					aria-selected={currentView === 'cost'}
-					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
-						{currentView === 'cost'
-							? 'border-foreground text-foreground'
-							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
-					onclick={() => setView('cost')}
-				>
-					Cost
-				</button>
+				{#each availableViewModes as mode (mode.value)}
+					<button
+						role="tab"
+						aria-selected={currentView === mode.value}
+						class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+							{currentView === mode.value
+								? 'border-foreground text-foreground'
+								: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+						onclick={() => setView(mode.value)}
+					>
+						{mode.label}
+					</button>
+				{/each}
 			</div>
 		</div>
 	{/if}
@@ -700,8 +692,28 @@
 				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
 			</div>
 
+		{:else if currentView === 'board'}
+			<!-- Board tab: full-width board (no detail panel) -->
+			<div class="flex-1 overflow-hidden">
+				<BoardView {spaceId} tasks={flatTasks} {stationMap} />
+			</div>
+
+		{:else if currentView === 'graph'}
+			<!-- Graph tab: full-width graph (no detail panel). Clicking a node
+			     navigates to that task's detail page. -->
+			<div class="flex-1 overflow-hidden">
+				<GraphView
+					{spaceId}
+					tasks={flatTasks}
+					deps={depsMap}
+					{stationMap}
+					rootTaskId={tree?.id}
+					onmutate={handleTreeMutate}
+				/>
+			</div>
+
 		{:else}
-			<!-- Tasks tab: split pane with [Graph|List|Board] toggle -->
+			<!-- Overview tab: detail panel (left) + child-task List (right) -->
 			<div class="flex-1 flex overflow-hidden">
 				<!-- Left: Detail panel (desktop sidebar) -->
 				{#if graphPanelOpen}
@@ -725,69 +737,11 @@
 					</div>
 				{/if}
 
-				<!-- Right: views pane -->
+				<!-- Right: child-task list (no view-switcher header) -->
 				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
-					{#if currentView === 'graph'}
-						<GraphView
-							{spaceId}
-							tasks={flatTasks}
-							deps={depsMap}
-							{stationMap}
-							rootTaskId={tree?.id}
-							onmutate={handleTreeMutate}
-							viewToggle={{ current: currentView, onchange: (mode) => setView(mode as ViewMode) }}
-						/>
-					{:else if currentView === 'board'}
-						<!-- Board toolbar with view toggle -->
-						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
-							<h1 class="text-lg font-semibold text-foreground">Board</h1>
-							<div class="flex items-center gap-3">
-								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
-									{#each taskViewModes as mode (mode.value)}
-										<Button
-											variant={currentView === mode.value ? 'secondary' : 'ghost'}
-											size="sm"
-											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
-												? 'bg-background shadow-sm'
-												: 'hover:bg-transparent hover:text-foreground'}"
-											onclick={() => setView(mode.value)}
-										>
-											<mode.icon class="size-3.5" />
-											{mode.label}
-										</Button>
-									{/each}
-								</div>
-							</div>
-						</div>
-						<div class="flex-1 overflow-hidden">
-							<BoardView {spaceId} tasks={flatTasks} {stationMap} />
-						</div>
-					{:else if currentView === 'list'}
-						<!-- List toolbar with view toggle -->
-						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
-							<h1 class="text-lg font-semibold text-foreground">List</h1>
-							<div class="flex items-center gap-3">
-								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
-									{#each taskViewModes as mode (mode.value)}
-										<Button
-											variant={currentView === mode.value ? 'secondary' : 'ghost'}
-											size="sm"
-											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
-												? 'bg-background shadow-sm'
-												: 'hover:bg-transparent hover:text-foreground'}"
-											onclick={() => setView(mode.value)}
-										>
-											<mode.icon class="size-3.5" />
-											{mode.label}
-										</Button>
-									{/each}
-								</div>
-							</div>
-						</div>
-						<div class="flex-1 overflow-hidden">
-							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
-						</div>
-					{/if}
+					<div class="flex-1 overflow-hidden">
+						<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
+					</div>
 
 					<!-- Expand button (desktop) — shown only when the panel is collapsed -->
 					{#if !graphPanelOpen}

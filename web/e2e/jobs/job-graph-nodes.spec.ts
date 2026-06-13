@@ -18,7 +18,8 @@ test.describe('Job Graph Node Creation', () => {
     await page.getByRole('button', { name: 'Create Job' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
-    // Default view is graph — wait for graph toolbar
+    // Open the Graph tab — wait for graph toolbar
+    await page.getByRole('tab', { name: 'Graph' }).click();
     const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 
@@ -41,6 +42,7 @@ test.describe('Job Graph Node Creation', () => {
     await page.getByRole('button', { name: 'Create Job' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
+    await page.getByRole('tab', { name: 'Graph' }).click();
     const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
 

@@ -14,7 +14,10 @@ async function createJobWithChildren(
   await page.getByRole('button', { name: 'New Job' }).click();
   await page.locator('#job-title').fill(jobTitle);
   await page.getByRole('button', { name: 'Create Job' }).click();
+  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
+  // Open the Graph tab (full-width graph).
+  await page.getByRole('tab', { name: 'Graph' }).click();
   const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
   await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
 

@@ -14,7 +14,10 @@ async function createJobWithChildren(
   await page.getByRole('button', { name: 'New Job' }).click();
   await page.locator('#job-title').fill(jobTitle);
   await page.getByRole('button', { name: 'Create Job' }).click();
+  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
+  // Open the Graph tab (full-width graph).
+  await page.getByRole('tab', { name: 'Graph' }).click();
   const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
   await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
 
@@ -63,36 +66,36 @@ test.describe('Graph keyboard navigation', () => {
     await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  // nori-zv0.6: 's' switches to List; 'l' is freed for graph move-right.
-  test("'l' does not switch views; 's' switches to the List view", async ({ page }) => {
+  // nori-zv0.6 / nori-c98.1: 'l' is reserved for graph move-right; 'o' switches to Overview.
+  test("'l' does not switch views; 'o' switches to the Overview list", async ({ page }) => {
     await createJobWithChildren(page, 'Rebind Job', ['One', 'Two']);
     await expect(page.locator('.svelte-flow__node')).toHaveCount(2, { timeout: 10_000 });
 
-    // Graph view has no ?view param.
-    expect(new URL(page.url()).searchParams.get('view')).toBeNull();
+    // The Graph tab carries ?view=graph.
+    expect(new URL(page.url()).searchParams.get('view')).toBe('graph');
 
-    // 'l' must NOT switch to the list view (reserved for graph move-right).
+    // 'l' must NOT switch the view (reserved for graph move-right).
     await page.keyboard.press('l');
     await page.waitForTimeout(500); // allow any (incorrect) navigation to happen
-    expect(new URL(page.url()).searchParams.get('view')).toBeNull();
+    expect(new URL(page.url()).searchParams.get('view')).toBe('graph');
     await expect(page.locator('.svelte-flow')).toBeVisible();
     await expect(page.locator('tr[role="link"]')).toHaveCount(0);
 
-    // 's' switches to the List view.
-    await page.keyboard.press('s');
-    await page.waitForURL((url) => url.searchParams.get('view') === 'list', { timeout: 10_000 });
+    // 'o' switches to the Overview tab (?view cleared) and shows the child-task list.
+    await page.keyboard.press('o');
+    await page.waitForURL((url) => url.searchParams.get('view') === null, { timeout: 10_000 });
     await expect(page.locator('tr[role="link"]')).toHaveCount(2, { timeout: 10_000 });
   });
 
-  // nori-zv0.6: keyboard help overlay reflects the rebind.
-  test('keyboard help overlay shows s = Switch to list view', async ({ page }) => {
+  // nori-c98.1: keyboard help overlay reflects the Overview shortcut.
+  test('keyboard help overlay shows o = Switch to overview', async ({ page }) => {
     await createJobWithChildren(page, 'Help Job', ['One']);
 
     await page.keyboard.press('?');
     const dialog = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
     await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-    const row = dialog.locator('div.flex').filter({ hasText: 'Switch to list view' });
-    await expect(row.locator('kbd')).toHaveText('s');
+    const row = dialog.locator('div.flex').filter({ hasText: 'Switch to overview' });
+    await expect(row.locator('kbd')).toHaveText('o');
   });
 });

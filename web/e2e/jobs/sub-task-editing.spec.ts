@@ -26,7 +26,8 @@ async function createJobAndSelectChildTask(page: Page, jobTitle: string): Promis
   await page.getByRole('button', { name: 'Create Job' }).click();
   await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
-  // Wait for graph, add a child node (graph excludes root, so starts at 0)
+  // Open the Graph tab, add a child node (graph excludes root, so starts at 0)
+  await page.getByRole('tab', { name: 'Graph' }).click();
   const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
   await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
   await addNodeBtn.click();

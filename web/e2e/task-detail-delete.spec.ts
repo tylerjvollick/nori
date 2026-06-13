@@ -14,7 +14,10 @@ async function createJobWithChild(
   await page.getByRole('button', { name: 'New Job' }).click();
   await page.locator('#job-title').fill(jobTitle);
   await page.getByRole('button', { name: 'Create Job' }).click();
+  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
+  // Open the Graph tab to add a child node.
+  await page.getByRole('tab', { name: 'Graph' }).click();
   const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
   await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
   const jobUrl = page.url().split('?')[0];
@@ -57,11 +60,11 @@ test.describe('Task detail: delete', () => {
     await expect(dialog).toContainText('Delete task?');
     await page.getByTestId('delete-task-confirm').click();
 
-    // Navigates back to the parent job's detail page.
+    // Navigates back to the parent job's detail page (Overview tab).
     await page.waitForURL((url) => url.pathname === new URL(jobUrl).pathname, { timeout: 10_000 });
 
-    // The deleted task no longer appears in the job graph.
-    await expect(page.locator('.svelte-flow__node', { hasText: 'Doomed Task' })).toHaveCount(0, {
+    // The deleted task no longer appears on the parent job page.
+    await expect(page.getByText('Doomed Task')).toHaveCount(0, {
       timeout: 10_000,
     });
   });

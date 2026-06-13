@@ -108,8 +108,8 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
 
     // Title in breadcrumb
     await expect(page.locator('[data-slot="breadcrumb-page"]', { hasText: 'Layout Test Job' })).toBeVisible();
-    // No h1 title below breadcrumbs
-    await expect(page.locator('h1')).not.toBeVisible();
+    // The job title is not duplicated as an h1 below the breadcrumbs.
+    await expect(page.locator('h1', { hasText: 'Layout Test Job' })).not.toBeVisible();
   });
 
   test('job detail: Save as Recipe button in breadcrumb bar', async ({ page }) => {
@@ -125,7 +125,7 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
     await expect(page.getByRole('button', { name: 'Save as Recipe' })).toBeVisible();
   });
 
-  test('job detail: Tasks and Cost tabs are visible', async ({ page }) => {
+  test('job detail: Overview/Board/Graph/Cost tabs are visible', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New Job' }).click();
@@ -134,38 +134,46 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
 
-    await expect(page.getByRole('tab', { name: 'Tasks' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Board' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Graph' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Cost' })).toBeVisible();
   });
 
-  test('job detail: switch between Graph/List/Board, detail panel persists', async ({ page }) => {
+  test('job detail: each top-level tab renders its view; no in-pane view switcher', async ({ page }) => {
     await page.goto(`/spaces/${spaceSlug}/jobs`);
     await page.waitForLoadState('networkidle');
     await page.getByRole('button', { name: 'New Job' }).click();
-    await page.locator('#job-title').fill('View Toggle Job');
+    await page.locator('#job-title').fill('Four Tab Job');
     await page.getByRole('button', { name: 'Create Job' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
 
-    // Wait for graph to load
+    // Default tab is Overview: detail panel (h2) on the left + child-task list (h1 "Tasks") on the right.
+    await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible({ timeout: 10000 });
+    // The in-pane [Graph|List|Board] view-switcher has been removed (no such buttons).
+    await expect(page.getByRole('button', { name: 'List', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveCount(0);
+
+    // Graph tab → full-width graph (Add Node toolbar present); ?view=graph.
+    await page.getByRole('tab', { name: 'Graph' }).click();
+    await expect(page).toHaveURL(/\?view=graph/);
     await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({ timeout: 10000 });
 
-    // Graph view should show view toggle with Graph active
-    await expect(page.getByRole('button', { name: 'Graph', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'List', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Board', exact: true })).toBeVisible();
+    // Board tab → full-width board (Kanban columns); ?view=board.
+    await page.getByRole('tab', { name: 'Board' }).click();
+    await expect(page).toHaveURL(/\?view=board/);
+    await expect(page.getByRole('heading', { level: 3, name: 'In Progress' })).toBeVisible({ timeout: 10000 });
 
-    // Switch to List — right pane (detail panel heading) should still be visible
-    await page.getByRole('button', { name: 'List', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 5000 });
+    // Cost tab → cost summary; ?view=cost.
+    await page.getByRole('tab', { name: 'Cost' }).click();
+    await expect(page).toHaveURL(/\?view=cost/);
+    await expect(page.getByText('Estimated').or(page.locator('.max-w-5xl'))).toBeVisible({ timeout: 5000 });
 
-    // Switch to Board — right pane should still be visible
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 5000 });
-
-    // Switch back to Graph
-    await page.getByRole('button', { name: 'Graph', exact: true }).click();
-    await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 5000 });
+    // Back to Overview clears the ?view param (Overview is the default).
+    await page.getByRole('tab', { name: 'Overview' }).click();
+    await expect(page).not.toHaveURL(/\?view=/);
   });
 
   // --- nori-zv0.3: job-detail layout swap (panel left, views right) ---
@@ -178,8 +186,8 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
     await page.getByRole('button', { name: 'Create Job' }).click();
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
-    // Graph (views pane) is ready when Add Node is present.
-    await expect(page.getByRole('button', { name: 'Add Node', exact: true })).toBeVisible({
+    // Overview (default tab) is ready when the child-task list renders.
+    await expect(page.getByRole('heading', { level: 1, name: 'Tasks' })).toBeVisible({
       timeout: 10_000,
     });
   }
@@ -188,14 +196,14 @@ test.describe('Detail view layout (nori-5mn.2, 5mn.3)', () => {
     await createJobAndOpenDetail(page, 'Swap Layout Job');
 
     const panelTitle = page.getByRole('heading', { level: 2, name: 'Swap Layout Job' });
-    const addNode = page.getByRole('button', { name: 'Add Node', exact: true });
+    const listHeading = page.getByRole('heading', { level: 1, name: 'Tasks' });
     await expect(panelTitle).toBeVisible({ timeout: 10_000 });
 
     const panelBox = await panelTitle.boundingBox();
-    const viewsBox = await addNode.boundingBox();
+    const viewsBox = await listHeading.boundingBox();
     expect(panelBox).not.toBeNull();
     expect(viewsBox).not.toBeNull();
-    // The detail panel sits left of the views (graph) pane.
+    // The detail panel sits left of the views (list) pane.
     expect(panelBox!.x).toBeLessThan(viewsBox!.x);
   });
 

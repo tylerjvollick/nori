@@ -51,8 +51,9 @@ test.describe('Breadcrumb navigation on detail views', () => {
 
     // Space-level tabs (Jobs/Recipes/etc) should NOT be visible
     await expect(page.getByRole('tab', { name: 'Recipes' })).not.toBeVisible();
-    // Job detail should show Tasks/Cost tabs
-    await expect(page.getByRole('tab', { name: 'Tasks' })).toBeVisible();
+    // Job detail should show its Overview/Board/Graph/Cost tabs
+    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Graph' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Cost' })).toBeVisible();
   });
 
@@ -66,7 +67,8 @@ test.describe('Breadcrumb navigation on detail views', () => {
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
 
-    // Wait for graph to load and add a child task
+    // Open the Graph tab (full-width graph), then add a child task
+    await page.getByRole('tab', { name: 'Graph' }).click();
     const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
     await addNodeBtn.click();
@@ -112,7 +114,8 @@ test.describe('Breadcrumb navigation on detail views', () => {
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
 
-    // Add a child task to the job
+    // Open the Graph tab, then add a child task to the job
+    await page.getByRole('tab', { name: 'Graph' }).click();
     const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
     await addNodeBtn.click();
@@ -156,6 +159,7 @@ test.describe('Breadcrumb navigation on detail views', () => {
       page.getByRole('heading', { level: 2, name: 'Refetch Parent Job' }),
     ).toBeVisible({ timeout: 10000 });
     // The parent's tree re-fetched: the child task node is shown in the graph.
+    await page.getByRole('tab', { name: 'Graph' }).click();
     await expect(
       page.locator('.svelte-flow__node', { hasText: 'Refetch Child Task' }),
     ).toBeVisible({ timeout: 10000 });
