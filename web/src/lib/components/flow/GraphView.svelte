@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
-	import type { Node, Edge, NodeTypes, Connection } from '@xyflow/svelte';
+	import type { Node, Edge, NodeTypes, EdgeTypes, Connection } from '@xyflow/svelte';
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
@@ -16,6 +16,7 @@
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
+	import DependencyEdge from './DependencyEdge.svelte';
 	import FlowActions from './FlowActions.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
@@ -67,6 +68,12 @@
 	// ---- Custom node types ----
 	const nodeTypes: NodeTypes = {
 		task: TaskNode as unknown as NodeTypes[string],
+	};
+
+	// ---- Custom edge types ----
+	// 'dependency' renders the smoothstep path plus drag-to-reconnect anchors.
+	const edgeTypes: EdgeTypes = {
+		dependency: DependencyEdge as unknown as EdgeTypes[string],
 	};
 
 	// ---- State ----
@@ -284,7 +291,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -312,7 +319,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -489,7 +496,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -584,9 +591,11 @@
 
 	// ---- Cycle detection ----
 
-	function hasCycle(sourceId: string, targetId: string): boolean {
+	function hasCycle(sourceId: string, targetId: string, excludeEdgeId?: string): boolean {
 		// Check if adding source → target would create a cycle.
 		// A cycle exists iff there is already a path from targetId to sourceId.
+		// excludeEdgeId omits one edge from the traversal — used when re-pointing
+		// an existing edge, which is about to be removed and so must not count.
 		const visited = new Set<string>();
 		const queue: string[] = [targetId];
 		while (queue.length > 0) {
@@ -595,6 +604,7 @@
 			if (visited.has(current)) continue;
 			visited.add(current);
 			for (const edge of edges) {
+				if (edge.id === excludeEdgeId) continue;
 				if (edge.source === current) {
 					queue.push(edge.target);
 				}
@@ -635,6 +645,78 @@
 		} finally {
 			isConnecting = false;
 		}
+	}
+
+	// ---- Edge reconnection (drag an endpoint to re-point a dependency) ----
+
+	/**
+	 * Validate a reconnect before xyflow optimistically applies it. Runs
+	 * synchronously; returning a falsy value cancels the reconnect so the edge
+	 * snaps back. Only the dependency relationship moves — task data is untouched.
+	 */
+	function handleBeforeReconnect(reconnectedEdge: Edge, oldEdge: Edge): Edge | null {
+		const source = reconnectedEdge.source;
+		const target = reconnectedEdge.target;
+
+		// No-op: dropped back on the same endpoints.
+		if (source === oldEdge.source && target === oldEdge.target) return oldEdge;
+
+		// Self-loop.
+		if (source === target) {
+			showConnectionError('Cannot re-point dependency onto the same task');
+			return null;
+		}
+
+		// Duplicate: another edge already encodes this exact dependency.
+		if (edges.some((e) => e.id !== oldEdge.id && e.source === source && e.target === target)) {
+			showConnectionError('That dependency already exists');
+			return null;
+		}
+
+		// Cycle: ignore the edge being moved (it is about to be removed).
+		if (hasCycle(source, target, oldEdge.id)) {
+			showConnectionError('Cannot re-point dependency: this would create a cycle');
+			return null;
+		}
+
+		return reconnectedEdge;
+	}
+
+	/**
+	 * Persist a reconnect: add the new dependency first, then remove the old one
+	 * (add-then-remove leaves no window where the dependency is lost), then
+	 * refresh from the server. The lingering old edge can never falsely trip the
+	 * backend cycle check because old and new edges share the fixed endpoint.
+	 */
+	async function handleReconnect(oldEdge: Edge, newConnection: Connection): Promise<void> {
+		const source = newConnection.source;
+		const target = newConnection.target;
+		if (!source || !target) return;
+		// No-op reconnect (handled in before-hook, but guard anyway).
+		if (source === oldEdge.source && target === oldEdge.target) return;
+
+		const depId = (oldEdge.data as { depId?: string } | undefined)?.depId;
+
+		isConnecting = true;
+		connectionError = null;
+		try {
+			await taskApi.addDep(spaceId, source, target, 'blocks');
+			if (depId) {
+				await taskApi.removeDep(spaceId, oldEdge.source, depId);
+			}
+			await refreshGraph();
+		} catch (e) {
+			showConnectionError(e instanceof Error ? e.message : 'Failed to move dependency');
+			// Re-sync with server truth so the optimistic edge change is reverted.
+			await refreshGraph();
+		} finally {
+			isConnecting = false;
+		}
+	}
+
+	function showConnectionError(message: string): void {
+		connectionError = message;
+		setTimeout(() => { connectionError = null; }, 4000);
 	}
 
 	/**
@@ -1306,6 +1388,7 @@
 				{nodes}
 				{edges}
 				{nodeTypes}
+				{edgeTypes}
 				fitView
 				fitViewOptions={{ padding: 0.2 }}
 				nodesDraggable={true}
@@ -1322,6 +1405,8 @@
 					}
 				}}
 				onconnect={handleConnect}
+				onbeforereconnect={handleBeforeReconnect}
+				onreconnect={handleReconnect}
 				onbeforedelete={handleBeforeDelete}
 			>
 				<FlowActions bind:handle={flowHandle} />
@@ -1352,5 +1437,12 @@
 	/* Slow down the animated edge dash movement (xyflow default is 0.5s) */
 	:global(.svelte-flow .svelte-flow__edge.animated path) {
 		animation-duration: 2s !important;
+	}
+
+	/* Reveal the drag-to-reconnect endpoint dots when an edge is hovered or
+	   selected. The 25px anchor stays interactive regardless of opacity. */
+	:global(.svelte-flow .svelte-flow__edge:hover .nori-edge-anchor),
+	:global(.svelte-flow .svelte-flow__edge.selected .nori-edge-anchor) {
+		opacity: 1;
 	}
 </style>

@@ -215,6 +215,28 @@ Discoverable entry points in the UI:
 
 Both paths confirm before deleting and perform the upstream→downstream reconnect.
 
+### Editing Dependency Edges in the Graph
+
+In the graph view, dependency edges can be **dragged to re-point** them. Each
+edge has two reconnect anchors (one per endpoint); dragging an endpoint onto a
+different node's handle re-points that dependency:
+
+- Dragging an edge's **target** endpoint (the arrow head) to another node keeps
+  the same upstream blocker and changes the downstream task.
+- Dragging the **source** endpoint changes the upstream blocker, keeping the
+  same downstream task.
+
+Only the `task_dep` row moves — the task nodes and all their data (title, time
+estimates, status, station) are untouched. The change persists by adding the new
+dependency, then removing the old one (`addDep(newSource, newTarget)` followed by
+`removeDep(oldDepId)`), then refreshing the graph.
+
+A reconnect is rejected (with an inline message, no change persisted) if it would
+create a self-loop, duplicate an existing edge, or introduce a cycle. The cycle
+check runs client-side before the change is applied and is enforced again by the
+backend (`task_dep` `detectCycle`) as a backstop. Drawing a brand-new edge
+between two nodes' handles uses the same validation.
+
 ### Dependency Patterns
 
 **Sequential** (most common — recipe step ordering):
