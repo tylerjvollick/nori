@@ -105,6 +105,11 @@ The active tab is reflected in the `?view=` query param (`board`, `graph`,
 `cost`; Overview is the default and carries no param), so tabs are
 deep-linkable. Keyboard shortcuts `o`/`b`/`g`/`c` switch tabs. A non-job leaf
 task instead shows its detail panel beside a neighborhood graph, with no tabs.
+In the neighborhood graph the current task starts keyboard-focused (selected),
+so `hjkl` moves relative to it — e.g. `l` selects the downstream neighbor.
+Node borders reflect status: the highlighted (selected/in-focus) node uses its
+status color (blue for in-progress, green for done, etc.) while inactive nodes
+use a muted version of that color, so the focused node is easy to pick out.
 
 #### 3. Station View (capacity view)
 

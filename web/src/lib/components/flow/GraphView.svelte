@@ -451,11 +451,20 @@
 			}
 		}
 
+		// In the neighborhood (focus) view, start the keyboard cursor on the
+		// current task so the first hjkl press moves relative to it (e.g. 'l'
+		// goes downstream/right), instead of falling back to the leftmost node.
+		// Preserve an existing selection across rebuilds so navigation isn't
+		// reset when the graph re-renders. Full-graph view (no focusTaskId)
+		// keeps its prior behavior: no node selected on build.
+		const initialSelection = focusTaskId ? (selectedNodeId ?? focusTaskId) : null;
+
 		// Build nodes
 		const newNodes: Node[] = filtered.map((task) => ({
 			id: task.id,
 			type: 'task',
 			position: { x: 0, y: 0 },
+			selected: initialSelection != null && initialSelection === task.id,
 			data: {
 				title: task.title,
 				taskId: task.id,
