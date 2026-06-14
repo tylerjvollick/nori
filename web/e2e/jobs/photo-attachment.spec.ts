@@ -110,6 +110,28 @@ test.describe('Photo attachment on tasks and sub-steps', () => {
     });
   });
 
+  test('task photos: row caps at three with a "+N more" overflow indicator', async ({ page }) => {
+    const panel = await createJobAndSelectChildTask(page, 'Photo Task E');
+    const photos = panel.getByTestId('task-photos');
+
+    // Upload four photos.
+    await photos.getByTestId('task-photos-input').setInputFiles([
+      imageFile('a.png'),
+      imageFile('b.png'),
+      imageFile('c.png'),
+      imageFile('d.png'),
+    ]);
+
+    // Only the first three tiles render, and the third shows "+1".
+    await expect(photos.getByTestId('task-photo')).toHaveCount(3, { timeout: 10000 });
+    await expect(photos.getByTestId('task-photos-more')).toHaveText(/\+1/);
+
+    // Opening the viewer still exposes all four photos.
+    await photos.getByTestId('task-photo').last().click();
+    await expect(page.getByTestId('media-viewer-item')).toHaveCount(4, { timeout: 10000 });
+    await expect(page.getByTestId('media-viewer-counter')).toHaveText('3 / 4');
+  });
+
   test('attach an image to a sub-step', async ({ page }) => {
     const panel = await createJobAndSelectChildTask(page, 'Photo Task C');
     await addSubTask(panel, 'Glue the joints');

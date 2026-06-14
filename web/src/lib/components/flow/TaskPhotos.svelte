@@ -3,7 +3,7 @@
 	import { resolveMediaUrl } from '$lib/api/client';
 	import type { TaskMedia } from '$lib/types/task';
 	import { Button } from '$lib/components/ui/button';
-	import { ImagePlus, Loader2, Play } from '@lucide/svelte';
+	import { ImagePlus, Loader2, Play, Images } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import MediaViewerModal from './MediaViewerModal.svelte';
 
@@ -28,6 +28,12 @@
 	let viewerItems = $derived(
 		media.map((m) => ({ id: m.id, url: m.url, isVideo: isVideo(m) })),
 	);
+
+	// Show at most the first three photos in the row; if there are more, the
+	// third tile gets a "+N" overlay indicating the rest (all are still
+	// reachable in the viewer).
+	let visibleMedia = $derived(media.slice(0, 3));
+	let overflowCount = $derived(Math.max(0, media.length - 3));
 
 	async function load() {
 		loading = true;
@@ -130,22 +136,34 @@
 		<p class="text-xs text-muted-foreground">No photos yet.</p>
 	{:else}
 		<div class="grid grid-cols-3 gap-2" data-testid="task-photos-grid">
-			{#each media as item, i (item.id)}
+			{#each visibleMedia as item, i (item.id)}
 				<button
 					type="button"
 					class="group/photo relative aspect-square rounded-md border border-border overflow-hidden bg-muted"
 					onclick={() => openViewer(i)}
-					title="View photo"
+					title={i === 2 && overflowCount > 0 ? `View all ${media.length} photos` : 'View photo'}
 					data-testid="task-photo"
 				>
 					{#if isVideo(item)}
 						<!-- svelte-ignore a11y_media_has_caption -->
 						<video src={resolveMediaUrl(item.url)} class="w-full h-full object-cover" muted preload="metadata"></video>
-						<span class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
-							<Play class="size-6 text-white/90" />
-						</span>
+						{#if !(i === 2 && overflowCount > 0)}
+							<span class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+								<Play class="size-6 text-white/90" />
+							</span>
+						{/if}
 					{:else}
 						<img src={resolveMediaUrl(item.url)} alt={item.fileName} class="w-full h-full object-cover" />
+					{/if}
+
+					{#if i === 2 && overflowCount > 0}
+						<span
+							class="absolute inset-0 flex items-center justify-center gap-1 bg-black/60 text-white text-sm font-medium pointer-events-none"
+							data-testid="task-photos-more"
+						>
+							<Images class="size-4" />
+							+{overflowCount}
+						</span>
 					{/if}
 				</button>
 			{/each}
