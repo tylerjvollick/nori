@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Carousel from '$lib/components/ui/carousel';
+	import type { CarouselAPI } from '$lib/components/ui/carousel/context';
 	import { resolveMediaUrl } from '$lib/api/client';
 	import type { SubTaskImage } from '$lib/types/task';
 	import { Trash2, ImageIcon } from '@lucide/svelte';
@@ -15,6 +16,26 @@
 	}
 
 	let { open = $bindable(false), title, description = null, images, ondelete }: Props = $props();
+
+	// Embla measures slide sizes on init. Inside a Dialog the content is still
+	// animating in (and the images load asynchronously), so the first measurement
+	// is wrong and scrolling feels glitchy. Capture the API and re-measure once
+	// the dialog is open, whenever an image finishes loading, and when the image
+	// set changes (e.g. after a delete).
+	let emblaApi = $state<CarouselAPI | undefined>(undefined);
+
+	function reInit() {
+		emblaApi?.reInit();
+	}
+
+	$effect(() => {
+		// Track the things that should trigger a re-measure.
+		void open;
+		void images.length;
+		if (!open || !emblaApi) return;
+		const id = requestAnimationFrame(() => emblaApi?.reInit());
+		return () => cancelAnimationFrame(id);
+	});
 </script>
 
 <Dialog.Root bind:open>
@@ -24,15 +45,22 @@
 		</Dialog.Header>
 
 		{#if images.length > 0}
-			<Carousel.Root class="w-full" opts={{ loop: images.length > 1 }}>
+			<Carousel.Root
+				class="w-full"
+				opts={{ loop: images.length > 2, align: 'center' }}
+				setApi={(api) => (emblaApi = api)}
+			>
 				<Carousel.Content>
 					{#each images as img (img.id)}
-						<Carousel.Item class="flex items-center justify-center">
-							<div class="relative flex w-full items-center justify-center bg-muted/30 rounded-md">
+						<Carousel.Item>
+							<!-- Fixed-height frame keeps slide dimensions stable regardless of
+							     the loaded image's aspect ratio, so embla never has to re-layout. -->
+							<div class="relative flex h-[65vh] items-center justify-center rounded-md bg-muted/30">
 								<img
 									src={resolveMediaUrl(img.imageUrl)}
 									alt={title}
-									class="max-h-[65vh] w-auto object-contain"
+									class="max-h-full max-w-full object-contain"
+									onload={reInit}
 									data-testid="subtask-modal-image"
 								/>
 								<button
