@@ -595,9 +595,9 @@ func TestPourRecipe_DependencyEdgeDirection(t *testing.T) {
 func TestGenerateTaskID(t *testing.T) {
 	id := generateTaskID()
 
-	// Should start with "nori-".
-	if len(id) < 6 || id[:5] != "nori-" {
-		t.Errorf("expected ID starting with 'nori-', got %q", id)
+	// Should start with "task-".
+	if len(id) < 6 || id[:5] != "task-" {
+		t.Errorf("expected ID starting with 'task-', got %q", id)
 	}
 
 	// Should be unique.
@@ -3417,8 +3417,8 @@ func TestRollRecipe_GeneratesNoriPrefixID(t *testing.T) {
 		t.Fatalf("RollRecipe: %v", err)
 	}
 
-	if len(job.ID) < 5 || job.ID[:5] != "nori-" {
-		t.Errorf("job ID %q does not start with 'nori-'", job.ID)
+	if len(job.ID) < 5 || job.ID[:5] != "task-" {
+		t.Errorf("job ID %q does not start with 'task-'", job.ID)
 	}
 }
 

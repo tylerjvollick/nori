@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -1811,4 +1812,33 @@ func TestCreateTask_WithParentPointingToRoot_Succeeds(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, &rootID, result.ParentID)
+	// Child created via CreateTask gets a hierarchical {parentID}.{seq} ID
+	// (not a flat ID), so descendant tree queries continue to work.
+	assert.Equal(t, "job-abc.1", result.ID)
+}
+
+func TestCreateTask_RootGetsTaskPrefix(t *testing.T) {
+	// CreateTask with no parent produces a root job ID with the task- prefix.
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	var created *models.Task
+	mockRepo := &MockTaskRepository{
+		createFunc: func(task *models.Task) error {
+			created = task
+			return nil
+		},
+	}
+
+	svc := newTestTaskService(mockRepo, &MockTaskDepRepository{})
+
+	result, err := svc.CreateTask(spaceID, userID, &dtos.CreateTaskRequest{
+		Title: "Build dining table",
+	})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.True(t, strings.HasPrefix(result.ID, "task-"),
+		"root task ID %q should start with 'task-'", result.ID)
+	assert.Equal(t, result.ID, created.ID)
 }
