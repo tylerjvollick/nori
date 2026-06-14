@@ -702,7 +702,7 @@
 		<!-- Photos (hidden for recipe/job root tasks, same as sub-tasks) -->
 		{#if !hideSubTasks}
 			<Separator />
-			<TaskPhotos spaceId={spaceId} taskId={task.id} />
+			<TaskPhotos spaceId={spaceId} taskId={task.id} title={task.title} />
 		{/if}
 
 		<!-- Sub-tasks (hidden for recipe/job root tasks) -->

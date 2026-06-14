@@ -4,7 +4,7 @@
 	import type { SubTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
 	import { resolveMediaUrl } from '$lib/api/client';
-	import SubTaskImageModal from './SubTaskImageModal.svelte';
+	import MediaViewerModal from './MediaViewerModal.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -619,11 +619,11 @@
 
 <!-- Full-size image viewer for the selected sub-step. -->
 {#if modalSubTask}
-	<SubTaskImageModal
+	<MediaViewerModal
 		bind:open={modalOpen}
 		title={modalSubTask.title}
 		description={modalSubTask.description}
-		images={modalSubTask.images ?? []}
+		items={(modalSubTask.images ?? []).map((img) => ({ id: img.id, url: img.imageUrl }))}
 		ondelete={(imageId) => deleteImage(modalSubTask!.id, imageId)}
 	/>
 {/if}

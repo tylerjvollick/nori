@@ -84,10 +84,10 @@ test.describe('Photo attachment on tasks and sub-steps', () => {
     await expect(img.first()).toHaveAttribute('src', /\/uploads\/task-media\//);
     await expect(photos.getByText('No photos yet.')).not.toBeVisible();
 
-    // Delete it.
-    const photoCell = grid.locator('div.group\\/photo').first();
-    await photoCell.hover();
-    await photoCell.getByTestId('task-photo-delete').click();
+    // Clicking the photo opens the shared full-size viewer; delete from there.
+    await grid.getByTestId('task-photo').first().click();
+    await expect(page.getByTestId('media-viewer-item').first()).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('media-viewer-delete').first().click();
 
     await expect(photos.getByText('No photos yet.')).toBeVisible({ timeout: 10000 });
   });
@@ -149,17 +149,17 @@ test.describe('Photo attachment on tasks and sub-steps', () => {
 
     // Clicking the thumbnail opens the full-size viewer modal with both images.
     await row.getByTestId('subtask-thumb').click();
-    await expect(page.getByTestId('subtask-modal-image').first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId('subtask-modal-image')).toHaveCount(2);
+    await expect(page.getByTestId('media-viewer-item').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('media-viewer-item')).toHaveCount(2);
 
     // Position indicator starts at 1 / 2 and advances on Next.
-    await expect(page.getByTestId('subtask-modal-counter')).toHaveText('1 / 2');
+    await expect(page.getByTestId('media-viewer-counter')).toHaveText('1 / 2');
     await page.getByRole('button', { name: 'Next slide' }).click();
-    await expect(page.getByTestId('subtask-modal-counter')).toHaveText('2 / 2');
+    await expect(page.getByTestId('media-viewer-counter')).toHaveText('2 / 2');
 
     // Delete the currently-visible image (slide 2); the count drops to 1.
-    await page.getByTestId('subtask-modal-delete').last().click();
-    await expect(page.getByTestId('subtask-modal-image')).toHaveCount(1, { timeout: 10000 });
+    await page.getByTestId('media-viewer-delete').last().click();
+    await expect(page.getByTestId('media-viewer-item')).toHaveCount(1, { timeout: 10000 });
 
     // Close the modal (Escape) and confirm the count badge is gone (only 1 left).
     await page.keyboard.press('Escape');

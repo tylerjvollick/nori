@@ -3,20 +3,31 @@
 	import { resolveMediaUrl } from '$lib/api/client';
 	import type { TaskMedia } from '$lib/types/task';
 	import { Button } from '$lib/components/ui/button';
-	import { ImagePlus, Trash2, Loader2 } from '@lucide/svelte';
+	import { ImagePlus, Loader2, Play } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import MediaViewerModal from './MediaViewerModal.svelte';
 
 	interface Props {
 		spaceId: string;
 		taskId: string;
+		/** Used as the viewer modal heading. */
+		title?: string;
 	}
 
-	let { spaceId, taskId }: Props = $props();
+	let { spaceId, taskId, title = 'Photos' }: Props = $props();
 
 	let media = $state<TaskMedia[]>([]);
 	let loading = $state(true);
 	let uploading = $state(false);
 	let fileInput = $state<HTMLInputElement | null>(null);
+
+	// Viewer modal state.
+	let viewerOpen = $state(false);
+	let viewerStartIndex = $state(0);
+
+	let viewerItems = $derived(
+		media.map((m) => ({ id: m.id, url: m.url, isVideo: isVideo(m) })),
+	);
 
 	async function load() {
 		loading = true;
@@ -61,15 +72,22 @@
 		}
 	}
 
-	async function remove(item: TaskMedia) {
+	function openViewer(index: number) {
+		viewerStartIndex = index;
+		viewerOpen = true;
+	}
+
+	async function deleteById(id: string) {
 		const prev = media;
-		media = media.filter((m) => m.id !== item.id);
+		media = media.filter((m) => m.id !== id);
 		try {
-			await taskApi.deleteTaskMedia(spaceId, taskId, item.id);
+			await taskApi.deleteTaskMedia(spaceId, taskId, id);
 		} catch (err) {
 			media = prev; // restore on failure
 			toast.error(err instanceof Error ? err.message : 'Failed to delete photo');
+			return;
 		}
+		if (media.length === 0) viewerOpen = false;
 	}
 
 	function isVideo(m: TaskMedia): boolean {
@@ -112,26 +130,34 @@
 		<p class="text-xs text-muted-foreground">No photos yet.</p>
 	{:else}
 		<div class="grid grid-cols-3 gap-2" data-testid="task-photos-grid">
-			{#each media as item (item.id)}
-				<div class="group/photo relative aspect-square rounded-md border border-border overflow-hidden bg-muted">
+			{#each media as item, i (item.id)}
+				<button
+					type="button"
+					class="group/photo relative aspect-square rounded-md border border-border overflow-hidden bg-muted"
+					onclick={() => openViewer(i)}
+					title="View photo"
+					data-testid="task-photo"
+				>
 					{#if isVideo(item)}
 						<!-- svelte-ignore a11y_media_has_caption -->
-						<video src={resolveMediaUrl(item.url)} class="w-full h-full object-cover" controls></video>
+						<video src={resolveMediaUrl(item.url)} class="w-full h-full object-cover" muted preload="metadata"></video>
+						<span class="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+							<Play class="size-6 text-white/90" />
+						</span>
 					{:else}
 						<img src={resolveMediaUrl(item.url)} alt={item.fileName} class="w-full h-full object-cover" />
 					{/if}
-					<button
-						class="absolute top-1 right-1 p-1 rounded bg-black/50 text-white/90 opacity-0 group-hover/photo:opacity-100 hover:text-red-400 transition-opacity"
-						onclick={() => remove(item)}
-						type="button"
-						title="Delete photo"
-						aria-label="Delete photo"
-						data-testid="task-photo-delete"
-					>
-						<Trash2 class="size-3.5" />
-					</button>
-				</div>
+				</button>
 			{/each}
 		</div>
 	{/if}
 </div>
+
+<!-- Full-size viewer (shared with sub-step photos). -->
+<MediaViewerModal
+	bind:open={viewerOpen}
+	{title}
+	items={viewerItems}
+	startIndex={viewerStartIndex}
+	ondelete={deleteById}
+/>

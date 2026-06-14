@@ -3,24 +3,39 @@
 	import * as Carousel from '$lib/components/ui/carousel';
 	import type { CarouselAPI } from '$lib/components/ui/carousel/context';
 	import { resolveMediaUrl } from '$lib/api/client';
-	import type { SubTaskImage } from '$lib/types/task';
 	import { Trash2, ImageIcon, X } from '@lucide/svelte';
+
+	/** A single viewable media item. `url` is a server-relative path. */
+	export interface MediaViewerItem {
+		id: string;
+		url: string;
+		isVideo?: boolean;
+	}
 
 	interface Props {
 		open: boolean;
 		title: string;
 		description?: string | null;
-		images: SubTaskImage[];
-		/** Called when the user deletes an image; parent owns the API call + state. */
-		ondelete?: (imageId: string) => void;
+		items: MediaViewerItem[];
+		/** Which item to open on first show. */
+		startIndex?: number;
+		/** Called when the user deletes an item; the parent owns the API call + state. */
+		ondelete?: (id: string) => void;
 	}
 
-	let { open = $bindable(false), title, description = null, images, ondelete }: Props = $props();
+	let {
+		open = $bindable(false),
+		title,
+		description = null,
+		items,
+		startIndex = 0,
+		ondelete,
+	}: Props = $props();
 
 	// Embla measures slide sizes on init. Inside a portal/dialog that first
 	// measurement can happen before layout settles, so re-measure once after the
-	// dialog opens and whenever the image set changes (e.g. after a delete).
-	// Slides use a fixed-height frame, so image loads do NOT require a reInit.
+	// dialog opens and whenever the item set changes (e.g. after a delete).
+	// Slides use a fixed-height frame, so media loads do NOT require a reInit.
 	let emblaApi = $state<CarouselAPI | undefined>(undefined);
 
 	// Current slide (0-based) for the "n / total" position indicator.
@@ -28,7 +43,7 @@
 
 	$effect(() => {
 		void open;
-		void images.length;
+		void items.length;
 		if (!open || !emblaApi) return;
 		const id = requestAnimationFrame(() => emblaApi?.reInit());
 		return () => cancelAnimationFrame(id);
@@ -51,8 +66,8 @@
 <Dialog.Root bind:open>
 	<Dialog.Portal>
 		<!-- Plain dark overlay — intentionally NO backdrop-blur: blurring the page
-		     behind (which includes the live SvelteFlow graph) is GPU-expensive and
-		     makes the modal feel sluggish to open. -->
+		     behind (which can include the live SvelteFlow graph) is GPU-expensive
+		     and makes the modal feel sluggish to open. -->
 		<Dialog.Overlay
 			class="fixed inset-0 z-50 bg-black/70 data-open:animate-in data-closed:animate-out data-open:fade-in-0 data-closed:fade-out-0 duration-100"
 		/>
@@ -69,31 +84,41 @@
 				</Dialog.Close>
 			</div>
 
-			{#if images.length > 0}
+			{#if items.length > 0}
 				<Carousel.Root
 					class="w-full"
-					opts={{ loop: images.length > 2, align: 'center' }}
+					opts={{ loop: items.length > 2, align: 'center', startIndex }}
 					setApi={(api) => (emblaApi = api)}
 				>
 					<Carousel.Content>
-						{#each images as img (img.id)}
+						{#each items as item (item.id)}
 							<Carousel.Item>
 								<!-- Fixed-height frame keeps slide dimensions stable regardless of
-								     the loaded image's aspect ratio, so embla never has to relayout. -->
+								     the loaded media's aspect ratio, so embla never has to relayout. -->
 								<div class="relative flex h-[65vh] items-center justify-center rounded-md bg-muted/30">
-									<img
-										src={resolveMediaUrl(img.imageUrl)}
-										alt={title}
-										class="max-h-full max-w-full object-contain"
-										data-testid="subtask-modal-image"
-									/>
+									{#if item.isVideo}
+										<!-- svelte-ignore a11y_media_has_caption -->
+										<video
+											src={resolveMediaUrl(item.url)}
+											class="max-h-full max-w-full object-contain"
+											controls
+											data-testid="media-viewer-item"
+										></video>
+									{:else}
+										<img
+											src={resolveMediaUrl(item.url)}
+											alt={title}
+											class="max-h-full max-w-full object-contain"
+											data-testid="media-viewer-item"
+										/>
+									{/if}
 									<button
 										type="button"
 										class="absolute top-2 right-2 p-1.5 rounded bg-black/50 text-white/90 hover:text-red-400 transition-colors"
-										title="Delete image"
-										aria-label="Delete image"
-										onclick={() => ondelete?.(img.id)}
-										data-testid="subtask-modal-delete"
+										title="Delete"
+										aria-label="Delete"
+										onclick={() => ondelete?.(item.id)}
+										data-testid="media-viewer-delete"
 									>
 										<Trash2 class="size-4" />
 									</button>
@@ -101,24 +126,24 @@
 							</Carousel.Item>
 						{/each}
 					</Carousel.Content>
-					{#if images.length > 1}
+					{#if items.length > 1}
 						<Carousel.Previous />
 						<Carousel.Next />
 					{/if}
 				</Carousel.Root>
 
-				{#if images.length > 1}
+				{#if items.length > 1}
 					<div
 						class="mt-2 text-center text-xs font-medium text-muted-foreground tabular-nums"
-						data-testid="subtask-modal-counter"
+						data-testid="media-viewer-counter"
 					>
-						{selectedIndex + 1} / {images.length}
+						{selectedIndex + 1} / {items.length}
 					</div>
 				{/if}
 			{:else}
 				<div class="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
 					<ImageIcon class="size-8 opacity-40" />
-					<p class="text-sm">No photos for this step yet.</p>
+					<p class="text-sm">No media yet.</p>
 				</div>
 			{/if}
 
