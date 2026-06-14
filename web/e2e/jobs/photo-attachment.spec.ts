@@ -125,8 +125,39 @@ test.describe('Photo attachment on tasks and sub-steps', () => {
     await chooser.setFiles(imageFile('step.png'));
 
     // The row's thumbnail now shows the uploaded image.
-    const thumb = row.locator('img');
-    await expect(thumb).toBeVisible({ timeout: 10000 });
-    await expect(thumb).toHaveAttribute('src', /\/uploads\/sub-task-images\//);
+    const thumb = row.getByTestId('subtask-thumb').locator('img');
+    await expect(thumb.first()).toBeVisible({ timeout: 10000 });
+    await expect(thumb.first()).toHaveAttribute('src', /\/uploads\/sub-task-images\//);
+  });
+
+  test('multiple images: count badge, viewer modal, and delete', async ({ page }) => {
+    const panel = await createJobAndSelectChildTask(page, 'Photo Task D');
+    await addSubTask(panel, 'Apply finish');
+
+    const row = panel.locator('.group\\/item', { hasText: 'Apply finish' });
+    await row.hover();
+
+    // Upload two images at once (the input is multiple).
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      row.getByTestId('subtask-image-add').click(),
+    ]);
+    await chooser.setFiles([imageFile('a.png'), imageFile('b.png')]);
+
+    // The thumbnail shows a count badge of 2.
+    await expect(row.getByTestId('subtask-image-count')).toHaveText('2', { timeout: 10000 });
+
+    // Clicking the thumbnail opens the full-size viewer modal with both images.
+    await row.getByTestId('subtask-thumb').click();
+    await expect(page.getByTestId('subtask-modal-image').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('subtask-modal-image')).toHaveCount(2);
+
+    // Delete one image from the modal; the count badge drops to 1.
+    await page.getByTestId('subtask-modal-delete').first().click();
+    await expect(page.getByTestId('subtask-modal-image')).toHaveCount(1, { timeout: 10000 });
+
+    // Close the modal (Escape) and confirm the count badge is gone (only 1 left).
+    await page.keyboard.press('Escape');
+    await expect(row.getByTestId('subtask-image-count')).toHaveCount(0, { timeout: 10000 });
   });
 });
