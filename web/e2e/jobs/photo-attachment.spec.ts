@@ -152,8 +152,13 @@ test.describe('Photo attachment on tasks and sub-steps', () => {
     await expect(page.getByTestId('subtask-modal-image').first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('subtask-modal-image')).toHaveCount(2);
 
-    // Delete one image from the modal; the count badge drops to 1.
-    await page.getByTestId('subtask-modal-delete').first().click();
+    // Position indicator starts at 1 / 2 and advances on Next.
+    await expect(page.getByTestId('subtask-modal-counter')).toHaveText('1 / 2');
+    await page.getByRole('button', { name: 'Next slide' }).click();
+    await expect(page.getByTestId('subtask-modal-counter')).toHaveText('2 / 2');
+
+    // Delete the currently-visible image (slide 2); the count drops to 1.
+    await page.getByTestId('subtask-modal-delete').last().click();
     await expect(page.getByTestId('subtask-modal-image')).toHaveCount(1, { timeout: 10000 });
 
     // Close the modal (Escape) and confirm the count badge is gone (only 1 left).

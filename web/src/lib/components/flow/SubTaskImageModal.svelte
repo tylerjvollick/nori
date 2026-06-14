@@ -23,12 +23,28 @@
 	// Slides use a fixed-height frame, so image loads do NOT require a reInit.
 	let emblaApi = $state<CarouselAPI | undefined>(undefined);
 
+	// Current slide (0-based) for the "n / total" position indicator.
+	let selectedIndex = $state(0);
+
 	$effect(() => {
 		void open;
 		void images.length;
 		if (!open || !emblaApi) return;
 		const id = requestAnimationFrame(() => emblaApi?.reInit());
 		return () => cancelAnimationFrame(id);
+	});
+
+	$effect(() => {
+		const api = emblaApi;
+		if (!api) return;
+		const update = () => (selectedIndex = api.selectedScrollSnap());
+		update();
+		api.on('select', update);
+		api.on('reInit', update);
+		return () => {
+			api.off('select', update);
+			api.off('reInit', update);
+		};
 	});
 </script>
 
@@ -90,6 +106,15 @@
 						<Carousel.Next />
 					{/if}
 				</Carousel.Root>
+
+				{#if images.length > 1}
+					<div
+						class="mt-2 text-center text-xs font-medium text-muted-foreground tabular-nums"
+						data-testid="subtask-modal-counter"
+					>
+						{selectedIndex + 1} / {images.length}
+					</div>
+				{/if}
 			{:else}
 				<div class="flex flex-col items-center justify-center gap-2 py-12 text-muted-foreground">
 					<ImageIcon class="size-8 opacity-40" />
