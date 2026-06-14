@@ -107,9 +107,11 @@ deep-linkable. Keyboard shortcuts `o`/`b`/`g`/`c` switch tabs. A non-job leaf
 task instead shows its detail panel beside a neighborhood graph, with no tabs.
 In the neighborhood graph the current task starts keyboard-focused (selected),
 so `hjkl` moves relative to it — e.g. `l` selects the downstream neighbor.
-Node borders reflect status: the highlighted (selected/in-focus) node uses its
-status color (blue for in-progress, green for done, etc.) while inactive nodes
-use a muted version of that color, so the focused node is easy to pick out.
+Node borders reflect status: only the keyboard-selected node is highlighted
+(its status color — blue for in-progress, green for done, etc. — with a matching
+ring), and every other node uses a muted version of that color. The single
+highlight follows the cursor as you navigate, so the focused node is always
+easy to pick out.
 
 #### 3. Station View (capacity view)
 

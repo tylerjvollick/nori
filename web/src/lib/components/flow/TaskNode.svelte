@@ -189,16 +189,15 @@
 	);
 	let StatusIcon = $derived(config.icon);
 
-	// Border/ring for the node based on highlight state:
-	// - selected (keyboard cursor): vivid status border + a status-colored ring
-	// - in-focus task (cursor elsewhere): vivid status border, no ring
-	// - inactive: muted status border
+	// Border/ring for the node based on highlight state. Only the keyboard-
+	// selected node is highlighted (vivid status border + status-colored ring);
+	// every other node — including the in-focus task once the cursor moves off
+	// it — uses the muted status border. The current task starts selected, so it
+	// is highlighted on load, but hjkl moves the single highlight with the cursor.
 	let highlightClass = $derived(
 		selected
 			? `${config.activeBorder} ring-2 ${config.ring} shadow-md`
-			: data.isFocus
-				? `${config.activeBorder} shadow-md`
-				: `${config.border} shadow-sm`,
+			: `${config.border} shadow-sm`,
 	);
 
 	function formatEstimate(seconds: number): string {

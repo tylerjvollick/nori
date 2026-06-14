@@ -77,10 +77,21 @@ test.describe('Leaf-task neighborhood: current task is focused for keyboard nav 
     await expect(selected).toHaveCount(1, { timeout: 5_000 });
     await expect(selected).toHaveAttribute('data-id', focusId!);
 
+    // Exactly one node shows the highlight ring, and it is the selected one.
+    // (The in-focus/URL node must not stay highlighted once the cursor moves.)
+    const highlighted = page.locator('.svelte-flow__node:has(.ring-2)');
+    await expect(highlighted).toHaveCount(1, { timeout: 5_000 });
+    await expect(highlighted).toHaveAttribute('data-id', focusId!);
+
     // 'l' moves the selection DOWNSTREAM (right) to Down — not to the leftmost
     // node, which was the previous (buggy) fallback behavior.
     await page.keyboard.press('l');
     await expect(selected).toHaveCount(1);
     await expect(selected).toHaveAttribute('data-id', downId!, { timeout: 5_000 });
+
+    // The highlight follows the cursor: only Down is highlighted now, and the
+    // Focus (URL) node is no longer highlighted.
+    await expect(highlighted).toHaveCount(1, { timeout: 5_000 });
+    await expect(highlighted).toHaveAttribute('data-id', downId!);
   });
 });
