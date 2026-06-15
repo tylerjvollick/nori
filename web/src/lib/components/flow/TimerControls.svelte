@@ -4,7 +4,7 @@
 	import { taskApi } from '$lib/api/task';
 	import { Button } from '$lib/components/ui/button';
 	import { Play, Pause, Square, Loader2 } from '@lucide/svelte';
-	import { formatDuration } from '$lib/utils/time';
+	import { formatDuration, computeEntryElapsed } from '$lib/utils/time';
 
 	interface Props {
 		spaceId: string;
@@ -48,18 +48,12 @@
 		return () => { if (tickInterval) clearInterval(tickInterval); };
 	});
 
-	/** Total elapsed seconds across all entries, including live segment. */
-	let totalElapsed = $derived.by(() => {
-		let total = 0;
-		for (const entry of entries) {
-			total += entry.elapsedSecs;
-			if (!entry.endedAt && !entry.isPaused) {
-				const activeStart = entry.resumedAt || entry.startedAt;
-				total += Math.max(0, Math.floor((now - new Date(activeStart).getTime()) / 1000));
-			}
-		}
-		return total;
-	});
+	/**
+	 * Elapsed seconds for the *current* session only (the active entry),
+	 * including the live segment while running. Zero when stopped — the
+	 * lifetime total belongs to "Total Recorded", not the timer.
+	 */
+	let sessionElapsed = $derived(activeEntry ? computeEntryElapsed(activeEntry, new Date(now)) : 0);
 
 	// --- Actions ---
 
@@ -119,18 +113,20 @@
 </script>
 
 <div class="flex items-center gap-2">
-	<!-- Timer display -->
-	<div class="flex items-center gap-1.5">
-		{#if isRunning}
-			<span class="relative flex size-2">
-				<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-				<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+	<!-- Timer display: current session only; empty when no timer is active. -->
+	{#if !isStopped}
+		<div class="flex items-center gap-1.5" data-testid="timer-session">
+			{#if isRunning}
+				<span class="relative flex size-2">
+					<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+					<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
+				</span>
+			{/if}
+			<span class="font-mono text-sm {isRunning ? 'text-foreground font-medium' : 'text-muted-foreground'}">
+				{formatDuration(sessionElapsed)}
 			</span>
-		{/if}
-		<span class="font-mono text-sm {isRunning ? 'text-foreground font-medium' : 'text-muted-foreground'}">
-			{formatDuration(totalElapsed)}
-		</span>
-	</div>
+		</div>
+	{/if}
 
 	<!-- Controls -->
 	{#if !isTerminal}
@@ -141,6 +137,7 @@
 				class="gap-1.5 text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
 				onclick={startTimer}
 				disabled={actionInProgress !== null}
+				data-testid="timer-start"
 			>
 				{#if actionInProgress === 'start'}
 					<Loader2 class="size-4 animate-spin" />

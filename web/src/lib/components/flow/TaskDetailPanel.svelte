@@ -24,7 +24,7 @@
 		ListTodo,
 		PanelLeftClose,
 	} from '@lucide/svelte';
-	import { formatDuration } from '$lib/utils/time';
+	import { formatDuration, computeTimeSpent, hasRunningTimer } from '$lib/utils/time';
 	import { taskApi } from '$lib/api/task';
 	import { timeEntryApi, type TimeEntryResponse } from '$lib/api/timeEntry';
 	import { Input } from '$lib/components/ui/input';
@@ -295,6 +295,17 @@
 
 	// --- Time entry tracking (job/task mode) ---
 	let timeEntries = $state<TimeEntryResponse[]>([]);
+
+	// Clock that ticks only while a timer is running, so "Total Recorded"
+	// stays live. The total is the sum of all entries (the source of truth),
+	// not task.actualTimeSeconds (a cached field only written on completion).
+	let nowMs = $state(Date.now());
+	$effect(() => {
+		if (!hasRunningTimer(timeEntries)) return;
+		const id = setInterval(() => { nowMs = Date.now(); }, 1000);
+		return () => clearInterval(id);
+	});
+	let totalRecordedSecs = $derived(computeTimeSpent(timeEntries, new Date(nowMs)));
 
 	// Fetch time entries when task changes (only in job/task mode).
 	$effect(() => {
@@ -651,7 +662,7 @@
 					<span class="text-sm text-muted-foreground">Total Recorded</span>
 					<span class="flex items-center gap-1.5">
 						<span class="text-sm font-mono text-foreground" data-testid="logged-time">
-							{formatDuration(task.actualTimeSeconds)}
+							{formatDuration(totalRecordedSecs)}
 						</span>
 						<Button
 							variant="ghost"
