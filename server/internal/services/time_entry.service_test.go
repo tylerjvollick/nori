@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,7 +102,16 @@ func (r *minimalMockTaskRepo) Update(task *models.Task) error          { r.tasks
 func (r *minimalMockTaskRepo) Delete(_ string) error                   { return nil }
 func (r *minimalMockTaskRepo) GetChildren(_ string) ([]models.Task, error) { return nil, nil }
 func (r *minimalMockTaskRepo) GetRoot(_ string) (*models.Task, error)  { return nil, nil }
-func (r *minimalMockTaskRepo) GetDescendants(_ string) ([]models.Task, error) { return nil, nil }
+func (r *minimalMockTaskRepo) GetDescendants(idPrefix string) ([]models.Task, error) {
+	var result []models.Task
+	for id, t := range r.tasks {
+		// Descendants share the parent's hierarchical ID prefix (e.g. "task-j.1").
+		if strings.HasPrefix(id, idPrefix+".") {
+			result = append(result, *t)
+		}
+	}
+	return result, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -305,6 +315,60 @@ func TestListEntries_ReturnsTotalDuration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 2)
 	assert.InDelta(t, 1800, total, 2) // 10m + 20m = 30m = 1800s
+}
+
+// nori-19e: a job's time summary rolls up own + all descendant tasks' time.
+func TestGetJobTimeSummary_RollsUpDescendants(t *testing.T) {
+	svc, _, taskRepo := setupTimeEntryService(t)
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	// Job with two child tasks.
+	taskRepo.tasks["task-j"] = &models.Task{ID: "task-j", SpaceID: spaceID, Type: models.TaskTypeJob}
+	taskRepo.tasks["task-j.1"] = &models.Task{ID: "task-j.1", SpaceID: spaceID}
+	taskRepo.tasks["task-j.2"] = &models.Task{ID: "task-j.2", SpaceID: spaceID}
+
+	// Helper to log a closed entry of `mins` minutes on a task.
+	logMinutes := func(taskID string, mins int) {
+		end := time.Now()
+		start := end.Add(-time.Duration(mins) * time.Minute)
+		_, err := svc.CreateManualEntry(taskID, spaceID, userID, &dtos.CreateTimeEntryRequest{
+			StartedAt: start,
+			EndedAt:   &end,
+		})
+		require.NoError(t, err)
+	}
+
+	logMinutes("task-j", 10)   // 10m logged directly on the job
+	logMinutes("task-j.1", 30) // 30m on child 1
+	logMinutes("task-j.1", 20) // +20m on child 1 (two sessions)
+	logMinutes("task-j.2", 60) // 60m on child 2
+
+	summary, err := svc.GetJobTimeSummary("task-j")
+	require.NoError(t, err)
+	assert.Equal(t, "task-j", summary.JobID)
+	assert.InDelta(t, 600, summary.OwnSecs, 2)      // 10m
+	assert.InDelta(t, 7200, summary.RollupSecs, 4)  // 10 + 30 + 20 + 60 = 120m
+}
+
+// A childless job rolls up only its own time.
+func TestGetJobTimeSummary_ChildlessJob(t *testing.T) {
+	svc, _, taskRepo := setupTimeEntryService(t)
+	spaceID := uuid.New()
+	taskRepo.tasks["task-solo"] = &models.Task{ID: "task-solo", SpaceID: spaceID, Type: models.TaskTypeJob}
+
+	end := time.Now()
+	start := end.Add(-45 * time.Minute)
+	_, err := svc.CreateManualEntry("task-solo", spaceID, uuid.New(), &dtos.CreateTimeEntryRequest{
+		StartedAt: start,
+		EndedAt:   &end,
+	})
+	require.NoError(t, err)
+
+	summary, err := svc.GetJobTimeSummary("task-solo")
+	require.NoError(t, err)
+	assert.InDelta(t, 2700, summary.OwnSecs, 2)
+	assert.Equal(t, summary.OwnSecs, summary.RollupSecs) // no descendants
 }
 
 func TestUpdateEntry_UpdatesFields(t *testing.T) {

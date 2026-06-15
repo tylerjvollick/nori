@@ -105,7 +105,7 @@ func New(cfg *config.Config) *App {
 	recipeHandler := handlers.NewRecipeHandler(recipeRepo, recipeService, recipeService, recipeService)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	costHandler := handlers.NewCostHandler(costService)
-	jobHandler := handlers.NewJobHandler(taskService, costService, recipeService)
+	jobHandler := handlers.NewJobHandler(taskService, costService, recipeService, timeEntryService)
 	taskDepHandler := handlers.NewTaskDepHandler(taskDepRepo, taskService)
 	customerHandler := handlers.NewCustomerHandler(customerRepo)
 	subTaskHandler := handlers.NewSubTaskHandler(subTaskRepo, taskService, mediaStore)

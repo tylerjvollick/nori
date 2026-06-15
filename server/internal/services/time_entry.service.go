@@ -241,18 +241,12 @@ func (s *TimeEntryService) DeleteEntry(id uuid.UUID) error {
 	return s.timeEntryRepo.Delete(id)
 }
 
-// ListEntries returns all time entries for a task with a total elapsed duration.
-func (s *TimeEntryService) ListEntries(taskID string) ([]models.TimeEntry, int, error) {
-	entries, err := s.timeEntryRepo.GetByTaskID(taskID)
-	if err != nil {
-		return nil, 0, fmt.Errorf("listing time entries: %w", err)
-	}
-
+// sumEntriesElapsed returns total elapsed seconds across entries, adding the
+// live segment for any entry still running (not ended, not paused).
+func sumEntriesElapsed(entries []models.TimeEntry, now time.Time) int {
 	total := 0
-	now := time.Now()
 	for _, e := range entries {
 		total += e.ElapsedSecs
-		// If entry is still running (not ended, not paused), add live delta.
 		if e.EndedAt == nil && !e.IsPaused {
 			activeStart := e.StartedAt
 			if e.ResumedAt != nil {
@@ -261,8 +255,59 @@ func (s *TimeEntryService) ListEntries(taskID string) ([]models.TimeEntry, int, 
 			total += int(now.Sub(activeStart).Seconds())
 		}
 	}
+	return total
+}
 
-	return entries, total, nil
+// ListEntries returns all time entries for a task with a total elapsed duration.
+func (s *TimeEntryService) ListEntries(taskID string) ([]models.TimeEntry, int, error) {
+	entries, err := s.timeEntryRepo.GetByTaskID(taskID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing time entries: %w", err)
+	}
+
+	return entries, sumEntriesElapsed(entries, time.Now()), nil
+}
+
+// JobTimeSummary holds rolled-up recorded time for a job.
+type JobTimeSummary struct {
+	JobID string `json:"jobId"`
+	// OwnSecs is the time logged directly on the job task itself.
+	OwnSecs int `json:"ownSecs"`
+	// RollupSecs is OwnSecs plus the time logged on every descendant task.
+	RollupSecs int `json:"rollupSecs"`
+}
+
+// GetJobTimeSummary computes a job's own recorded time and the rolled-up total
+// across the job and all descendant tasks, summed from time entries (the live
+// source of truth, consistent with the per-task panel — including running
+// timers).
+func (s *TimeEntryService) GetJobTimeSummary(jobID string) (*JobTimeSummary, error) {
+	if _, err := s.taskRepo.GetByID(jobID); err != nil {
+		return nil, fmt.Errorf("task %q not found: %w", jobID, err)
+	}
+
+	now := time.Now()
+
+	ownEntries, err := s.timeEntryRepo.GetByTaskID(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("listing job time entries: %w", err)
+	}
+	ownSecs := sumEntriesElapsed(ownEntries, now)
+	rollupSecs := ownSecs
+
+	descendants, err := s.taskRepo.GetDescendants(jobID)
+	if err != nil {
+		return nil, fmt.Errorf("listing descendants of %q: %w", jobID, err)
+	}
+	for _, d := range descendants {
+		entries, err := s.timeEntryRepo.GetByTaskID(d.ID)
+		if err != nil {
+			return nil, fmt.Errorf("listing time entries for %q: %w", d.ID, err)
+		}
+		rollupSecs += sumEntriesElapsed(entries, now)
+	}
+
+	return &JobTimeSummary{JobID: jobID, OwnSecs: ownSecs, RollupSecs: rollupSecs}, nil
 }
 
 // GetUnloggedTasks returns completed tasks with zero time entries.

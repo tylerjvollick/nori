@@ -24,9 +24,10 @@
 		ListTodo,
 		PanelLeftClose,
 	} from '@lucide/svelte';
-	import { formatDuration } from '$lib/utils/time';
+	import { formatDuration, computeTimeSpent, hasRunningTimer } from '$lib/utils/time';
 	import { taskApi } from '$lib/api/task';
 	import { timeEntryApi, type TimeEntryResponse } from '$lib/api/timeEntry';
+	import { costApi } from '$lib/api/cost';
 	import { Input } from '$lib/components/ui/input';
 	import TaskActions from './TaskActions.svelte';
 	import StatusDropdown from './StatusDropdown.svelte';
@@ -296,6 +297,35 @@
 	// --- Time entry tracking (job/task mode) ---
 	let timeEntries = $state<TimeEntryResponse[]>([]);
 
+	// Clock that ticks only while a timer is running, so "Total Recorded"
+	// stays live. The total is the sum of all entries (the source of truth),
+	// not task.actualTimeSeconds (a cached field only written on completion).
+	let nowMs = $state(Date.now());
+	$effect(() => {
+		if (!hasRunningTimer(timeEntries)) return;
+		const id = setInterval(() => { nowMs = Date.now(); }, 1000);
+		return () => clearInterval(id);
+	});
+	let totalRecordedSecs = $derived(computeTimeSpent(timeEntries, new Date(nowMs)));
+
+	// On a parent job, "Total Recorded" rolls up the job's own time plus every
+	// descendant task's time (server-summed from time entries). Leaf tasks keep
+	// the per-task entry sum above. Null until/unless a job rollup is loaded.
+	let jobRollupSecs = $state<number | null>(null);
+	let isJob = $derived(task?.type === 'job');
+	let recordedDisplaySecs = $derived(
+		isJob && jobRollupSecs !== null ? jobRollupSecs : totalRecordedSecs,
+	);
+
+	async function loadJobRollup(jobId: string): Promise<void> {
+		try {
+			const summary = await costApi.getJobTimeSummary(spaceId, jobId);
+			jobRollupSecs = summary.rollupSecs;
+		} catch {
+			jobRollupSecs = null;
+		}
+	}
+
 	// Fetch time entries when task changes (only in job/task mode).
 	$effect(() => {
 		const currentTask = task;
@@ -303,6 +333,7 @@
 			loadTimeEntries(currentTask.id);
 		} else {
 			timeEntries = [];
+			jobRollupSecs = null;
 		}
 	});
 
@@ -314,6 +345,12 @@
 			timeEntries = result.items;
 		} catch {
 			timeEntries = [];
+		}
+		// Parent jobs additionally show a rolled-up total across descendants.
+		if (task?.type === 'job') {
+			loadJobRollup(taskId);
+		} else {
+			jobRollupSecs = null;
 		}
 	}
 
@@ -651,7 +688,7 @@
 					<span class="text-sm text-muted-foreground">Total Recorded</span>
 					<span class="flex items-center gap-1.5">
 						<span class="text-sm font-mono text-foreground" data-testid="logged-time">
-							{formatDuration(task.actualTimeSeconds)}
+							{formatDuration(recordedDisplaySecs)}
 						</span>
 						<Button
 							variant="ghost"

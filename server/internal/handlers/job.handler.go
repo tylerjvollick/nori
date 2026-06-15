@@ -17,19 +17,26 @@ type SaveAsRecipeServiceInterface interface {
 	SaveAsRecipe(jobID string, spaceID uuid.UUID, createdByID uuid.UUID, name string, opts services.SaveAsRecipeOptions) (*models.Recipe, error)
 }
 
+// JobTimeSummaryServiceInterface defines the time-rollup method from TimeEntryService.
+type JobTimeSummaryServiceInterface interface {
+	GetJobTimeSummary(jobID string) (*services.JobTimeSummary, error)
+}
+
 // JobHandler handles HTTP requests for jobs (tasks with type=job).
 type JobHandler struct {
 	taskService         TaskServiceInterface
 	costService         CostServiceInterface
 	saveAsRecipeService SaveAsRecipeServiceInterface
+	timeEntryService    JobTimeSummaryServiceInterface
 }
 
 // NewJobHandler creates a new JobHandler.
-func NewJobHandler(taskService TaskServiceInterface, costService CostServiceInterface, saveAsRecipeService SaveAsRecipeServiceInterface) *JobHandler {
+func NewJobHandler(taskService TaskServiceInterface, costService CostServiceInterface, saveAsRecipeService SaveAsRecipeServiceInterface, timeEntryService JobTimeSummaryServiceInterface) *JobHandler {
 	return &JobHandler{
 		taskService:         taskService,
 		costService:         costService,
 		saveAsRecipeService: saveAsRecipeService,
+		timeEntryService:    timeEntryService,
 	}
 }
 
@@ -41,6 +48,7 @@ func (h *JobHandler) RegisterJobRoutes(router fiber.Router, middlewares ...fiber
 	group.Get("/:id", h.GetJob)
 	group.Get("/:id/tasks", h.GetJobTasks)
 	group.Get("/:id/cost-summary", h.GetJobCostSummary)
+	group.Get("/:id/time-summary", h.GetJobTimeSummary)
 	group.Post("/:id/save-as-recipe", h.SaveJobAsRecipe)
 }
 
@@ -184,6 +192,30 @@ func (h *JobHandler) GetJobCostSummary(c *fiber.Ctx) error {
 	result, err := h.costService.GetJobCostSummary(id)
 	if err != nil {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	return c.JSON(result)
+}
+
+// GetJobTimeSummary returns the rolled-up recorded time for a job (own time
+// plus all descendant tasks' time), summed from time entries.
+func (h *JobHandler) GetJobTimeSummary(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "job ID is required",
+		})
+	}
+
+	if _, err := h.getJobInSpace(c, id); err != nil {
+		return err
+	}
+
+	result, err := h.timeEntryService.GetJobTimeSummary(id)
+	if err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"error": err.Error(),
 		})
 	}
