@@ -24,8 +24,12 @@ tmp/
 server/.env
 
 # Local agent/tooling state
+CLAUDE.md
 .claude/
 .specify/
 
 # Secret scan reports
 .gitleaks-report*
+
+
+
