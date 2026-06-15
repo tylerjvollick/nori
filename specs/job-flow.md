@@ -88,6 +88,31 @@ Progress: 2/8 done, 1 active | Est. remaining: 3h 45m
 Shows the full task tree with dependency status, who's working on what, and
 time data.
 
+In the web app, the job-detail page (`/spaces/[slug]/[taskId]` for a job root)
+presents this view through four top-level tabs:
+
+- **Overview** (default) — a split pane with the task detail panel on the left
+  and the child-task **list** on the right. The detail panel can be collapsed.
+- **Board** — the job's child tasks on a Kanban board (Ready / In Progress /
+  Done), full-width with no detail panel. Clicking or pressing Enter on a card
+  opens that task's detail page.
+- **Graph** — the dependency graph of the job's child tasks, full-width with no
+  detail panel. Clicking a node opens that task's detail page; keyboard
+  shortcuts (`hjkl`, `Alt+S`/`Alt+P`, etc.) operate on the graph.
+- **Cost** — the job cost summary (estimated vs. actual).
+
+The active tab is reflected in the `?view=` query param (`board`, `graph`,
+`cost`; Overview is the default and carries no param), so tabs are
+deep-linkable. Keyboard shortcuts `o`/`b`/`g`/`c` switch tabs. A non-job leaf
+task instead shows its detail panel beside a neighborhood graph, with no tabs.
+In the neighborhood graph the current task starts keyboard-focused (selected),
+so `hjkl` moves relative to it — e.g. `l` selects the downstream neighbor.
+Node borders reflect status: only the keyboard-selected node is highlighted
+(its status color — blue for in-progress, green for done, etc. — with a matching
+ring), and every other node uses a muted version of that color. The single
+highlight follows the cursor as you navigate, so the focused node is always
+easy to pick out.
+
 #### 3. Station View (capacity view)
 
 "What's happening at each station?"
@@ -174,6 +199,50 @@ non-terminal status; `done` from any non-terminal status except `backlog`.
 The displayed job status on the board is computed from child task statuses,
 except `backlog`, which is set on the job itself (at creation or via the
 status dropdown) and takes precedence over child aggregation.
+
+### Deleting Tasks
+
+Deletion is a **hard delete** (`DELETE /api/v1/spaces/:spaceId/tasks/:id`). It
+cascades to all descendant sub-tasks and removes the task's dependency edges
+(`task.parent_id` and `task_dep` are `ON DELETE CASCADE`). It is irreversible —
+to keep a record instead, set the task's status to `cancelled`.
+
+Before deleting a task that sits mid-chain, its upstream blockers are
+reconnected to its downstream dependents (`addDep(upstream, downstream)`) so the
+dependency chain is not broken and downstream tasks don't become unexpectedly
+ready.
+
+Discoverable entry points in the UI:
+- **Task detail page** — a `Delete` action in the header, offered on individual
+  tasks only (not on a job root, so a whole job tree can't be wiped in one
+  click). Confirms, then navigates to the parent task or the jobs list.
+- **Graph view** — with a node keyboard-selected (`hjkl`), `Delete`/`Backspace`
+  deletes it after a confirmation dialog. This is how individual tasks within a
+  job are removed from the graph (single-click navigates to the task instead).
+
+Both paths confirm before deleting and perform the upstream→downstream reconnect.
+
+### Editing Dependency Edges in the Graph
+
+In the graph view, dependency edges can be **dragged to re-point** them. Each
+edge has two reconnect anchors (one per endpoint); dragging an endpoint onto a
+different node's handle re-points that dependency:
+
+- Dragging an edge's **target** endpoint (the arrow head) to another node keeps
+  the same upstream blocker and changes the downstream task.
+- Dragging the **source** endpoint changes the upstream blocker, keeping the
+  same downstream task.
+
+Only the `task_dep` row moves — the task nodes and all their data (title, time
+estimates, status, station) are untouched. The change persists by adding the new
+dependency, then removing the old one (`addDep(newSource, newTarget)` followed by
+`removeDep(oldDepId)`), then refreshing the graph.
+
+A reconnect is rejected (with an inline message, no change persisted) if it would
+create a self-loop, duplicate an existing edge, or introduce a cycle. The cycle
+check runs client-side before the change is applied and is enforced again by the
+backend (`task_dep` `detectCycle`) as a backstop. Drawing a brand-new edge
+between two nodes' handles uses the same validation.
 
 ### Dependency Patterns
 
@@ -268,6 +337,8 @@ POST   /api/spaces/:spaceId/jobs                        — Create job (manual)
 GET    /api/jobs/:id                                    — Job detail with task tree
 PUT    /api/jobs/:id                                    — Update job metadata
 POST   /api/jobs/:id/cancel                             — Cancel job
+
+DELETE /api/v1/spaces/:spaceId/tasks/:id                — Hard-delete a task (cascades to sub-tasks + deps)
 
 GET    /api/spaces/:spaceId/stations/status              — Station WIP overview
 GET    /api/stations/:id/queue                           — Tasks at/queued for a station

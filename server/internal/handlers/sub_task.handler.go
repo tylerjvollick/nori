@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/tylerjvollick/nori/internal/dtos"
 	"github.com/tylerjvollick/nori/internal/models"
+	"github.com/tylerjvollick/nori/internal/storage"
 )
 
 // SubTaskRepoInterface defines the repository methods needed by SubTaskHandler.
@@ -18,6 +20,10 @@ type SubTaskRepoInterface interface {
 	Update(id uuid.UUID, updates map[string]interface{}) error
 	Delete(id uuid.UUID) error
 	Reorder(taskID string, ids []uuid.UUID) error
+	AddImage(img *models.SubTaskImage) error
+	GetImageByID(id uuid.UUID) (*models.SubTaskImage, error)
+	GetMaxImageDisplayOrder(subTaskID uuid.UUID) (int, error)
+	DeleteImage(id uuid.UUID) error
 }
 
 // SubTaskTaskServiceInterface defines the task service methods needed by
@@ -30,11 +36,12 @@ type SubTaskTaskServiceInterface interface {
 type SubTaskHandler struct {
 	subTaskRepo SubTaskRepoInterface
 	taskService SubTaskTaskServiceInterface
+	store       *storage.LocalStorage
 }
 
 // NewSubTaskHandler creates a new SubTaskHandler.
-func NewSubTaskHandler(subTaskRepo SubTaskRepoInterface, taskService SubTaskTaskServiceInterface) *SubTaskHandler {
-	return &SubTaskHandler{subTaskRepo: subTaskRepo, taskService: taskService}
+func NewSubTaskHandler(subTaskRepo SubTaskRepoInterface, taskService SubTaskTaskServiceInterface, store *storage.LocalStorage) *SubTaskHandler {
+	return &SubTaskHandler{subTaskRepo: subTaskRepo, taskService: taskService, store: store}
 }
 
 // RegisterSubTaskRoutes registers sub-task API routes under a space-scoped router.
@@ -47,6 +54,8 @@ func (h *SubTaskHandler) RegisterSubTaskRoutes(router fiber.Router, middlewares 
 	group.Put("/reorder", h.Reorder) // must come before /:subtaskId
 	group.Put("/:subtaskId", h.Update)
 	group.Delete("/:subtaskId", h.Delete)
+	group.Post("/:subtaskId/images", h.UploadImage)
+	group.Delete("/:subtaskId/images/:imageId", h.DeleteImage)
 }
 
 // getTaskInSpace fetches a task by ID and verifies it belongs to the space from
@@ -400,4 +409,131 @@ func (h *SubTaskHandler) Reorder(c *fiber.Ctx) error {
 		Items: items,
 		Total: len(items),
 	})
+}
+
+// UploadImage attaches an image to a sub-task.
+// POST /api/v1/spaces/:spaceId/tasks/:taskId/subtasks/:subtaskId/images
+// (multipart form, field "file")
+func (h *SubTaskHandler) UploadImage(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin(authDTO) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "admin access required",
+		})
+	}
+
+	taskID := c.Params("taskId")
+	if taskID == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	if _, err := h.getTaskInSpace(c, taskID); err != nil {
+		return nil
+	}
+
+	subtaskID, err := uuid.Parse(c.Params("subtaskId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid sub-task ID",
+		})
+	}
+
+	if _, err := h.getSubTaskForTask(c, subtaskID, taskID); err != nil {
+		return nil
+	}
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "file is required",
+		})
+	}
+
+	saved, err := h.store.Save(fh, "sub-task-images")
+	if err != nil {
+		var unsupported *storage.ErrUnsupportedMediaType
+		if errors.As(err, &unsupported) {
+			return c.Status(http.StatusUnsupportedMediaType).JSON(fiber.Map{"error": unsupported.Error()})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to store file"})
+	}
+
+	displayOrder := 0
+	if max, err := h.subTaskRepo.GetMaxImageDisplayOrder(subtaskID); err == nil {
+		displayOrder = max + 1
+	}
+
+	img := &models.SubTaskImage{
+		SubTaskID:    subtaskID,
+		ImageURL:     saved.URL,
+		DisplayOrder: displayOrder,
+	}
+	if err := h.subTaskRepo.AddImage(img); err != nil {
+		_ = h.store.Delete(saved.URL) // best-effort cleanup of orphaned file
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save image record"})
+	}
+
+	return c.Status(http.StatusCreated).JSON(dtos.SubTaskImageResponseFromModel(img))
+}
+
+// DeleteImage removes an image from a sub-task and its backing file.
+// DELETE /api/v1/spaces/:spaceId/tasks/:taskId/subtasks/:subtaskId/images/:imageId
+func (h *SubTaskHandler) DeleteImage(c *fiber.Ctx) error {
+	authDTO, err := requireAuth(c)
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin(authDTO) {
+		return c.Status(http.StatusForbidden).JSON(fiber.Map{
+			"error": "admin access required",
+		})
+	}
+
+	taskID := c.Params("taskId")
+	if taskID == "" {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "task ID is required",
+		})
+	}
+
+	if _, err := h.getTaskInSpace(c, taskID); err != nil {
+		return nil
+	}
+
+	subtaskID, err := uuid.Parse(c.Params("subtaskId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid sub-task ID",
+		})
+	}
+
+	if _, err := h.getSubTaskForTask(c, subtaskID, taskID); err != nil {
+		return nil
+	}
+
+	imageID, err := uuid.Parse(c.Params("imageId"))
+	if err != nil {
+		return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid image ID",
+		})
+	}
+
+	img, err := h.subTaskRepo.GetImageByID(imageID)
+	if err != nil || img.SubTaskID != subtaskID {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "image not found"})
+	}
+
+	if err := h.subTaskRepo.DeleteImage(imageID); err != nil {
+		return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": "image not found"})
+	}
+	_ = h.store.Delete(img.ImageURL) // best-effort file removal
+
+	return c.Status(http.StatusNoContent).Send(nil)
 }

@@ -310,7 +310,7 @@ GET /api/jobs/:id/cost-summary
 
 Response:
 {
-    "job_id": "nori-a3f8",
+    "job_id": "task-a3f8c127",
     "estimated": {
         "labor_hours": 45.5,
         "labor_cost": 2275.00,

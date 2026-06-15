@@ -14,6 +14,8 @@ async function createJobWithTasks(page: Page, jobTitle: string, count: number): 
   await page.getByRole('button', { name: 'Create Job' }).click();
   await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
 
+  // Add child nodes from the Graph tab.
+  await page.getByRole('tab', { name: 'Graph' }).click();
   for (let i = 0; i < count; i++) {
     const addNodeBtn = page.getByRole('button', { name: 'Add Node' });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
@@ -32,7 +34,7 @@ test.describe('hjkl keyboard navigation', () => {
   test('board view: j/k moves between cards in a column', async ({ page }) => {
     await createJobWithTasks(page, 'HjklTest1', 3);
 
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
+    await page.getByRole('tab', { name: 'Board' }).click();
     await page.waitForLoadState('networkidle');
 
     // j selects first card
@@ -78,7 +80,7 @@ test.describe('hjkl keyboard navigation', () => {
     // Reload to pick up the status change, then switch to board view
     await page.reload();
     await page.waitForLoadState('networkidle');
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
+    await page.getByRole('tab', { name: 'Board' }).click();
     await page.waitForLoadState('networkidle');
 
     // j selects first card
@@ -103,7 +105,7 @@ test.describe('hjkl keyboard navigation', () => {
   test('list view: j/k moves between rows', async ({ page }) => {
     await createJobWithTasks(page, 'HjklTest3', 3);
 
-    await page.getByRole('button', { name: 'List', exact: true }).click();
+    await page.getByRole('tab', { name: 'Overview' }).click();
     await page.waitForLoadState('networkidle');
 
     // j selects first row
@@ -125,25 +127,27 @@ test.describe('hjkl keyboard navigation', () => {
     expect(backUp).toBe(firstRow);
   });
 
-  test('Enter selects task in detail panel from board view', async ({ page }) => {
+  test('Enter on a board card opens that task detail page', async ({ page }) => {
     await createJobWithTasks(page, 'HjklTest4', 1);
 
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
+    await page.getByRole('tab', { name: 'Board' }).click();
     await page.waitForLoadState('networkidle');
+    const jobPath = new URL(page.url()).pathname;
 
     await page.keyboard.press('j');
     await expect(page.locator('[data-kb-selected="true"]')).toHaveCount(1, { timeout: 5000 });
 
     await page.keyboard.press('Enter');
 
-    // Should show selected task in the detail panel (right pane)
+    // Full-width board has no detail panel — Enter opens the task's own detail page.
+    await page.waitForURL((url) => url.pathname !== jobPath, { timeout: 10000 });
     await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible({ timeout: 10000 });
   });
 
   test('keyboard navigation suppressed when focus is in an input', async ({ page }) => {
     await createJobWithTasks(page, 'HjklTest5', 2);
 
-    await page.getByRole('button', { name: 'Board', exact: true }).click();
+    await page.getByRole('tab', { name: 'Board' }).click();
     await page.waitForLoadState('networkidle');
 
     // Verify j normally selects a card

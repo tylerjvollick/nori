@@ -72,6 +72,11 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 		return nil, fmt.Errorf("title is required")
 	}
 
+	// Generate the task ID. Root tasks (jobs) get a short hierarchical prefix
+	// (task-xxxx). Children derive a {parentID}.{seq} ID so descendant tree
+	// queries (LIKE 'parent.%') continue to work.
+	id := generateTaskID()
+
 	// Enforce max nesting depth of 2 levels. If ParentID is set, the parent
 	// must be a root task (i.e., its own ParentID must be nil).
 	if dto.ParentID != nil {
@@ -82,6 +87,11 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 		if parent.ParentID != nil {
 			return nil, ErrMaxDepthExceeded
 		}
+		children, err := s.taskRepo.GetChildren(*dto.ParentID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get children of task %q: %w", *dto.ParentID, err)
+		}
+		id = fmt.Sprintf("%s.%d", *dto.ParentID, len(children)+1)
 	}
 
 	// Tasks start as open unless explicitly created in the backlog
@@ -98,7 +108,7 @@ func (s *TaskService) CreateTask(spaceID uuid.UUID, createdByID uuid.UUID, dto *
 	}
 
 	task := &models.Task{
-		ID:          uuid.New().String(), // placeholder ID generation; real hierarchical IDs come later
+		ID:          id,
 		SpaceID:     spaceID,
 		CreatedByID: createdByID,
 		Title:       dto.Title,

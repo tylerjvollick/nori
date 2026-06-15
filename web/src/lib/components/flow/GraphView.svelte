@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { SvelteFlow, Background, Controls, MiniMap } from '@xyflow/svelte';
-	import type { Node, Edge, NodeTypes, Connection } from '@xyflow/svelte';
+	import type { Node, Edge, NodeTypes, EdgeTypes, Connection } from '@xyflow/svelte';
 	import dagre from '@dagrejs/dagre';
 	import { taskApi } from '$lib/api/task';
 	import { stationApi } from '$lib/api/station';
@@ -16,6 +16,7 @@
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import type { GraphDirection } from '$lib/stores/graph';
 	import TaskNode from './TaskNode.svelte';
+	import DependencyEdge from './DependencyEdge.svelte';
 	import FlowActions from './FlowActions.svelte';
 
 	import '@xyflow/svelte/dist/style.css';
@@ -69,6 +70,12 @@
 		task: TaskNode as unknown as NodeTypes[string],
 	};
 
+	// ---- Custom edge types ----
+	// 'dependency' renders the smoothstep path plus drag-to-reconnect anchors.
+	const edgeTypes: EdgeTypes = {
+		dependency: DependencyEdge as unknown as EdgeTypes[string],
+	};
+
 	// ---- State ----
 	let nodes = $state<Node[]>([]);
 	let edges = $state<Edge[]>([]);
@@ -90,10 +97,6 @@
 	let stationMap = $derived(externalStationMap ?? _internalStationMap);
 	let taskCount = $state(0);
 	let edgeCount = $state(0);
-
-	// For tracking node click timing (single vs double click)
-	let lastClickTime = $state(0);
-	let lastClickedNodeId = $state('');
 
 	// ---- Derived filters from URL ----
 	let slug = $derived($page.params.slug);
@@ -288,7 +291,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -316,7 +319,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -365,23 +368,16 @@
 
 	function handleNodeClick({ node }: { node: Node; event: MouseEvent | TouchEvent }): void {
 		const nodeId = node.id;
-		const now = Date.now();
 
-		// Double-click detection (within 400ms on the same node)
-		if (lastClickedNodeId === nodeId && now - lastClickTime < 400) {
-			if (mode !== 'recipe') {
-				// Navigate to task detail (task mode only)
-				goto(`/spaces/${slug}/${nodeId}`);
-			}
-			lastClickTime = 0;
-			lastClickedNodeId = '';
+		// Recipe editor: single-click selects the node for editing (no navigation).
+		if (mode === 'recipe') {
+			// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
+			selectNode(nodeId);
 			return;
 		}
 
-		lastClickTime = now;
-		lastClickedNodeId = nodeId;
-		// Explicitly set selection — xyflow may not sync `selected` on controlled nodes
-		selectNode(nodeId);
+		// Task mode: single-click navigates to that task's detail page.
+		goto(`/spaces/${slug}/${nodeId}`);
 	}
 
 	// ---- Re-fetch when filters change ----
@@ -455,11 +451,20 @@
 			}
 		}
 
+		// In the neighborhood (focus) view, start the keyboard cursor on the
+		// current task so the first hjkl press moves relative to it (e.g. 'l'
+		// goes downstream/right), instead of falling back to the leftmost node.
+		// Preserve an existing selection across rebuilds so navigation isn't
+		// reset when the graph re-renders. Full-graph view (no focusTaskId)
+		// keeps its prior behavior: no node selected on build.
+		const initialSelection = focusTaskId ? (selectedNodeId ?? focusTaskId) : null;
+
 		// Build nodes
 		const newNodes: Node[] = filtered.map((task) => ({
 			id: task.id,
 			type: 'task',
 			position: { x: 0, y: 0 },
+			selected: initialSelection != null && initialSelection === task.id,
 			data: {
 				title: task.title,
 				taskId: task.id,
@@ -500,7 +505,7 @@
 						id: edgeId,
 						source: dep.toTaskId,
 						target: dep.fromTaskId,
-						type: 'smoothstep',
+						type: 'dependency',
 						animated: !isResolved,
 						style: `stroke: ${STATUS_EDGE_COLORS[blockerStatus]}; stroke-width: 2px; ${!isResolved ? 'stroke-dasharray: 5 5;' : ''}`,
 						markerEnd: {
@@ -595,9 +600,11 @@
 
 	// ---- Cycle detection ----
 
-	function hasCycle(sourceId: string, targetId: string): boolean {
+	function hasCycle(sourceId: string, targetId: string, excludeEdgeId?: string): boolean {
 		// Check if adding source → target would create a cycle.
 		// A cycle exists iff there is already a path from targetId to sourceId.
+		// excludeEdgeId omits one edge from the traversal — used when re-pointing
+		// an existing edge, which is about to be removed and so must not count.
 		const visited = new Set<string>();
 		const queue: string[] = [targetId];
 		while (queue.length > 0) {
@@ -606,6 +613,7 @@
 			if (visited.has(current)) continue;
 			visited.add(current);
 			for (const edge of edges) {
+				if (edge.id === excludeEdgeId) continue;
 				if (edge.source === current) {
 					queue.push(edge.target);
 				}
@@ -648,49 +656,134 @@
 		}
 	}
 
+	// ---- Edge reconnection (drag an endpoint to re-point a dependency) ----
+
+	/**
+	 * Validate a reconnect before xyflow optimistically applies it. Runs
+	 * synchronously; returning a falsy value cancels the reconnect so the edge
+	 * snaps back. Only the dependency relationship moves — task data is untouched.
+	 */
+	function handleBeforeReconnect(reconnectedEdge: Edge, oldEdge: Edge): Edge | null {
+		const source = reconnectedEdge.source;
+		const target = reconnectedEdge.target;
+
+		// No-op: dropped back on the same endpoints.
+		if (source === oldEdge.source && target === oldEdge.target) return oldEdge;
+
+		// Self-loop.
+		if (source === target) {
+			showConnectionError('Cannot re-point dependency onto the same task');
+			return null;
+		}
+
+		// Duplicate: another edge already encodes this exact dependency.
+		if (edges.some((e) => e.id !== oldEdge.id && e.source === source && e.target === target)) {
+			showConnectionError('That dependency already exists');
+			return null;
+		}
+
+		// Cycle: ignore the edge being moved (it is about to be removed).
+		if (hasCycle(source, target, oldEdge.id)) {
+			showConnectionError('Cannot re-point dependency: this would create a cycle');
+			return null;
+		}
+
+		return reconnectedEdge;
+	}
+
+	/**
+	 * Persist a reconnect: add the new dependency first, then remove the old one
+	 * (add-then-remove leaves no window where the dependency is lost), then
+	 * refresh from the server. The lingering old edge can never falsely trip the
+	 * backend cycle check because old and new edges share the fixed endpoint.
+	 */
+	async function handleReconnect(oldEdge: Edge, newConnection: Connection): Promise<void> {
+		const source = newConnection.source;
+		const target = newConnection.target;
+		if (!source || !target) return;
+		// No-op reconnect (handled in before-hook, but guard anyway).
+		if (source === oldEdge.source && target === oldEdge.target) return;
+
+		const depId = (oldEdge.data as { depId?: string } | undefined)?.depId;
+
+		isConnecting = true;
+		connectionError = null;
+		try {
+			await taskApi.addDep(spaceId, source, target, 'blocks');
+			if (depId) {
+				await taskApi.removeDep(spaceId, oldEdge.source, depId);
+			}
+			await refreshGraph();
+		} catch (e) {
+			showConnectionError(e instanceof Error ? e.message : 'Failed to move dependency');
+			// Re-sync with server truth so the optimistic edge change is reverted.
+			await refreshGraph();
+		} finally {
+			isConnecting = false;
+		}
+	}
+
+	function showConnectionError(message: string): void {
+		connectionError = message;
+		setTimeout(() => { connectionError = null; }, 4000);
+	}
+
+	/**
+	 * Delete a single task node: confirm, reconnect its upstream blockers to its
+	 * downstream dependents, hard-delete the task, then refresh the graph.
+	 * Shared by xyflow's onbeforedelete path and the explicit Delete/Backspace
+	 * keyboard shortcut. Returns true if the task was deleted.
+	 *
+	 * Guards against a double-fire: if a confirm dialog is already pending (the
+	 * other path got here first for the same keystroke), this call bails. The
+	 * guard is order-independent because deleteConfirmState is set synchronously
+	 * inside the Promise executor below, before the first await.
+	 */
+	async function deleteNodeById(nodeId: string): Promise<boolean> {
+		if (deleteConfirmState) return false;
+		const node = nodes.find((n) => n.id === nodeId);
+		if (!node) return false;
+
+		const upstreamEdges = edges.filter((e) => e.target === nodeId);
+		const downstreamEdges = edges.filter((e) => e.source === nodeId);
+		const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
+		const nodeTitle = (node.data as { title?: string }).title ?? nodeId;
+
+		const confirmed = await new Promise<boolean>((resolve) => {
+			deleteConfirmState = { nodeId, nodeTitle, hasConnections, resolve };
+		});
+		if (!confirmed) return false;
+
+		// Reconnect: add a dep from each upstream to each downstream
+		for (const upEdge of upstreamEdges) {
+			for (const downEdge of downstreamEdges) {
+				try {
+					await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
+				} catch {
+					// Ignore duplicate dep errors
+				}
+			}
+		}
+
+		try {
+			await taskApi.deleteTask(spaceId, nodeId);
+		} catch (e) {
+			connectionError = e instanceof Error ? e.message : 'Failed to delete task';
+			setTimeout(() => { connectionError = null; }, 4000);
+			return false;
+		}
+
+		await refreshGraph();
+		return true;
+	}
+
 	async function handleBeforeDelete({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
 		// Handle node deletion
 		if (deletedNodes.length > 0) {
 			for (const node of deletedNodes) {
-				const upstreamEdges = edges.filter((e) => e.target === node.id);
-				const downstreamEdges = edges.filter((e) => e.source === node.id);
-				const hasConnections = upstreamEdges.length > 0 || downstreamEdges.length > 0;
-				const nodeTitle = (node.data as { title?: string }).title ?? node.id;
-
-				const confirmed = await new Promise<boolean>((resolve) => {
-					deleteConfirmState = { nodeId: node.id, nodeTitle, hasConnections, resolve };
-				});
-
-				if (!confirmed) return false;
-
-				// Reconnect: add a dep from each upstream to each downstream
-				for (const upEdge of upstreamEdges) {
-					for (const downEdge of downstreamEdges) {
-						try {
-							await taskApi.addDep(spaceId, upEdge.source, downEdge.target, 'blocks');
-						} catch {
-							// Ignore duplicate dep errors
-						}
-					}
-				}
-
-				// Delete the task
-				try {
-					await taskApi.deleteTask(spaceId, node.id);
-				} catch (e) {
-					connectionError = e instanceof Error ? e.message : 'Failed to delete task';
-					setTimeout(() => { connectionError = null; }, 4000);
-					return false;
-				}
+				await deleteNodeById(node.id);
 			}
-
-			// Refresh graph after node deletion
-			if (isScoped && externalTasks) {
-				buildFromExternalData(externalTasks, externalDeps);
-			} else {
-				await fetchGraph({ silent: true });
-			}
-			return false; // We've already updated state via fetch
+			return false; // deleteNodeById already updated state via refreshGraph
 		}
 
 		// Handle edge deletion
@@ -1090,8 +1183,24 @@
 
 		switch (e.key) {
 			case 'Enter': {
-				// No-op: hjkl navigation and clicking already open the detail panel.
 				e.preventDefault();
+				// Navigate to the selected task's detail page so it becomes the
+				// focused/center node (task mode only — recipe editing keeps Enter free).
+				if (mode !== 'recipe' && selectedNodeId) {
+					goto(`/spaces/${slug}/${selectedNodeId}`);
+				}
+				break;
+			}
+			case 'Delete':
+			case 'Backspace': {
+				// Delete the keyboard-selected node (task mode only). Confirms
+				// first via the same dialog as the click+drag delete. This is the
+				// discoverable path: single-click navigates away in task mode, so
+				// hjkl-select then Delete is how a task is removed from the graph.
+				if (mode !== 'recipe' && selectedNodeId) {
+					e.preventDefault();
+					deleteNodeById(selectedNodeId);
+				}
 				break;
 			}
 			case 'Escape': {
@@ -1288,6 +1397,7 @@
 				{nodes}
 				{edges}
 				{nodeTypes}
+				{edgeTypes}
 				fitView
 				fitViewOptions={{ padding: 0.2 }}
 				nodesDraggable={true}
@@ -1304,6 +1414,8 @@
 					}
 				}}
 				onconnect={handleConnect}
+				onbeforereconnect={handleBeforeReconnect}
+				onreconnect={handleReconnect}
 				onbeforedelete={handleBeforeDelete}
 			>
 				<FlowActions bind:handle={flowHandle} />
@@ -1334,5 +1446,12 @@
 	/* Slow down the animated edge dash movement (xyflow default is 0.5s) */
 	:global(.svelte-flow .svelte-flow__edge.animated path) {
 		animation-duration: 2s !important;
+	}
+
+	/* Reveal the drag-to-reconnect endpoint dots when an edge is hovered or
+	   selected. The 25px anchor stays interactive regardless of opacity. */
+	:global(.svelte-flow .svelte-flow__edge:hover .nori-edge-anchor),
+	:global(.svelte-flow .svelte-flow__edge.selected .nori-edge-anchor) {
+		opacity: 1;
 	}
 </style>

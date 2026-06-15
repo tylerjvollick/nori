@@ -1,124 +1,38 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import * as Card from '$lib/components/ui/card';
-  import * as Alert from '$lib/components/ui/alert';
-  import { Badge } from '$lib/components/ui/badge';
-  import { Skeleton } from '$lib/components/ui/skeleton';
-  import { BookOpen, Target, BarChart3, Info, Plus } from '@lucide/svelte';
+  import { goto } from '$app/navigation';
+  import { browser } from '$app/environment';
 
   let user = $derived($page.data.user);
+
+  // Forward an authenticated user straight into a space rather than showing a
+  // static landing page. Prefer the last-visited space (persisted in
+  // spaces/[slug]/+layout.svelte), falling back to the user's default/first
+  // accessible space. The /spaces/{slug} route then forwards to the last
+  // visited tab. Users with no spaces never reach here — hooks.server.ts
+  // already redirects them to /onboarding.
+  $effect(() => {
+    if (!browser || !user) return;
+
+    const spaces = user.accessibleSpaces ?? [];
+    if (spaces.length === 0) return;
+
+    const stored = localStorage.getItem('lastVisitedSpace');
+    const target =
+      (stored && spaces.find((s) => s.slug === stored)?.slug) ??
+      spaces.find((s) => s.isDefault)?.slug ??
+      spaces[0].slug;
+
+    goto(`/spaces/${target}`, { replaceState: true });
+  });
 </script>
 
 <svelte:head>
   <title>Dashboard - Nori</title>
 </svelte:head>
 
-{#if user}
-  <div class="min-h-screen bg-background">
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div class="px-4 py-6 sm:px-0">
-        <div class="text-center mb-12">
-          <h2 class="text-3xl font-bold text-foreground mb-4">
-            Welcome back{user.firstName ? `, ${user.firstName}` : ''}!
-          </h2>
-          <p class="text-muted-foreground text-lg">
-            A thin layer that holds everything together for your business processes.
-          </p>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          <!-- Recipes Card -->
-          <Card.Root class="h-full p-8 border-2 border-transparent">
-            <Card.Header class="px-0 py-0">
-              <BookOpen class="size-10 text-primary mb-2" />
-              <Card.Title class="text-xl">Recipes</Card.Title>
-            </Card.Header>
-            <Card.Content class="px-0 py-0">
-              <Card.Description>
-                Document and manage your process recipes — built incrementally during real work. Access via a Space.
-              </Card.Description>
-            </Card.Content>
-          </Card.Root>
-
-          <!-- Tasks Card (coming soon) -->
-          <Card.Root class="h-full p-8 opacity-50 cursor-not-allowed">
-            <Card.Header class="px-0 py-0">
-              <Target class="size-10 text-muted-foreground mb-2" />
-              <Card.Title class="text-xl">Tasks</Card.Title>
-            </Card.Header>
-            <Card.Content class="px-0 py-0">
-              <Card.Description>
-                Track tasks and workflows using Lean methodologies.
-              </Card.Description>
-              <Badge variant="secondary" class="mt-3">Coming Soon</Badge>
-            </Card.Content>
-          </Card.Root>
-
-          <!-- Analytics Card (coming soon) -->
-          <Card.Root class="h-full p-8 opacity-50 cursor-not-allowed">
-            <Card.Header class="px-0 py-0">
-              <BarChart3 class="size-10 text-muted-foreground mb-2" />
-              <Card.Title class="text-xl">Analytics</Card.Title>
-            </Card.Header>
-            <Card.Content class="px-0 py-0">
-              <Card.Description>
-                Get insights into your process efficiency and bottlenecks.
-              </Card.Description>
-              <Badge variant="secondary" class="mt-3">Coming Soon</Badge>
-            </Card.Content>
-          </Card.Root>
-        </div>
-
-        <!-- Quick Start -->
-        <div class="mt-12 max-w-3xl mx-auto">
-          <Alert.Root>
-            <Info class="size-4" />
-            <Alert.Title>Quick Start</Alert.Title>
-            <Alert.Description>
-              <p class="mb-3">
-                Get started by creating your first Recipe or exploring your Spaces.
-              </p>
-              <div class="flex gap-3">
-                <Badge variant="outline">
-                  <Plus class="size-3" />
-                  Create Recipe &rarr; New process template
-                </Badge>
-              </div>
-            </Alert.Description>
-          </Alert.Root>
-        </div>
-      </div>
-    </main>
-  </div>
-{:else}
-  <!-- Skeleton loading state -->
-  <div class="min-h-screen bg-background">
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-      <div class="px-4 py-6 sm:px-0">
-        <div class="text-center mb-12">
-          <Skeleton class="h-9 w-80 mx-auto mb-4" />
-          <Skeleton class="h-6 w-96 mx-auto" />
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {#each [1, 2, 3] as _}
-            <Card.Root class="h-full p-8">
-              <Card.Header class="px-0 py-0">
-                <Skeleton class="size-10 mb-2" />
-                <Skeleton class="h-6 w-24" />
-              </Card.Header>
-              <Card.Content class="px-0 py-0">
-                <Skeleton class="h-4 w-full mb-1" />
-                <Skeleton class="h-4 w-3/4" />
-              </Card.Content>
-            </Card.Root>
-          {/each}
-        </div>
-
-        <div class="mt-12 max-w-3xl mx-auto">
-          <Skeleton class="h-24 w-full" />
-        </div>
-      </div>
-    </main>
-  </div>
-{/if}
+<!-- Authenticated users are redirected away by the effect above; this is a
+     brief loading placeholder shown while that navigation resolves. -->
+<div class="flex min-h-screen items-center justify-center bg-background">
+  <div class="size-6 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" aria-label="Loading" role="status"></div>
+</div>

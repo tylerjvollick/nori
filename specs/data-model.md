@@ -52,7 +52,7 @@ The model is designed around these principles:
 - **Fixed status and type enums** — not configurable per-space. Manufacturing
   shops share the same workflow primitives. Simplifies the model, the UI, and
   the query layer.
-- **Beads-style hierarchical string IDs** for Tasks (e.g., `nori-a3f8.1.2`).
+- **Beads-style hierarchical string IDs** for Tasks (e.g., `task-a3f8c127.1.2`).
   The root task (Job) gets a generated ID; children get dot-suffixed ordinals.
 - **Dependency graph** replaces linear station-column flow. Tasks declare what
   they block or wait for. The ready-work algorithm finds unblocked leaf tasks.
@@ -149,16 +149,17 @@ a **Job** (user-facing term). Children are **Tasks** (user-facing). The backend
 model is `Task` for both.
 
 **Hierarchical string IDs** (beads-style):
-- Root: `nori-a3f8` (space prefix + random hex)
-- Child: `nori-a3f8.1`
-- Grandchild: `nori-a3f8.1.2`
+- Root: `task-a3f8c127` (fixed `task-` prefix + random hex)
+- Child: `task-a3f8c127.1`
+- Grandchild: `task-a3f8c127.1.2`
 
-ID generation: root IDs are `{space-slug}-{4-hex}`. Child IDs append
-`.{ordinal}` where ordinal is the next sequential integer among siblings.
+ID generation: root IDs are `task-{8-hex}` (8 hex chars from a random UUID).
+Child IDs append `.{ordinal}` where ordinal is the next sequential integer
+among siblings, so the `task-` prefix cascades to the entire tree.
 
 ```
 Task
-  - ID: string (primary key — hierarchical, e.g. "nori-a3f8.1.2")
+  - ID: string (primary key — hierarchical, e.g. "task-a3f8c127.1.2")
   - SpaceID: uuid (FK → Space)
   - ParentID: string (FK → Task, nullable — null = root/Job/Recipe)
   - RecipeID: uuid (FK → Recipe, nullable)
@@ -263,17 +264,25 @@ Photos and videos captured during task execution. Separate from recipe media
 TaskMedia
   - ID: uuid
   - TaskID: string (FK → Task)
-  - FilePath: string
-  - FileName: string
+  - FilePath: string (public URL path, e.g. /uploads/task-media/<uuid>.jpg)
+  - FileName: string (original client filename)
   - MimeType: string
   - FileSize: int64
   - Duration: int (nullable — for videos, in seconds)
   - DisplayOrder: int
-  - CapturedByID: uuid (FK → User)
+  - CapturedByID: uuid (FK → User, nullable — set null if user deleted)
   - CreatedAt: timestamp
 ```
 
-Uses the existing TUS-based chunked upload system.
+Implemented in migration `000052_add_task_media`. Uploads are simple multipart
+form posts (field `file`) handled by `internal/storage.LocalStorage`, which
+validates the MIME type against `ALLOWED_MIME_TYPES`, writes the file under
+`UPLOAD_DIR` (served statically at `/uploads`), and stores the public path in
+`FilePath`. (The earlier plan called for a TUS chunked-upload system; that was
+not built — simple disk-backed upload covers the photo/short-video use case.)
+
+Sub-task images use the same storage layer via the pre-existing
+`sub_task_images` table (`SubTaskImage`, migration `000045`).
 
 ---
 

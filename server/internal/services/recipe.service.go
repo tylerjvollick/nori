@@ -693,7 +693,7 @@ func (s *RecipeService) CreateRecipeWithTaskTree(
 	}
 
 	recipeID := uuid.New()
-	rootTaskID := uuid.New().String()
+	rootTaskID := generateTaskID()
 	now := time.Now()
 
 	recipe := &models.Recipe{
@@ -1030,7 +1030,7 @@ func (s *RecipeService) PublishVersion(recipeID uuid.UUID) (*models.RecipeVersio
 
 	// 2. Deep-clone the draft task tree.
 	sourceRootID := *version.RootTaskID
-	clonedRootID := uuid.New().String()
+	clonedRootID := generateTaskID()
 
 	_, err = s.DeepCloneTaskTree(sourceRootID, TaskTreeCloneOptions{
 		NewRootID: clonedRootID,
@@ -1098,7 +1098,7 @@ func (s *RecipeService) CreateDraftFromPublished(
 	}
 
 	// 4. Clone the published task tree.
-	clonedRootID := uuid.New().String()
+	clonedRootID := generateTaskID()
 
 	_, err = s.DeepCloneTaskTree(*publishedVersion.RootTaskID, TaskTreeCloneOptions{
 		NewRootID: clonedRootID,
@@ -1464,12 +1464,13 @@ func extractPath(taskID, rootID string) string {
 	return ""
 }
 
-// generateTaskID creates a short, unique task ID prefix for a root job.
-// Format: "nori-" + 8 hex chars from a UUID.
+// generateTaskID creates a short, unique task ID prefix for a root task.
+// Format: "task-" + 8 hex chars from a UUID. Children derive hierarchical IDs
+// from this root (e.g. task-a3f8c127.1), so the prefix cascades to the whole tree.
 func generateTaskID() string {
 	id := uuid.New()
 	hex := fmt.Sprintf("%x", id[:4])
-	return "nori-" + hex
+	return "task-" + hex
 }
 
 // ---------------------------------------------------------------------------
@@ -1493,7 +1494,7 @@ type RollRecipeOptions struct {
 // fan-in).
 //
 // The resulting tree gets:
-//   - A new root with Type='job' and a generated nori-{hex} ID
+//   - A new root with Type='job' and a generated task-{hex} ID
 //   - All children with new hierarchical IDs
 //   - Dependency edges wired (cloned or batch-expanded)
 //   - RecipeID and RecipeVersionID set on all tasks for traceability
@@ -1850,7 +1851,7 @@ func (s *RecipeService) SaveAsRecipe(
 
 	// 2. Prepare IDs and timestamps.
 	recipeID := uuid.New()
-	newRootID := uuid.New().String()
+	newRootID := generateTaskID()
 	now := time.Now()
 
 	// 3. Create Recipe record.

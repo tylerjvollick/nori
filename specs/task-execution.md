@@ -294,7 +294,11 @@ POST   /api/tasks/:id/pause                             — Pause task
 POST   /api/tasks/:id/resume                            — Resume task
 POST   /api/tasks/:id/skip                              — Skip task
 PUT    /api/tasks/:id/notes                             — Add/update deviation notes
-POST   /api/tasks/:id/media                             — Attach photo/video (TUS upload)
+POST   /api/v1/spaces/:spaceId/tasks/:id/media          — Attach photo/video (multipart, field "file")
+GET    /api/v1/spaces/:spaceId/tasks/:id/media          — List a task's media
+DELETE /api/v1/spaces/:spaceId/tasks/:id/media/:mediaId — Remove a media attachment
+POST   /api/v1/spaces/:spaceId/tasks/:id/subtasks/:subtaskId/images           — Attach image to a sub-step (multipart)
+DELETE /api/v1/spaces/:spaceId/tasks/:id/subtasks/:subtaskId/images/:imageId  — Remove a sub-step image
 
 POST   /api/tasks/:parentId/children                    — Add ad-hoc child task
 POST   /api/jobs/:id/summary                            — Generate post-job summary

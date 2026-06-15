@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { taskApi } from '$lib/api/task';
@@ -17,7 +16,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb';
-	import { CircleAlert, LayoutGrid, GitBranch, List, DollarSign, BookOpen, PanelRight, X, Briefcase, ListTodo } from '@lucide/svelte';
+	import { CircleAlert, BookOpen, PanelLeftOpen, X, Briefcase, ListTodo, Trash2 } from '@lucide/svelte';
 	import { isEditableTarget } from '$lib/utils/keyboard.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -44,13 +43,13 @@
 	// Parent task (for child task breadcrumbs: Spaces > Space > ParentJob > Task)
 	let parentTask = $state<TaskResponse | null>(null);
 
-	// ---- View mode ----
-	type ViewMode = 'graph' | 'board' | 'list' | 'cost';
-	const ALL_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'graph', label: 'Graph', icon: GitBranch },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
-		{ value: 'list', label: 'List', icon: List },
-		{ value: 'cost', label: 'Cost', icon: DollarSign },
+	// ---- View mode (top-level tabs) ----
+	type ViewMode = 'overview' | 'board' | 'graph' | 'cost';
+	const ALL_VIEW_MODES: { value: ViewMode; label: string }[] = [
+		{ value: 'overview', label: 'Overview' },
+		{ value: 'board', label: 'Board' },
+		{ value: 'graph', label: 'Graph' },
+		{ value: 'cost', label: 'Cost' },
 	];
 
 	/** Whether the root is a non-job leaf task (no children). */
@@ -58,24 +57,26 @@
 		tree !== null && tree.type !== 'job' && (!tree.children || tree.children.length === 0),
 	);
 
-	/** For non-job leaf tasks, hide the view toggle entirely (detail + graph only). */
+	/** For non-job leaf tasks, hide the tabs entirely (detail + neighborhood graph only). */
 	let availableViewModes = $derived(isLeafTask ? [] : ALL_VIEW_MODES);
 
-	/** Task view modes (Graph/List/Board) — used in left pane toolbar toggle. */
-	const TASK_VIEW_MODES: { value: ViewMode; label: string; icon: typeof LayoutGrid }[] = [
-		{ value: 'graph', label: 'Graph', icon: GitBranch },
-		{ value: 'list', label: 'List', icon: List },
-		{ value: 'board', label: 'Board', icon: LayoutGrid },
-	];
-	let taskViewModes = $derived(isLeafTask ? [] : TASK_VIEW_MODES);
+	/** Normalize the ?view= param to a known tab; default/unknown → Overview. */
+	function normalizeView(raw: string | null): ViewMode {
+		switch (raw) {
+			case 'board':
+			case 'graph':
+			case 'cost':
+				return raw;
+			default:
+				return 'overview';
+		}
+	}
 
-	let currentView = $derived<ViewMode>(
-		(($page.url.searchParams.get('view') as ViewMode) || 'graph') as ViewMode,
-	);
+	let currentView = $derived<ViewMode>(normalizeView($page.url.searchParams.get('view')));
 
 	function setView(mode: ViewMode): void {
 		const url = new URL($page.url);
-		if (mode === 'graph') {
+		if (mode === 'overview') {
 			url.searchParams.delete('view');
 		} else {
 			url.searchParams.set('view', mode);
@@ -227,8 +228,9 @@
 				neighborhoodDeps = new Map();
 				neighborhoodLoaded = true;
 			}
-		} else if ((view === 'graph' || view === 'list') && treeVal && !leaf && !dLoaded) {
-			// Job/parent task: load deps for all descendants when graph or list view selected
+		} else if ((view === 'graph' || view === 'overview') && treeVal && !leaf && !dLoaded) {
+			// Job/parent task: load deps for all descendants for the graph and the
+			// Overview list (the list shows blocker/dependent state from deps).
 			loadDepsForDescendants();
 		}
 	});
@@ -241,17 +243,14 @@
 		if (isLeafTask) return;
 
 		switch (e.key) {
-			case 'g':
-				setView('graph');
+			case 'o':
+				setView('overview');
 				break;
 			case 'b':
 				setView('board');
 				break;
-			case 'l':
-				// Only switch if not in board view (board uses 'l' for column navigation)
-				if (currentView !== 'board') {
-					setView('list');
-				}
+			case 'g':
+				setView('graph');
 				break;
 			case 'c':
 				setView('cost');
@@ -332,19 +331,43 @@
 		return null;
 	}
 
-	onMount(async () => {
-		if (!taskId) {
-			error = 'No task ID provided';
-			isLoading = false;
-			return;
-		}
+	// Sequence guard so a stale in-flight fetch can't overwrite a newer one
+	// when the user navigates quickly between task detail pages.
+	let loadSeq = 0;
+
+	/**
+	 * Load the task tree, stations, deps and parent for a given task id, fully
+	 * resetting per-task state first. Driven reactively by taskId so in-app
+	 * navigation between task detail pages (same [taskId] route) re-fetches
+	 * instead of showing the stale, originally-mounted task.
+	 */
+	async function loadTask(id: string): Promise<void> {
+		const seq = ++loadSeq;
+
+		// Reset per-task state so navigation never renders stale data.
+		isLoading = true;
+		error = null;
+		tree = null;
+		selectedTask = null;
+		selectedDeps = null;
+		rootDepsAttempted = false;
+		parentTask = null;
+		graphPanelTask = null;
+		graphPanelDeps = null;
+		graphPanelLoading = false;
+		depsLoaded = false;
+		depsMap = new Map();
+		neighborhoodLoaded = false;
+		neighborhoodTasks = [];
+		neighborhoodDeps = new Map();
 
 		try {
 			// Fetch tree and stations in parallel
 			const [treeData, stations] = await Promise.all([
-				taskApi.getTaskTree(spaceId, taskId),
+				taskApi.getTaskTree(spaceId, id),
 				stationApi.listStations(spaceId).catch(() => [] as StationResponse[]),
 			]);
+			if (seq !== loadSeq) return; // superseded by a newer navigation
 
 			tree = treeData;
 
@@ -356,27 +379,45 @@
 			stationMap = map;
 
 			// Auto-select root task and load its deps
-			selectedTask = tree;
+			selectedTask = treeData;
 			try {
-				selectedDeps = await taskApi.getTaskDeps(spaceId, tree.id);
+				const deps = await taskApi.getTaskDeps(spaceId, treeData.id);
+				if (seq !== loadSeq) return;
+				selectedDeps = deps;
 			} catch {
+				if (seq !== loadSeq) return;
 				selectedDeps = null;
 			}
 			rootDepsAttempted = true;
 
 			// Load parent task for breadcrumbs (child task under a job)
-			if (tree.parentId) {
+			if (treeData.parentId) {
 				try {
-					parentTask = await taskApi.getTask(spaceId, tree.parentId);
+					const p = await taskApi.getTask(spaceId, treeData.parentId);
+					if (seq !== loadSeq) return;
+					parentTask = p;
 				} catch {
+					if (seq !== loadSeq) return;
 					parentTask = null;
 				}
 			}
 		} catch (e) {
+			if (seq !== loadSeq) return;
 			error = e instanceof Error ? e.message : 'Failed to load task tree';
 		} finally {
-			isLoading = false;
+			if (seq === loadSeq) isLoading = false;
 		}
+	}
+
+	// Re-fetch whenever the task id changes (including in-app navigation).
+	$effect(() => {
+		const id = taskId;
+		if (!id) {
+			error = 'No task ID provided';
+			isLoading = false;
+			return;
+		}
+		loadTask(id);
 	});
 
 	/** Reload the task tree and deps — called by GraphView after mutations. */
@@ -385,7 +426,11 @@
 		try {
 			const treeData = await taskApi.getTaskTree(spaceId, taskId);
 			tree = treeData;
-			// Reload deps for descendants
+			// Force a fresh deps load. loadDepsForDescendants() early-returns when
+			// depsLoaded is already true, so without resetting it here a newly added
+			// serial/parallel node renders with no connecting edges until a full
+			// page refresh (nori-c98.2).
+			depsLoaded = false;
 			await loadDepsForDescendants();
 		} catch {
 			// ignore — tree will be stale but not crash
@@ -417,6 +462,54 @@
 
 	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
 	let graphPanelIsRoot = $derived(graphPanelTask?.id === tree?.id);
+
+	// ---- Delete task ----
+	let showDeleteDialog = $state(false);
+	let isDeleting = $state(false);
+
+	/** Number of descendant sub-tasks that a delete would cascade to. */
+	let descendantCount = $derived(flatTasks.length);
+
+	/**
+	 * Hard-delete the task being viewed. Reconnects its upstream blockers to its
+	 * downstream dependents first (so the chain isn't broken), then deletes and
+	 * navigates away — to the parent task if this is a child, else the jobs list.
+	 * Matches the reconnect-then-delete behavior of GraphView.handleBeforeDelete.
+	 */
+	async function handleDelete(): Promise<void> {
+		if (!tree) return;
+		isDeleting = true;
+		try {
+			// Reconnect upstream blockers -> downstream dependents before deleting.
+			if (selectedDeps) {
+				const upstreamIds = selectedDeps.blockers.map((d) => d.toTaskId);
+				const downstreamIds = selectedDeps.dependents.map((d) => d.fromTaskId);
+				for (const upstream of upstreamIds) {
+					for (const downstream of downstreamIds) {
+						try {
+							await taskApi.addDep(spaceId, upstream, downstream, 'blocks');
+						} catch {
+							// Ignore duplicate-dep errors — the link may already exist.
+						}
+					}
+				}
+			}
+
+			await taskApi.deleteTask(spaceId, tree.id);
+			showDeleteDialog = false;
+			toast.success('Task deleted');
+			// Can't stay on a deleted task's page — go to the parent or the jobs list.
+			if (parentTask) {
+				goto(`/spaces/${slug}/${parentTask.id}`);
+			} else {
+				goto(`/spaces/${slug}/jobs`);
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Failed to delete task');
+		} finally {
+			isDeleting = false;
+		}
+	}
 
 	async function handleSaveAsRecipe(): Promise<void> {
 		if (!tree || !recipeName.trim()) return;
@@ -491,41 +584,48 @@
 			</Breadcrumb.Root>
 
 			<!-- Actions (right side of breadcrumb bar) -->
-			{#if isJob}
-				<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
-					<BookOpen class="size-4 mr-1" />
-					Save as Recipe
-				</Button>
-			{/if}
+			<div class="flex items-center gap-1">
+				{#if isJob}
+					<Button variant="ghost" size="sm" onclick={() => (showSaveAsRecipeDialog = true)}>
+						<BookOpen class="size-4 mr-1" />
+						Save as Recipe
+					</Button>
+				{/if}
+				<!-- Delete is offered on individual tasks only; a whole job tree is not
+				     deletable in one click (delete its tasks from the graph instead). -->
+				{#if tree && !isJob}
+					<Button
+						variant="ghost"
+						size="sm"
+						class="text-destructive hover:text-destructive"
+						onclick={() => (showDeleteDialog = true)}
+						data-testid="delete-task"
+					>
+						<Trash2 class="size-4 mr-1" />
+						Delete
+					</Button>
+				{/if}
+			</div>
 		</div>
 	</div>
 
-	<!-- Top-level tabs: [Tasks] [Cost] (for jobs/tasks with children) -->
+	<!-- Top-level tabs: [Overview] [Board] [Graph] [Cost] (for jobs/tasks with children) -->
 	{#if availableViewModes.length > 0}
 		<div class="flex-shrink-0 border-b bg-background px-4 pt-0 pb-0">
 			<div class="flex gap-0" role="tablist">
-				<button
-					role="tab"
-					aria-selected={currentView !== 'cost'}
-					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
-						{currentView !== 'cost'
-							? 'border-foreground text-foreground'
-							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
-					onclick={() => { if (currentView === 'cost') setView('graph'); }}
-				>
-					Tasks
-				</button>
-				<button
-					role="tab"
-					aria-selected={currentView === 'cost'}
-					class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
-						{currentView === 'cost'
-							? 'border-foreground text-foreground'
-							: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
-					onclick={() => setView('cost')}
-				>
-					Cost
-				</button>
+				{#each availableViewModes as mode (mode.value)}
+					<button
+						role="tab"
+						aria-selected={currentView === mode.value}
+						class="px-4 py-2 text-sm font-medium border-b-2 transition-colors
+							{currentView === mode.value
+								? 'border-foreground text-foreground'
+								: 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}"
+						onclick={() => setView(mode.value)}
+					>
+						{mode.label}
+					</button>
+				{/each}
 			</div>
 		</div>
 	{/if}
@@ -596,87 +696,32 @@
 				<JobCostSummary jobId={tree.id} {spaceId} {tree} {stationMap} />
 			</div>
 
+		{:else if currentView === 'board'}
+			<!-- Board tab: full-width board (no detail panel) -->
+			<div class="flex-1 overflow-hidden">
+				<BoardView {spaceId} tasks={flatTasks} {stationMap} />
+			</div>
+
+		{:else if currentView === 'graph'}
+			<!-- Graph tab: full-width graph (no detail panel). Clicking a node
+			     navigates to that task's detail page. -->
+			<div class="flex-1 overflow-hidden">
+				<GraphView
+					{spaceId}
+					tasks={flatTasks}
+					deps={depsMap}
+					{stationMap}
+					rootTaskId={tree?.id}
+					onmutate={handleTreeMutate}
+				/>
+			</div>
+
 		{:else}
-			<!-- Tasks tab: split pane with [Graph|List|Board] toggle -->
+			<!-- Overview tab: detail panel (left) + child-task List (right) -->
 			<div class="flex-1 flex overflow-hidden">
-				<!-- Left pane -->
-				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
-					{#if currentView === 'graph'}
-						<GraphView
-							{spaceId}
-							tasks={flatTasks}
-							deps={depsMap}
-							{stationMap}
-							rootTaskId={tree?.id}
-							onselect={handleGraphNodeSelect}
-							onmutate={handleTreeMutate}
-							viewToggle={{ current: currentView, onchange: (mode) => setView(mode as ViewMode) }}
-						/>
-					{:else if currentView === 'board'}
-						<!-- Board toolbar with view toggle -->
-						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
-							<h1 class="text-lg font-semibold text-foreground">Board</h1>
-							<div class="flex items-center gap-3">
-								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
-									{#each taskViewModes as mode (mode.value)}
-										<Button
-											variant={currentView === mode.value ? 'secondary' : 'ghost'}
-											size="sm"
-											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
-												? 'bg-background shadow-sm'
-												: 'hover:bg-transparent hover:text-foreground'}"
-											onclick={() => setView(mode.value)}
-										>
-											<mode.icon class="size-3.5" />
-											{mode.label}
-										</Button>
-									{/each}
-								</div>
-							</div>
-						</div>
-						<div class="flex-1 overflow-hidden">
-							<BoardView {spaceId} tasks={flatTasks} {stationMap} onselect={handleGraphNodeSelect} />
-						</div>
-					{:else if currentView === 'list'}
-						<!-- List toolbar with view toggle -->
-						<div class="flex-shrink-0 flex items-center justify-between px-4 py-2">
-							<h1 class="text-lg font-semibold text-foreground">List</h1>
-							<div class="flex items-center gap-3">
-								<div class="flex items-center rounded-lg border bg-muted/50 p-0.5">
-									{#each taskViewModes as mode (mode.value)}
-										<Button
-											variant={currentView === mode.value ? 'secondary' : 'ghost'}
-											size="sm"
-											class="gap-1.5 rounded-md px-2.5 h-7 text-xs {currentView === mode.value
-												? 'bg-background shadow-sm'
-												: 'hover:bg-transparent hover:text-foreground'}"
-											onclick={() => setView(mode.value)}
-										>
-											<mode.icon class="size-3.5" />
-											{mode.label}
-										</Button>
-									{/each}
-								</div>
-							</div>
-						</div>
-						<div class="flex-1 overflow-hidden">
-							<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} onselect={handleGraphNodeSelect} />
-						</div>
-					{/if}
-
-					<!-- Panel toggle button (desktop) -->
-					<button
-						onclick={() => (graphPanelOpen = !graphPanelOpen)}
-						class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
-						title={graphPanelOpen ? 'Collapse panel' : 'Expand panel'}
-					>
-						<PanelRight class="size-4" />
-					</button>
-				</div>
-
-				<!-- Detail panel (desktop sidebar) -->
+				<!-- Left: Detail panel (desktop sidebar) -->
 				{#if graphPanelOpen}
-					<div class="hidden lg:flex w-1/2 flex-col border-l border-border overflow-y-auto shrink-0">
+					<div class="hidden lg:flex w-1/2 flex-col border-r border-border overflow-y-auto shrink-0">
 						<TaskDetailPanel
 							task={graphPanelTask ?? tree ?? undefined}
 							{spaceId}
@@ -691,9 +736,30 @@
 							onnavparent={handleNavToRoot}
 							onselecttask={handleSelectTaskInGraph}
 							hideSubTasks={graphPanelIsRoot}
+							oncollapse={() => (graphPanelOpen = false)}
 						/>
 					</div>
 				{/if}
+
+				<!-- Right: child-task list (no view-switcher header) -->
+				<div class="flex-1 min-w-0 overflow-hidden flex flex-col relative">
+					<div class="flex-1 overflow-hidden">
+						<ListView {spaceId} tasks={flatTasks} deps={depsMap} {stationMap} />
+					</div>
+
+					<!-- Expand button (desktop) — shown only when the panel is collapsed -->
+					{#if !graphPanelOpen}
+						<button
+							onclick={() => (graphPanelOpen = true)}
+							class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+							title="Expand panel"
+							aria-label="Expand panel"
+							data-testid="panel-expand"
+						>
+							<PanelLeftOpen class="size-4" />
+						</button>
+					{/if}
+				</div>
 
 				<!-- Detail panel (mobile drawer overlay) -->
 				{#if graphPanelTask}
@@ -799,5 +865,39 @@
 				</Button>
 			</Dialog.Footer>
 		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Delete Task Dialog -->
+<Dialog.Root bind:open={showDeleteDialog}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Delete task?</Dialog.Title>
+			<Dialog.Description>
+				Delete "<strong>{tree?.title ?? 'this task'}</strong>"?
+				{#if descendantCount > 0}
+					This will also delete its {descendantCount} sub-task{descendantCount === 1 ? '' : 's'}.
+				{/if}
+				{#if selectedDeps && selectedDeps.blockers.length > 0 && selectedDeps.dependents.length > 0}
+					Upstream and downstream dependencies will be reconnected automatically.
+				{/if}
+				This action cannot be undone.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer class="pt-2">
+			<Button type="button" variant="outline" onclick={() => (showDeleteDialog = false)}>
+				Cancel
+			</Button>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={isDeleting}
+				onclick={handleDelete}
+				data-testid="delete-task-confirm"
+			>
+				<Trash2 class="size-4 mr-1.5" />
+				{isDeleting ? 'Deleting...' : 'Delete'}
+			</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

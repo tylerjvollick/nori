@@ -92,6 +92,26 @@ export interface AddNoteRequest {
 /** Tasks returned by GET /tasks/ready have the same shape as TaskResponse. */
 export type ReadyTask = TaskResponse;
 
+// --- Task media types ---
+
+export interface TaskMedia {
+	id: string;
+	taskId: string;
+	url: string;
+	fileName: string;
+	mimeType: string;
+	fileSize: number;
+	duration?: number | null;
+	displayOrder: number;
+	capturedById?: string | null;
+	createdAt: string;
+}
+
+export interface TaskMediaListResponse {
+	items: TaskMedia[];
+	total: number;
+}
+
 // --- Sub-task types ---
 
 export interface SubTaskImage {

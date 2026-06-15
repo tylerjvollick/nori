@@ -3,9 +3,12 @@
 	import { flip } from 'svelte/animate';
 	import type { SubTaskResponse } from '$lib/types/task';
 	import { taskApi } from '$lib/api/task';
+	import { resolveMediaUrl } from '$lib/api/client';
+	import MediaViewerModal from './MediaViewerModal.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { toast } from 'svelte-sonner';
 	import {
 		List,
 		LayoutGrid,
@@ -15,6 +18,8 @@
 		ChevronDown,
 		ChevronRight,
 		ImageIcon,
+		ImagePlus,
+		Images,
 		Pencil,
 		Check,
 		X,
@@ -184,9 +189,84 @@
 	}
 
 	const flipDurationMs = 150;
+
+	// --- Image attachment ---
+	let imageInput = $state<HTMLInputElement | null>(null);
+	let uploadTargetId = $state<string | null>(null);
+	let uploadingId = $state<string | null>(null);
+
+	function pickImage(subtaskId: string) {
+		uploadTargetId = subtaskId;
+		imageInput?.click();
+	}
+
+	async function onImageSelected(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const files = input.files ? Array.from(input.files) : [];
+		const targetId = uploadTargetId;
+		input.value = '';
+		uploadTargetId = null;
+		if (files.length === 0 || !targetId) return;
+
+		uploadingId = targetId;
+		try {
+			for (const file of files) {
+				const img = await taskApi.uploadSubTaskImage(spaceId, taskId, targetId, file);
+				items = items.map((i) =>
+					i.id === targetId ? { ...i, images: [...(i.images ?? []), img] } : i,
+				);
+			}
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to attach image');
+		} finally {
+			uploadingId = null;
+		}
+	}
+
+	// --- Full-size image viewer modal ---
+	let modalSubTaskId = $state<string | null>(null);
+	let modalOpen = $state(false);
+
+	let modalSubTask = $derived(
+		modalSubTaskId ? (items.find((i) => i.id === modalSubTaskId) ?? null) : null,
+	);
+
+	function openModal(subtaskId: string) {
+		modalSubTaskId = subtaskId;
+		modalOpen = true;
+	}
+
+	async function deleteImage(subtaskId: string, imageId: string) {
+		const prev = items;
+		// Optimistically remove from local state.
+		items = items.map((i) =>
+			i.id === subtaskId ? { ...i, images: (i.images ?? []).filter((img) => img.id !== imageId) } : i,
+		);
+		try {
+			await taskApi.deleteSubTaskImage(spaceId, taskId, subtaskId, imageId);
+		} catch (err) {
+			items = prev; // restore on failure
+			toast.error(err instanceof Error ? err.message : 'Failed to delete image');
+			return;
+		}
+		// Close the modal once the last image is gone.
+		if ((modalSubTask?.images?.length ?? 0) === 0) {
+			modalOpen = false;
+		}
+	}
 </script>
 
 <div class="space-y-3">
+	<!-- Hidden file input shared by all sub-task rows for image attachment. -->
+	<input
+		bind:this={imageInput}
+		type="file"
+		accept="image/*"
+		multiple
+		class="hidden"
+		onchange={onImageSelected}
+		data-testid="subtask-image-input"
+	/>
 	<!-- Header with view toggle -->
 	<div class="flex items-center justify-between">
 		<h4 class="text-sm font-medium text-foreground">Sub-tasks</h4>
@@ -239,14 +319,41 @@
 									<GripVertical class="size-3.5" />
 								</div>
 
-								<!-- Photo thumbnail -->
-								<div class="size-7 shrink-0 rounded border border-border bg-muted flex items-center justify-center overflow-hidden">
+								<!-- Photo thumbnail (click to open the full-size viewer). When a
+								     sub-task has more than one image, peek the extras behind the
+								     first to signal there are multiple. -->
+								<button
+									type="button"
+									class="relative size-14 shrink-0"
+									onclick={() => openModal(item.id)}
+									title={item.images && item.images.length > 0 ? 'View photos' : 'No photos yet'}
+									data-testid="subtask-thumb"
+								>
 									{#if item.images && item.images.length > 0}
-										<img src={item.images[0].imageUrl} alt="" class="size-full object-cover" />
+										{#if item.images.length > 2}
+											<div class="absolute inset-0 rounded border border-border bg-muted overflow-hidden rotate-[6deg] translate-x-1">
+												<img src={resolveMediaUrl(item.images[2].imageUrl)} alt="" class="size-full object-cover" />
+											</div>
+										{/if}
+										{#if item.images.length > 1}
+											<div class="absolute inset-0 rounded border border-border bg-muted overflow-hidden -rotate-[5deg] -translate-x-1">
+												<img src={resolveMediaUrl(item.images[1].imageUrl)} alt="" class="size-full object-cover" />
+											</div>
+										{/if}
+										<div class="absolute inset-0 rounded border border-border bg-muted overflow-hidden">
+											<img src={resolveMediaUrl(item.images[0].imageUrl)} alt="" class="size-full object-cover" />
+										</div>
+										{#if item.images.length > 1}
+											<span class="absolute -top-1 -right-1 z-10 flex items-center gap-0.5 rounded-full bg-foreground/80 px-1.5 py-0.5 text-[10px] font-medium text-background" data-testid="subtask-image-count">
+												{item.images.length}
+											</span>
+										{/if}
 									{:else}
-										<ImageIcon class="size-3 text-muted-foreground/30" />
+										<div class="size-full rounded border border-border bg-muted flex items-center justify-center">
+											<ImageIcon class="size-5 text-muted-foreground/30" />
+										</div>
 									{/if}
-								</div>
+								</button>
 
 								<!-- Expand toggle (only if description exists) -->
 								<button
@@ -297,6 +404,16 @@
 									<span class="text-sm flex-1 leading-tight">{item.title}</span>
 									<!-- Action buttons (hover) -->
 									<div class="flex items-center gap-0.5 opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0">
+										<button
+											class="text-muted-foreground/60 hover:text-foreground p-0.5 disabled:opacity-50"
+											onclick={() => pickImage(item.id)}
+											type="button"
+											title="Attach image"
+											disabled={uploadingId === item.id}
+											data-testid="subtask-image-add"
+										>
+											<ImagePlus class="size-3" />
+										</button>
 										<button
 											class="text-muted-foreground/60 hover:text-foreground p-0.5"
 											onclick={() => startEdit(item)}
@@ -357,21 +474,42 @@
 							animate:flip={{ duration: flipDurationMs }}
 							class="group/card rounded-md border border-border bg-card overflow-hidden flex flex-col cursor-grab active:cursor-grabbing"
 						>
-							<!-- Photo area -->
-							<div class="aspect-square bg-muted flex items-center justify-center relative">
-								{#if item.images && item.images.length > 0}
-									<img
-										src={item.images[0].imageUrl}
-										alt={item.title}
-										class="w-full h-full object-cover"
-									/>
-								{:else}
-									<ImageIcon class="size-6 text-muted-foreground/30" />
+							<!-- Photo area (click opens the full-size viewer) -->
+							<div class="aspect-square bg-muted relative">
+								<button
+									type="button"
+									class="absolute inset-0 flex items-center justify-center"
+									onclick={() => openModal(item.id)}
+									title={item.images && item.images.length > 0 ? 'View photos' : 'No photos yet'}
+									data-testid="subtask-card"
+								>
+									{#if item.images && item.images.length > 0}
+										<img
+											src={resolveMediaUrl(item.images[0].imageUrl)}
+											alt={item.title}
+											class="w-full h-full object-cover"
+										/>
+									{:else}
+										<ImageIcon class="size-6 text-muted-foreground/30" />
+									{/if}
+								</button>
+
+								<!-- Multi-photo indicator -->
+								{#if item.images && item.images.length > 1}
+									<span
+										class="absolute top-1 left-1 z-10 flex items-center gap-0.5 rounded-full bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none"
+										data-testid="subtask-card-multi"
+									>
+										<Images class="size-3" />
+										{item.images.length}
+									</span>
 								{/if}
-								<!-- Hover overlay with delete -->
-								<div class="absolute inset-0 bg-black/40 flex items-center justify-center gap-2 opacity-0 group-hover/card:opacity-100 transition-opacity">
+
+								<!-- Hover overlay actions (sibling of the trigger; container is
+								     pointer-events-none so clicks fall through to the viewer). -->
+								<div class="absolute inset-0 bg-black/40 flex items-center justify-center gap-2 opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-none">
 									<button
-										class="text-white/80 hover:text-red-400 p-1 bg-black/30 rounded"
+										class="text-white/80 hover:text-red-400 p-1 bg-black/30 rounded pointer-events-auto"
 										onclick={() => deleteItem(item.id)}
 										type="button"
 										title="Delete"
@@ -379,7 +517,7 @@
 										<Trash2 class="size-3.5" />
 									</button>
 									<button
-										class="text-white/80 hover:text-white p-1 bg-black/30 rounded"
+										class="text-white/80 hover:text-white p-1 bg-black/30 rounded pointer-events-auto"
 										onclick={() => startEdit(item)}
 										type="button"
 										title="Edit"
@@ -478,3 +616,14 @@
 		{/if}
 	{/if}
 </div>
+
+<!-- Full-size image viewer for the selected sub-step. -->
+{#if modalSubTask}
+	<MediaViewerModal
+		bind:open={modalOpen}
+		title={modalSubTask.title}
+		description={modalSubTask.description}
+		items={(modalSubTask.images ?? []).map((img) => ({ id: img.id, url: img.imageUrl }))}
+		ondelete={(imageId) => deleteImage(modalSubTask!.id, imageId)}
+	/>
+{/if}

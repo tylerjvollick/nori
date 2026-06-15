@@ -51,8 +51,9 @@ test.describe('Breadcrumb navigation on detail views', () => {
 
     // Space-level tabs (Jobs/Recipes/etc) should NOT be visible
     await expect(page.getByRole('tab', { name: 'Recipes' })).not.toBeVisible();
-    // Job detail should show Tasks/Cost tabs
-    await expect(page.getByRole('tab', { name: 'Tasks' })).toBeVisible();
+    // Job detail should show its Overview/Board/Graph/Cost tabs
+    await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Graph' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Cost' })).toBeVisible();
   });
 
@@ -66,7 +67,8 @@ test.describe('Breadcrumb navigation on detail views', () => {
     await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
     await page.waitForLoadState('networkidle');
 
-    // Wait for graph to load and add a child task
+    // Open the Graph tab (full-width graph), then add a child task
+    await page.getByRole('tab', { name: 'Graph' }).click();
     const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
     await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
     await addNodeBtn.click();
@@ -98,6 +100,73 @@ test.describe('Breadcrumb navigation on detail views', () => {
 
     // Tab bar should NOT be visible
     await expect(page.locator('[role="tablist"]')).not.toBeVisible();
+  });
+
+  test('clicking parent-job breadcrumb from a child task re-fetches the parent (nori-zv0.7)', async ({
+    page,
+  }) => {
+    // Create a job
+    await page.goto(`/spaces/${spaceSlug}/jobs`);
+    await page.waitForLoadState('networkidle');
+    await page.getByRole('button', { name: 'New Job' }).click();
+    await page.locator('#job-title').fill('Refetch Parent Job');
+    await page.getByRole('button', { name: 'Create Job' }).click();
+    await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
+    await page.waitForLoadState('networkidle');
+
+    // Open the Graph tab, then add a child task to the job
+    await page.getByRole('tab', { name: 'Graph' }).click();
+    const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
+    await expect(addNodeBtn).toBeVisible({ timeout: 10000 });
+    await addNodeBtn.click();
+    const inlineInput = page.locator('.svelte-flow__node input');
+    await expect(inlineInput).toBeVisible({ timeout: 10000 });
+    await inlineInput.fill('Refetch Child Task');
+    await page.keyboard.press('Enter');
+    const childNode = page.locator('.svelte-flow__node', { hasText: 'Refetch Child Task' });
+    await expect(childNode).toBeVisible({ timeout: 10000 });
+    const childTaskId = await childNode.getAttribute('data-id');
+    expect(childTaskId).toBeTruthy();
+
+    // Open the child task detail page directly
+    await page.goto(`/spaces/${spaceSlug}/${childTaskId}`);
+    await page.waitForLoadState('networkidle');
+
+    const breadcrumbNav = page.locator('nav[aria-label="breadcrumb"]');
+    await expect(
+      breadcrumbNav.locator('[data-slot="breadcrumb-page"]', { hasText: 'Refetch Child Task' }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole('heading', { level: 2, name: 'Refetch Child Task' }),
+    ).toBeVisible({ timeout: 10000 });
+
+    // Click the parent-job breadcrumb link — this is in-app navigation that reuses
+    // the [taskId] component, which is exactly where the stale-data bug lived.
+    const parentLink = breadcrumbNav.locator('[data-slot="breadcrumb-link"]', {
+      hasText: 'Refetch Parent Job',
+    });
+    const parentHref = await parentLink.getAttribute('href');
+    expect(parentHref).toMatch(new RegExp(`^/spaces/${spaceSlug}/[^/]+$`));
+    await parentLink.click();
+
+    await page.waitForURL((url) => url.pathname === parentHref, { timeout: 10000 });
+
+    // The page must now render the PARENT job, not the stale child.
+    await expect(
+      breadcrumbNav.locator('[data-slot="breadcrumb-page"]', { hasText: 'Refetch Parent Job' }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole('heading', { level: 2, name: 'Refetch Parent Job' }),
+    ).toBeVisible({ timeout: 10000 });
+    // The parent's tree re-fetched: the child task node is shown in the graph.
+    await page.getByRole('tab', { name: 'Graph' }).click();
+    await expect(
+      page.locator('.svelte-flow__node', { hasText: 'Refetch Child Task' }),
+    ).toBeVisible({ timeout: 10000 });
+    // The child task is no longer the current page.
+    await expect(
+      breadcrumbNav.locator('[data-slot="breadcrumb-page"]', { hasText: 'Refetch Child Task' }),
+    ).toHaveCount(0);
   });
 
   test('clicking SpaceName breadcrumb navigates to space view with tab bar', async ({ page }) => {

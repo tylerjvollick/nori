@@ -38,12 +38,24 @@
 		{ value: 'insights', label: 'Insights' },
 	] as const;
 
-	let activeTab = $derived($page.url.pathname.split('/')[3] ?? '');
+	// Raw path segment (empty on a bare /spaces/{slug} URL before the redirect).
+	let rawTab = $derived($page.url.pathname.split('/')[3] ?? '');
+	// Highlight a concrete tab at all times — default to Jobs when the URL has no
+	// tab segment yet (bare space URL) so the user never sees "no tab selected".
+	let activeTab = $derived(TABS.some((t) => t.value === rawTab) ? rawTab : 'jobs');
 
-	// Persist the active tab to localStorage (per-space)
+	// Persist only a real, concrete tab segment (never the defaulted highlight),
+	// so landing on a bare space URL can't clobber the stored last-visited tab.
 	$effect(() => {
-		if (browser && slug && activeTab && TABS.some((t) => t.value === activeTab)) {
-			localStorage.setItem(`lastVisitedTab:${slug}`, activeTab);
+		if (browser && slug && TABS.some((t) => t.value === rawTab)) {
+			localStorage.setItem(`lastVisitedTab:${slug}`, rawTab);
+		}
+	});
+
+	// Persist the most recently opened space so `/` can forward back to it
+	$effect(() => {
+		if (browser && slug) {
+			localStorage.setItem('lastVisitedSpace', slug);
 		}
 	});
 

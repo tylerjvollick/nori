@@ -155,3 +155,14 @@ export class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+// resolveMediaUrl turns a server-relative media path (e.g. "/uploads/...") into
+// an absolute URL against the API origin. Uploaded files are served by the API
+// server, which is a different origin from the web app in development, so an
+// <img src="/uploads/..."> would otherwise resolve against the web origin and
+// 404. Absolute URLs and data URIs are returned unchanged.
+export function resolveMediaUrl(path: string): string {
+	if (!path) return path;
+	if (/^(https?:)?\/\//.test(path) || path.startsWith('data:')) return path;
+	return `${API_BASE_URL}${path}`;
+}

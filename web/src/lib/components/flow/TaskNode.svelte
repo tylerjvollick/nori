@@ -102,44 +102,59 @@
 	let targetPosition = $derived(TARGET_POSITIONS[data.direction ?? 'LR']);
 	let sourcePosition = $derived(SOURCE_POSITIONS[data.direction ?? 'LR']);
 
-	// Status → color mapping (matches TaskCard/TaskTree patterns)
+	// Status → color mapping (matches TaskCard/TaskTree patterns).
+	// `border` is the muted/inactive border. `activeBorder` + `ring` are used
+	// when the node is highlighted (keyboard-selected or the in-focus task) so
+	// the highlight matches the node's status color instead of always green.
 	const STATUS_CONFIG: Record<
 		TaskStatus,
-		{ bg: string; border: string; text: string; icon: typeof Circle }
+		{ bg: string; border: string; activeBorder: string; ring: string; text: string; icon: typeof Circle }
 	> = {
 		backlog: {
 			bg: 'bg-slate-50 dark:bg-slate-900/50',
-			border: 'border-slate-200 border-dashed dark:border-slate-700',
+			border: 'border-slate-200/40 border-dashed dark:border-slate-700/30',
+			activeBorder: 'border-slate-400 dark:border-slate-500',
+			ring: 'ring-slate-400/40',
 			text: 'text-slate-400',
 			icon: CircleDashed,
 		},
 		open: {
 			bg: 'bg-gray-50 dark:bg-gray-900/50',
-			border: 'border-gray-200 dark:border-gray-800',
+			border: 'border-gray-200/50 dark:border-gray-800/40',
+			activeBorder: 'border-gray-400 dark:border-gray-500',
+			ring: 'ring-gray-400/40',
 			text: 'text-gray-500',
 			icon: Circle,
 		},
 		in_progress: {
 			bg: 'bg-blue-50 dark:bg-blue-950/50',
-			border: 'border-blue-200 dark:border-blue-900',
+			border: 'border-blue-200/50 dark:border-blue-900/40',
+			activeBorder: 'border-blue-500 dark:border-blue-400',
+			ring: 'ring-blue-500/40',
 			text: 'text-blue-500',
 			icon: CircleDot,
 		},
 		done: {
 			bg: 'bg-green-50 dark:bg-green-950/50',
-			border: 'border-green-200 dark:border-green-900',
+			border: 'border-green-200/50 dark:border-green-900/40',
+			activeBorder: 'border-green-500 dark:border-green-400',
+			ring: 'ring-green-500/40',
 			text: 'text-green-500',
 			icon: CircleCheck,
 		},
 		skipped: {
 			bg: 'bg-gray-50 dark:bg-gray-900/50',
-			border: 'border-gray-200 dark:border-gray-800',
+			border: 'border-gray-200/40 dark:border-gray-800/30',
+			activeBorder: 'border-gray-400 dark:border-gray-500',
+			ring: 'ring-gray-400/40',
 			text: 'text-gray-400 line-through',
 			icon: CircleMinus,
 		},
 		cancelled: {
 			bg: 'bg-red-50 dark:bg-red-950/50',
-			border: 'border-red-200 dark:border-red-900',
+			border: 'border-red-200/50 dark:border-red-900/40',
+			activeBorder: 'border-red-500 dark:border-red-400',
+			ring: 'ring-red-500/40',
 			text: 'text-red-500',
 			icon: CircleX,
 		},
@@ -148,7 +163,9 @@
 	// Blocked tasks get red styling to make blockers immediately visible
 	const BLOCKED_CONFIG = {
 		bg: 'bg-red-50 dark:bg-red-950/50',
-		border: 'border-red-200 dark:border-red-900',
+		border: 'border-red-200/50 dark:border-red-900/40',
+		activeBorder: 'border-red-500 dark:border-red-400',
+		ring: 'ring-red-500/40',
 		text: 'text-red-500',
 		icon: Ban,
 	};
@@ -156,7 +173,9 @@
 	// Recipe mode: all nodes use the same neutral styling (no priority coloring)
 	const RECIPE_NODE_CONFIG = {
 		bg: 'bg-background',
-		border: 'border-border/50',
+		border: 'border-border/40',
+		activeBorder: 'border-primary',
+		ring: 'ring-primary/40',
 	};
 
 	let isRecipe = $derived(data.mode === 'recipe');
@@ -169,6 +188,17 @@
 				: (STATUS_CONFIG[data.status] ?? STATUS_CONFIG.open),
 	);
 	let StatusIcon = $derived(config.icon);
+
+	// Border/ring for the node based on highlight state. Only the keyboard-
+	// selected node is highlighted (vivid status border + status-colored ring);
+	// every other node — including the in-focus task once the cursor moves off
+	// it — uses the muted status border. The current task starts selected, so it
+	// is highlighted on load, but hjkl moves the single highlight with the cursor.
+	let highlightClass = $derived(
+		selected
+			? `${config.activeBorder} ring-2 ${config.ring} shadow-md`
+			: `${config.border} shadow-sm`,
+	);
 
 	function formatEstimate(seconds: number): string {
 		if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
@@ -183,7 +213,7 @@
 	<Handle type="target" position={targetPosition} class="!bg-muted-foreground !border-background !w-2 !h-2" />
 
 	<div
-		class="rounded-lg border-2 px-3 py-2 w-[180px] h-[72px] flex flex-col transition-shadow {config.bg} {selected ? 'border-primary ring-2 ring-primary/30 shadow-md' : config.border + ' shadow-sm'} {data.isFocus ? 'ring-2 ring-primary shadow-md' : ''}"
+		class="rounded-lg border-2 px-3 py-2 w-[180px] h-[72px] flex flex-col transition-shadow {config.bg} {highlightClass}"
 	>
 		<!-- Title area: 2-line clamp -->
 		<div class="flex items-start gap-1.5 flex-1 min-h-0">
