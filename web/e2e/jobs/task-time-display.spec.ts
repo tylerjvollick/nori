@@ -11,34 +11,53 @@ async function authToken(page: Page): Promise<string> {
   return page.evaluate(() => localStorage.getItem('accessToken') ?? '');
 }
 
+/** Create a job, then add the named child tasks via the graph. */
+async function createJobWithChildren(
+  page: Page,
+  jobTitle: string,
+  childTitles: string[],
+): Promise<{ jobId: string; childIds: string[] }> {
+  await page.goto(`/spaces/${spaceSlug}/jobs`);
+  await page.waitForLoadState('networkidle');
+  await page.getByRole('button', { name: 'New Job' }).click();
+  await page.locator('#job-title').fill(jobTitle);
+  await page.getByRole('button', { name: 'Create Job' }).click();
+  // Wait for the job's own detail URL (task-…), not the intermediate /jobs route.
+  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/task-[0-9a-f]+`));
+
+  await page.getByRole('tab', { name: 'Graph' }).click();
+  const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
+  await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
+
+  const jobId = page.url().split('?')[0].split('/').pop()!;
+  expect(jobId).toMatch(/^task-[0-9a-f]+$/);
+
+  const childIds: string[] = [];
+  for (const title of childTitles) {
+    await addNodeBtn.click();
+    const inlineInput = page.locator('.svelte-flow__node input');
+    await expect(inlineInput).toBeVisible({ timeout: 10_000 });
+    await inlineInput.fill(title);
+    await page.keyboard.press('Enter');
+
+    const childNode = page.locator('.svelte-flow__node', { hasText: title });
+    await expect(childNode).toBeVisible({ timeout: 10_000 });
+    const childId = await childNode.getAttribute('data-id');
+    expect(childId).toBeTruthy();
+    childIds.push(childId!);
+  }
+
+  return { jobId, childIds };
+}
+
 /** Create a job with one child task; return the child's task id. */
 async function createJobWithChild(
   page: Page,
   jobTitle: string,
   childTitle: string,
 ): Promise<string> {
-  await page.goto(`/spaces/${spaceSlug}/jobs`);
-  await page.waitForLoadState('networkidle');
-  await page.getByRole('button', { name: 'New Job' }).click();
-  await page.locator('#job-title').fill(jobTitle);
-  await page.getByRole('button', { name: 'Create Job' }).click();
-  await page.waitForURL(new RegExp(`/spaces/${spaceSlug}/.+`));
-
-  await page.getByRole('tab', { name: 'Graph' }).click();
-  const addNodeBtn = page.getByRole('button', { name: 'Add Node', exact: true });
-  await expect(addNodeBtn).toBeVisible({ timeout: 10_000 });
-
-  await addNodeBtn.click();
-  const inlineInput = page.locator('.svelte-flow__node input');
-  await expect(inlineInput).toBeVisible({ timeout: 10_000 });
-  await inlineInput.fill(childTitle);
-  await page.keyboard.press('Enter');
-
-  const childNode = page.locator('.svelte-flow__node', { hasText: childTitle });
-  await expect(childNode).toBeVisible({ timeout: 10_000 });
-  const childId = await childNode.getAttribute('data-id');
-  expect(childId).toBeTruthy();
-  return childId!;
+  const { childIds } = await createJobWithChildren(page, jobTitle, [childTitle]);
+  return childIds[0];
 }
 
 /** Seed a finished (stopped) time entry of `elapsedSecs` on a task via the API. */
@@ -90,6 +109,35 @@ test.describe('Task detail: time display', () => {
 
     // Total Recorded reflects the sum of all entries (3h), not actualTimeSeconds.
     await expect(page.getByTestId('logged-time')).toHaveText('3h 0m', { timeout: 10_000 });
+  });
+
+  test('parent job Total Recorded rolls up time from child tasks', async ({ page }) => {
+    // Heavier flow (job + two graph children + a heavy Overview page).
+    test.setTimeout(60_000);
+
+    const { jobId, childIds } = await createJobWithChildren(page, 'Rollup Job', [
+      'Cut Parts',
+      'Assemble',
+    ]);
+    const token = await authToken(page);
+
+    // 2h on the first child, 1h on the second; nothing logged on the job itself.
+    await addTimeEntry(token, childIds[0], 2 * 3600);
+    await addTimeEntry(token, childIds[1], 1 * 3600);
+
+    // Open the parent job's detail page (Overview tab shows the job root panel).
+    await page.goto(`/spaces/${spaceSlug}/${jobId}`);
+    await expect(page.getByRole('heading', { level: 2, name: 'Rollup Job' })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Total Recorded shows the rolled-up total across descendants (2h + 1h = 3h),
+    // even though the job has no direct time entries of its own. The Overview tab
+    // renders the panel twice (desktop + a hidden mobile drawer) — assert the
+    // visible one.
+    await expect(page.locator('[data-testid="logged-time"]:visible')).toHaveText('3h 0m', {
+      timeout: 15_000,
+    });
   });
 
   test('starting a timer shows the live session in the timer slot', async ({ page }) => {
