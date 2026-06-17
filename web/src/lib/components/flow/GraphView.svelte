@@ -86,12 +86,23 @@
 	let isConnecting = $state(false);
 	let connectionError = $state<string | null>(null);
 	let editingNodeId = $state<string | null>(null);
-	let deleteConfirmState = $state<{
-		nodeId: string;
-		nodeTitle: string;
-		hasConnections: boolean;
-		resolve: (ok: boolean) => void;
-	} | null>(null);
+	let deleteConfirmState = $state<
+		| {
+			kind: 'node';
+			nodeId: string;
+			nodeTitle: string;
+			hasConnections: boolean;
+			resolve: (ok: boolean) => void;
+		}
+		| {
+			kind: 'edge';
+			edgeId: string;
+			sourceTitle: string;
+			targetTitle: string;
+			resolve: (ok: boolean) => void;
+		}
+		| null
+	>(null);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let _internalStationMap = $state<Map<string, string>>(new Map());
 	let stationMap = $derived(externalStationMap ?? _internalStationMap);
@@ -378,6 +389,18 @@
 
 		// Task mode: single-click navigates to that task's detail page.
 		goto(`/spaces/${slug}/${nodeId}`);
+	}
+
+	/**
+	 * Select a dependency edge on click so it highlights and Delete/Backspace can
+	 * remove it. Selection is mutually exclusive with node selection — clear any
+	 * selected node so the keyboard delete unambiguously targets the edge.
+	 */
+	function handleEdgeClick({ edge }: { edge: Edge; event: MouseEvent }): void {
+		edges = edges.map((e) => ({ ...e, selected: e.id === edge.id }));
+		if (nodes.some((n) => n.selected)) {
+			nodes = nodes.map((n) => (n.selected ? { ...n, selected: false } : n));
+		}
 	}
 
 	// ---- Re-fetch when filters change ----
@@ -750,7 +773,7 @@
 		const nodeTitle = (node.data as { title?: string }).title ?? nodeId;
 
 		const confirmed = await new Promise<boolean>((resolve) => {
-			deleteConfirmState = { nodeId, nodeTitle, hasConnections, resolve };
+			deleteConfirmState = { kind: 'node', nodeId, nodeTitle, hasConnections, resolve };
 		});
 		if (!confirmed) return false;
 
@@ -777,6 +800,53 @@
 		return true;
 	}
 
+	/**
+	 * Delete a single dependency edge: confirm, remove the TaskDep, then refresh.
+	 * Shared by xyflow's onbeforedelete path and the explicit Delete/Backspace
+	 * keyboard shortcut. Only the dependency relationship is removed — the task
+	 * nodes and their data are untouched. Returns true if the dependency was
+	 * removed.
+	 *
+	 * Guards against a double-fire the same way deleteNodeById does: if a confirm
+	 * dialog is already pending, this call bails (deleteConfirmState is set
+	 * synchronously inside the Promise executor below, before the first await, so
+	 * the guard is order-independent).
+	 */
+	async function deleteEdgeById(edgeId: string): Promise<boolean> {
+		if (deleteConfirmState) return false;
+		const edge = edges.find((e) => e.id === edgeId);
+		if (!edge) return false;
+
+		const depId = (edge.data as { depId?: string } | undefined)?.depId;
+		const sourceTitle = (nodes.find((n) => n.id === edge.source)?.data as { title?: string } | undefined)?.title ?? edge.source;
+		const targetTitle = (nodes.find((n) => n.id === edge.target)?.data as { title?: string } | undefined)?.title ?? edge.target;
+
+		const confirmed = await new Promise<boolean>((resolve) => {
+			deleteConfirmState = { kind: 'edge', edgeId, sourceTitle, targetTitle, resolve };
+		});
+		if (!confirmed) return false;
+
+		if (!depId) {
+			showConnectionError('Cannot remove dependency: missing dependency id');
+			return false;
+		}
+
+		isConnecting = true;
+		connectionError = null;
+		try {
+			await taskApi.removeDep(spaceId, edge.source, depId);
+			await refreshGraph();
+			return true;
+		} catch (e) {
+			showConnectionError(e instanceof Error ? e.message : 'Failed to remove dependency');
+			// Re-sync with server truth so the edge stays visible if the delete failed.
+			await refreshGraph();
+			return false;
+		} finally {
+			isConnecting = false;
+		}
+	}
+
 	async function handleBeforeDelete({ nodes: deletedNodes, edges: deletedEdges }: { nodes: Node[]; edges: Edge[] }): Promise<boolean> {
 		// Handle node deletion
 		if (deletedNodes.length > 0) {
@@ -786,32 +856,11 @@
 			return false; // deleteNodeById already updated state via refreshGraph
 		}
 
-		// Handle edge deletion
-		if (deletedEdges.length === 0) return true;
-
-		const failures: string[] = [];
-		await Promise.all(
-			deletedEdges.map(async (edge) => {
-				const depId = (edge.data as { depId?: string } | undefined)?.depId;
-				if (!depId) return;
-				try {
-					await taskApi.removeDep(spaceId, edge.source, depId);
-				} catch (e) {
-					failures.push(e instanceof Error ? e.message : 'Failed to remove dependency');
-				}
-			}),
-		);
-
-		if (failures.length > 0) {
-			connectionError = failures[0];
-			setTimeout(() => { connectionError = null; }, 4000);
-			return false; // Cancel xyflow deletion so edges stay visible
+		// Handle edge deletion — route through the confirm flow, same as nodes.
+		for (const edge of deletedEdges) {
+			await deleteEdgeById(edge.id);
 		}
-
-		// Update our controlled edges state to match xyflow's pending deletion
-		const deletedIds = new Set(deletedEdges.map((e) => e.id));
-		edges = edges.filter((e) => !deletedIds.has(e.id));
-		return true;
+		return false; // deleteEdgeById confirms, removes, and refreshes itself
 	}
 
 	// ---- Node creation ----
@@ -991,6 +1040,11 @@
 		return sel?.id ?? null;
 	});
 
+	let selectedEdgeId = $derived.by(() => {
+		const sel = edges.find((e) => e.selected);
+		return sel?.id ?? null;
+	});
+
 	// Reference to the flow container div, used to restore focus on Escape.
 	let flowContainer: HTMLDivElement | undefined = $state(undefined);
 
@@ -1020,6 +1074,11 @@
 	/** Programmatically select a node, notify the detail panel, and pan to center it. */
 	function selectNode(nodeId: string): void {
 		nodes = nodes.map((n) => ({ ...n, selected: n.id === nodeId }));
+		// A node and an edge are never selected at once — clear any edge selection
+		// so Delete unambiguously targets the node.
+		if (edges.some((e) => e.selected)) {
+			edges = edges.map((e) => (e.selected ? { ...e, selected: false } : e));
+		}
 		onselect?.(nodeId);
 
 		// Smoothly pan so the selected node is centered in the viewport
@@ -1193,11 +1252,16 @@
 			}
 			case 'Delete':
 			case 'Backspace': {
-				// Delete the keyboard-selected node (task mode only). Confirms
-				// first via the same dialog as the click+drag delete. This is the
-				// discoverable path: single-click navigates away in task mode, so
-				// hjkl-select then Delete is how a task is removed from the graph.
-				if (mode !== 'recipe' && selectedNodeId) {
+				// Delete the selected element (task mode only), confirming first via
+				// the shared dialog. A selected edge takes priority — click an edge
+				// to remove that dependency; otherwise the keyboard-selected node is
+				// removed (single-click navigates away in task mode, so hjkl-select
+				// then Delete is how a task is removed from the graph).
+				if (mode === 'recipe') break;
+				if (selectedEdgeId) {
+					e.preventDefault();
+					deleteEdgeById(selectedEdgeId);
+				} else if (selectedNodeId) {
 					e.preventDefault();
 					deleteNodeById(selectedNodeId);
 				}
@@ -1320,14 +1384,23 @@
 		>
 			<Dialog.Content>
 				<Dialog.Header>
-					<Dialog.Title>Delete task?</Dialog.Title>
-					<Dialog.Description>
-						Delete "<strong>{dcs.nodeTitle}</strong>"?
-						{#if dcs.hasConnections}
-							Upstream and downstream dependencies will be reconnected automatically.
-						{/if}
-						This action cannot be undone.
-					</Dialog.Description>
+					{#if dcs.kind === 'edge'}
+						<Dialog.Title>Remove dependency?</Dialog.Title>
+						<Dialog.Description>
+							Remove the dependency where "<strong>{dcs.sourceTitle}</strong>" blocks
+							"<strong>{dcs.targetTitle}</strong>"? The tasks are kept — only the
+							dependency arrow is removed. This action cannot be undone.
+						</Dialog.Description>
+					{:else}
+						<Dialog.Title>Delete task?</Dialog.Title>
+						<Dialog.Description>
+							Delete "<strong>{dcs.nodeTitle}</strong>"?
+							{#if dcs.hasConnections}
+								Upstream and downstream dependencies will be reconnected automatically.
+							{/if}
+							This action cannot be undone.
+						</Dialog.Description>
+					{/if}
 				</Dialog.Header>
 				<Dialog.Footer>
 					<Button
@@ -1341,7 +1414,7 @@
 						onclick={() => { dcs.resolve(true); deleteConfirmState = null; }}
 					>
 						<Trash2 class="size-4 mr-1.5" />
-						Delete
+						{dcs.kind === 'edge' ? 'Remove' : 'Delete'}
 					</Button>
 				</Dialog.Footer>
 			</Dialog.Content>
@@ -1407,6 +1480,7 @@
 				maxZoom={2}
 				colorMode="system"
 				onnodeclick={handleNodeClick}
+				onedgeclick={handleEdgeClick}
 				onpaneclick={() => {
 					// Re-select the current node — prevent xyflow from deselecting
 					if (selectedNodeId) {
@@ -1453,5 +1527,13 @@
 	:global(.svelte-flow .svelte-flow__edge:hover .nori-edge-anchor),
 	:global(.svelte-flow .svelte-flow__edge.selected .nori-edge-anchor) {
 		opacity: 1;
+	}
+
+	/* Highlight the selected dependency edge so it is obvious which one Delete
+	   will remove. !important overrides the per-edge inline stroke (status color)
+	   set when the edge is built. */
+	:global(.svelte-flow .svelte-flow__edge.selected .svelte-flow__edge-path) {
+		stroke: #f59e0b !important; /* amber-500 */
+		stroke-width: 3px !important;
 	}
 </style>

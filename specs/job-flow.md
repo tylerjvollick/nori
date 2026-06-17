@@ -246,6 +246,13 @@ between two nodes' handles uses the same validation, and on success the graph
 refreshes from the server so the new arrow appears immediately — no reload
 needed.
 
+A dependency edge can also be **deleted**: click the arrow to select and
+highlight it (a selected edge and a selected node are mutually exclusive), then
+press `Delete`/`Backspace`. A confirmation dialog ("Remove dependency: A blocks
+B?") appears; confirming calls `removeDep(depId)` and refreshes the graph, while
+canceling leaves the edge in place. Only the `task_dep` row is removed — both
+task nodes and their data are kept.
+
 ### Dependency Patterns
 
 **Sequential** (most common — recipe step ordering):
