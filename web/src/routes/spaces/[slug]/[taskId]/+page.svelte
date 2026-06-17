@@ -460,6 +460,12 @@
 		handleGraphNodeSelect(depTaskId);
 	}
 
+	/** Open the full detail page for the task currently shown in the graph panel. */
+	function handleOpenPanelDetail(): void {
+		const id = graphPanelTask?.id;
+		if (id) goto(`/spaces/${slug}/${id}`);
+	}
+
 	/** Whether the currently shown panel task is the root (hide sub-tasks for root). */
 	let graphPanelIsRoot = $derived(graphPanelTask?.id === tree?.id);
 
@@ -703,17 +709,91 @@
 			</div>
 
 		{:else if currentView === 'graph'}
-			<!-- Graph tab: full-width graph (no detail panel). Clicking a node
-			     navigates to that task's detail page. -->
-			<div class="flex-1 overflow-hidden">
-				<GraphView
-					{spaceId}
-					tasks={flatTasks}
-					deps={depsMap}
-					{stationMap}
-					rootTaskId={tree?.id}
-					onmutate={handleTreeMutate}
-				/>
+			<!-- Graph tab: graph (left) + read-only detail panel (right). Clicking a
+			     node activates it and loads it into the panel; Enter or the panel's
+			     open-in-detail button navigates to the full task page. -->
+			<div class="flex-1 flex overflow-hidden">
+				<!-- Left: graph -->
+				<div class="flex-1 min-w-0 overflow-hidden relative">
+					<GraphView
+						{spaceId}
+						tasks={flatTasks}
+						deps={depsMap}
+						{stationMap}
+						rootTaskId={tree?.id}
+						onselect={handleGraphNodeSelect}
+						onmutate={handleTreeMutate}
+					/>
+
+					<!-- Expand button (desktop) — shown only when the panel is collapsed -->
+					{#if !graphPanelOpen}
+						<button
+							onclick={() => (graphPanelOpen = true)}
+							class="hidden lg:flex absolute top-3 right-3 z-10 items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+							title="Show details"
+							aria-label="Show details"
+							data-testid="graph-panel-expand"
+						>
+							<PanelLeftOpen class="size-4" />
+						</button>
+					{/if}
+				</div>
+
+				<!-- Right: read-only detail panel (desktop sidebar) -->
+				{#if graphPanelOpen}
+					<div class="hidden lg:flex w-[400px] flex-col border-l border-border overflow-y-auto shrink-0">
+						<TaskDetailPanel
+							task={graphPanelTask ?? tree ?? undefined}
+							{spaceId}
+							{stationMap}
+							{taskTitleMap}
+							deps={graphPanelDeps}
+							isLoading={graphPanelLoading}
+							onaction={handleTaskAction}
+							oncomplete={handleCompletion}
+							parentName={tree?.title}
+							parentType={isJob ? 'job' : undefined}
+							onnavparent={handleNavToRoot}
+							onselecttask={handleSelectTaskInGraph}
+							hideSubTasks={graphPanelIsRoot}
+							oncollapse={() => (graphPanelOpen = false)}
+							onopendetail={handleOpenPanelDetail}
+						/>
+					</div>
+				{/if}
+
+				<!-- Detail panel (mobile drawer overlay) -->
+				{#if graphPanelTask}
+					<div class="lg:hidden fixed inset-y-0 right-0 w-4/5 max-w-sm z-50 flex flex-col bg-background border-l border-border shadow-xl overflow-y-auto">
+						<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+							<span class="text-sm font-medium text-foreground truncate">{graphPanelTask.title}</span>
+							<button
+								onclick={() => { graphPanelTask = null; }}
+								class="ml-2 text-muted-foreground hover:text-foreground"
+							>
+								<X class="size-4" />
+							</button>
+						</div>
+						<div class="flex-1 overflow-y-auto">
+							<TaskDetailPanel
+								task={graphPanelTask}
+								{spaceId}
+								{stationMap}
+								{taskTitleMap}
+								deps={graphPanelDeps}
+								isLoading={graphPanelLoading}
+								onaction={handleTaskAction}
+								oncomplete={handleCompletion}
+								parentName={tree?.title}
+								parentType={isJob ? 'job' : undefined}
+								onnavparent={handleNavToRoot}
+								onselecttask={handleSelectTaskInGraph}
+								hideSubTasks={graphPanelIsRoot}
+								onopendetail={handleOpenPanelDetail}
+							/>
+						</div>
+					</div>
+				{/if}
 			</div>
 
 		{:else}

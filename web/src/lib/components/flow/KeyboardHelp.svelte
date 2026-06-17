@@ -57,6 +57,7 @@
 				{ key: 'l / Tab', description: 'Next sibling / cycle' },
 				{ key: 'Enter', description: 'Open selected task' },
 				{ key: 'Del / ⌫', description: 'Delete selected node' },
+				{ key: 'Click, Del', description: 'Delete selected dependency' },
 				{ key: 'Ctrl+R', description: 'Rename selected node' },
 				{ key: 'Alt+S', description: 'Add serial node' },
 				{ key: 'Alt+P', description: 'Add parallel node' },

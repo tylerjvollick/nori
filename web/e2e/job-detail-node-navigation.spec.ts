@@ -43,8 +43,11 @@ test.describe('Job detail: selecting a task node navigates to its detail page', 
     spaceSlug = result.slug;
   });
 
-  test('graph view: single-clicking a child node navigates to that task', async ({ page }) => {
-    const { childId } = await createJobWithChild(page, 'Graph Nav Job', 'Graph Child');
+  test('graph view: clicking a child node activates it (no navigation); Enter opens it', async ({
+    page,
+  }) => {
+    const { jobUrl, childId } = await createJobWithChild(page, 'Graph Nav Job', 'Graph Child');
+    const jobPath = new URL(jobUrl).pathname;
 
     // Dismiss any lingering selection/inline edit by clicking empty canvas.
     await page.locator('.svelte-flow').click({ position: { x: 12, y: 12 } });
@@ -52,6 +55,13 @@ test.describe('Job detail: selecting a task node navigates to its detail page', 
     const node = page.locator('.svelte-flow__node', { hasText: 'Graph Child' });
     await node.click();
 
+    // Clicking now ACTIVATES the node (loads it into the side panel) instead of
+    // navigating — the URL stays on the job page.
+    await expect(page.locator('.svelte-flow__node.selected')).toHaveCount(1, { timeout: 5_000 });
+    expect(new URL(page.url()).pathname).toBe(jobPath);
+
+    // Enter on the active node opens its full detail page.
+    await page.keyboard.press('Enter');
     await page.waitForURL((url) => url.pathname === `/spaces/${spaceSlug}/${childId}`, {
       timeout: 10_000,
     });
