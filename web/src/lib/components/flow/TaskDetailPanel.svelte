@@ -23,6 +23,7 @@
 		Briefcase,
 		ListTodo,
 		PanelLeftClose,
+		Maximize2,
 	} from '@lucide/svelte';
 	import { formatDuration, computeTimeSpent, hasRunningTimer } from '$lib/utils/time';
 	import { taskApi } from '$lib/api/task';
@@ -72,6 +73,8 @@
 		onmutate?: () => void;
 		/** When provided, render a collapse control in the panel header that hides the panel. */
 		oncollapse?: () => void;
+		/** When provided, render an expand control that opens the task's full detail page. */
+		onopendetail?: () => void;
 	}
 
 	let {
@@ -83,6 +86,7 @@
 		recipeStatus, recipeVersion,
 		onmutate,
 		oncollapse,
+		onopendetail,
 	}: Props = $props();
 
 	let slug = $derived($page.params.slug);
@@ -390,19 +394,33 @@
 
 
 <div class="p-6 space-y-5">
-	{#if oncollapse}
-		<!-- Panel header control: collapse the detail panel (views pane goes full width) -->
-		<div class="flex justify-end -mt-2 -mb-1">
-			<button
-				type="button"
-				onclick={() => oncollapse?.()}
-				class="hidden lg:flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
-				title="Collapse panel"
-				aria-label="Collapse panel"
-				data-testid="panel-collapse"
-			>
-				<PanelLeftClose class="size-4" />
-			</button>
+	{#if oncollapse || onopendetail}
+		<!-- Panel header controls: open the full task page, and/or collapse the panel. -->
+		<div class="flex justify-end gap-1.5 -mt-2 -mb-1">
+			{#if onopendetail}
+				<button
+					type="button"
+					onclick={() => onopendetail?.()}
+					class="flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+					title="Open task detail page"
+					aria-label="Open task detail page"
+					data-testid="panel-open-detail"
+				>
+					<Maximize2 class="size-4" />
+				</button>
+			{/if}
+			{#if oncollapse}
+				<button
+					type="button"
+					onclick={() => oncollapse?.()}
+					class="hidden lg:flex items-center justify-center h-7 w-7 rounded border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground transition-colors"
+					title="Collapse panel"
+					aria-label="Collapse panel"
+					data-testid="panel-collapse"
+				>
+					<PanelLeftClose class="size-4" />
+				</button>
+			{/if}
 		</div>
 	{/if}
 	{#if isLoading || !task}

@@ -216,9 +216,9 @@ Discoverable entry points in the UI:
 - **Task detail page** — a `Delete` action in the header, offered on individual
   tasks only (not on a job root, so a whole job tree can't be wiped in one
   click). Confirms, then navigates to the parent task or the jobs list.
-- **Graph view** — with a node keyboard-selected (`hjkl`), `Delete`/`Backspace`
-  deletes it after a confirmation dialog. This is how individual tasks within a
-  job are removed from the graph (single-click navigates to the task instead).
+- **Graph view** — with a node selected (single-click or `hjkl`),
+  `Delete`/`Backspace` deletes it after a confirmation dialog. This is how
+  individual tasks within a job are removed from the graph.
 
 Both paths confirm before deleting and perform the upstream→downstream reconnect.
 
@@ -252,6 +252,22 @@ press `Delete`/`Backspace`. A confirmation dialog ("Remove dependency: A blocks
 B?") appears; confirming calls `removeDep(depId)` and refreshes the graph, while
 canceling leaves the edge in place. Only the `task_dep` row is removed — both
 task nodes and their data are kept.
+
+### Activating a Node — the Detail Panel
+
+On the job's **Graph tab**, selecting a node activates it rather than navigating
+away. Single-click or `hjkl` selects a node and loads it into a read-only detail
+panel docked to the right of the graph (the same `TaskDetailPanel` used
+elsewhere). The panel mirrors the task's detail data — status, priority, time
+and total recorded, photos, sub-tasks, dependencies — so a task can be inspected
+without leaving the graph. Keyboard navigation keeps the panel in sync as the
+active node moves.
+
+To open the full task page, press `Enter` on the active node or click the
+panel's expand (open-in-detail) control. The panel can be collapsed to give the
+graph full width; a small expand button over the graph restores it. The
+leaf-task neighborhood graph keeps its older behavior (single-click navigates),
+since it has no docked panel.
 
 ### Dependency Patterns
 

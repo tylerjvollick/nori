@@ -387,7 +387,15 @@
 			return;
 		}
 
-		// Task mode: single-click navigates to that task's detail page.
+		// Task mode: if a selection handler is wired (a side detail panel is
+		// present), single-click activates the node and loads it into the panel
+		// instead of navigating. Enter (or the panel's open-in-detail button) is
+		// how you then open the full task page. Without a panel (e.g. the leaf
+		// neighborhood graph), single-click still navigates.
+		if (onselect) {
+			selectNode(nodeId);
+			return;
+		}
 		goto(`/spaces/${slug}/${nodeId}`);
 	}
 
