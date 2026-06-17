@@ -242,7 +242,9 @@ A reconnect is rejected (with an inline message, no change persisted) if it woul
 create a self-loop, duplicate an existing edge, or introduce a cycle. The cycle
 check runs client-side before the change is applied and is enforced again by the
 backend (`task_dep` `detectCycle`) as a backstop. Drawing a brand-new edge
-between two nodes' handles uses the same validation.
+between two nodes' handles uses the same validation, and on success the graph
+refreshes from the server so the new arrow appears immediately — no reload
+needed.
 
 ### Dependency Patterns
 

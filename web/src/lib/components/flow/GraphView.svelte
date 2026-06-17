@@ -643,11 +643,11 @@
 		connectionError = null;
 		try {
 			await taskApi.addDep(spaceId, source, target, 'blocks');
-			if (isScoped && externalTasks) {
-				buildFromExternalData(externalTasks, externalDeps);
-			} else {
-				await fetchGraph({ silent: true });
-			}
+			// Re-sync from the server so the new edge appears immediately. In scoped
+			// mode this goes through the parent's onmutate() re-fetch — rebuilding
+			// from the stale externalDeps prop would drop the just-created edge until
+			// a manual reload (the original bug).
+			await refreshGraph();
 		} catch (e) {
 			connectionError = e instanceof Error ? e.message : 'Failed to create dependency';
 			setTimeout(() => { connectionError = null; }, 4000);
